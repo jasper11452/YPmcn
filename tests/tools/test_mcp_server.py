@@ -1,5 +1,4 @@
 import pytest
-
 from main import mcp
 from tools.registry import TOOL_NAMES
 

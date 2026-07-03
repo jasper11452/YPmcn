@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-
 T = TypeVar("T")
 
 

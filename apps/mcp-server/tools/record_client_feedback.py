@@ -1,8 +1,8 @@
 from typing import Any
 
 from contract.response_envelope import ResponseEnvelope
-from tools.registry import ToolRegistry, default_registry
 
+from tools.registry import ToolRegistry, default_registry
 
 TOOL_NAME = "record_client_feedback"
 

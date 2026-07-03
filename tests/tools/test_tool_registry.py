@@ -1,8 +1,6 @@
 import pytest
-
 from contract.error_codes import ErrorCode
 from tools.registry import TOOL_NAMES, ToolRegistry
-
 
 EXPECTED_TOOL_NAMES = {
     "validate_requirement",

@@ -2,7 +2,6 @@ from collections.abc import Callable
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
-
 from tools.registry import TOOL_NAMES, ToolRegistry, default_registry
 
 

@@ -4,7 +4,6 @@ from typing import Any
 from contract.error_codes import ErrorCode
 from contract.response_envelope import ResponseEnvelope
 
-
 TOOL_NAMES = (
     "validate_requirement",
     "search_creators",
