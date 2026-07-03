@@ -26,6 +26,7 @@ pythonpath = [
   "apps/mcp-server",
   "apps/workflow-engine",
   "apps/algorithm-engine",
+  "apps/wecom-integration",
 ]
 testpaths = ["tests"]
 
@@ -35,4 +36,3 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-

@@ -1,5 +1,4 @@
 import pytest
-
 from contract.idempotency import IdempotencyConflict, IdempotencyStore
 
 
