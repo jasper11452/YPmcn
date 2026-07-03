@@ -32,8 +32,33 @@ class ProjectContext(RequestModel):
     product: str | None = None
 
 
+class ParsedRequirement(RequestModel):
+    platforms: list[Platform] = Field(default_factory=list)
+    budget_min_cents: int | None = Field(default=None, ge=0)
+    budget_max_cents: int | None = Field(default=None, ge=0)
+    rebate_min_rate: float | None = Field(default=None, ge=0, le=1)
+    rebate_max_rate: float | None = Field(default=None, ge=0, le=1)
+    category_requirements: list[str] = Field(default_factory=list)
+    quantity_total: int | None = Field(default=None, ge=1)
+    content_formats: list[str] = Field(default_factory=list)
+    cooperation_types: list[str] = Field(default_factory=list)
+    creator_type_requirements: list[str] = Field(default_factory=list)
+    creator_tier_requirements: list[str] = Field(default_factory=list)
+    follower_min: int | None = Field(default=None, ge=0)
+    follower_max: int | None = Field(default=None, ge=0)
+    geo_requirements: dict[str, Any] = Field(default_factory=dict)
+    audience_requirements: dict[str, Any] = Field(default_factory=dict)
+    content_requirements: str | None = None
+    tone_requirements: list[str] = Field(default_factory=list)
+    negative_requirements: list[str] = Field(default_factory=list)
+    requirements_json: dict[str, Any] = Field(default_factory=dict)
+    confidence_map: dict[str, str] = Field(default_factory=dict)
+    field_evidence: dict[str, Any] = Field(default_factory=dict)
+
+
 class ValidateRequirementRequest(WriteRequest):
     raw_messages: list[RawMessage] = Field(min_length=1)
+    parsed_requirement: ParsedRequirement
     project_context: ProjectContext | None = None
     existing_demand_id: Identifier | None = None
     existing_demand_version: int | None = Field(default=None, ge=1)

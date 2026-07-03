@@ -97,6 +97,25 @@ def test_validate_requirement_requires_existing_id_and_version_together() -> Non
         )
 
 
+def test_validate_requirement_requires_parsed_requirement() -> None:
+    with pytest.raises(ValidationError):
+        ValidateRequirementRequest.model_validate(
+            {
+                "trace_id": "trace-1",
+                "idempotency_key": "idem-1",
+                "raw_messages": [{"role": "client", "content": "小红书美妆需求"}],
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_requirement_exposes_parsed_requirement() -> None:
+    tool = next(item for item in await mcp.list_tools() if item.name == "validate_requirement")
+
+    assert "parsed_requirement" in tool.inputSchema["properties"]
+    assert "parsed_requirement" in tool.inputSchema["required"]
+
+
 @pytest.mark.parametrize(
     "request_type,payload",
     [

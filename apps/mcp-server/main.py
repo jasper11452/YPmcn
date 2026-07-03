@@ -18,6 +18,7 @@ from tools.schemas import (
     ManualResult,
     ManualSourceCreatorsRequest,
     McnSubmissionItem,
+    ParsedRequirement,
     ProjectContext,
     RankCreatorsRequest,
     RankingWeights,
@@ -43,6 +44,7 @@ def create_server(registry: ToolRegistry = default_registry) -> FastMCP:
     @server.tool(name="validate_requirement", structured_output=True)
     async def validate_requirement(
         raw_messages: list[RawMessage],
+        parsed_requirement: ParsedRequirement,
         trace_id: str,
         idempotency_key: str,
         ctx: Context,
@@ -50,9 +52,10 @@ def create_server(registry: ToolRegistry = default_registry) -> FastMCP:
         existing_demand_id: str | None = None,
         existing_demand_version: int | None = None,
     ) -> dict[str, Any]:
-        """Parse, validate, version, and persist raw client requirements using MCP Sampling."""
+        """Validate, version, and persist a host-parsed client requirement."""
         request = ValidateRequirementRequest(
             raw_messages=raw_messages,
+            parsed_requirement=parsed_requirement,
             trace_id=trace_id,
             idempotency_key=idempotency_key,
             project_context=project_context,
