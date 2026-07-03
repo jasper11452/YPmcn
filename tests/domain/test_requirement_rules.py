@@ -1,10 +1,10 @@
 import pytest
 from domain.requirements import InvalidRequirement, validate_requirement_extraction
-from sampling import RequirementExtraction
+from tools.schemas import ParsedRequirement
 
 
 def test_missing_blockers_produce_draft_and_questions() -> None:
-    extraction = RequirementExtraction(
+    extraction = ParsedRequirement(
         platforms=["xhs"],
         category_requirements=["beauty"],
         quantity_total=5,
@@ -31,7 +31,7 @@ def test_missing_blockers_produce_draft_and_questions() -> None:
 
 
 def test_koc_does_not_imply_nano_tier() -> None:
-    extraction = RequirementExtraction(
+    extraction = ParsedRequirement(
         platforms=["xhs"],
         budget_max_cents=100_000,
         rebate_min_rate=0.2,
@@ -50,7 +50,7 @@ def test_koc_does_not_imply_nano_tier() -> None:
 
 
 def test_filter_rule_fields_and_modes_are_whitelisted() -> None:
-    extraction = RequirementExtraction(
+    extraction = ParsedRequirement(
         platforms=["xhs"],
         budget_max_cents=100_000,
         rebate_min_rate=0.2,

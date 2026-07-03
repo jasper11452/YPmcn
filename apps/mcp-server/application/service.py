@@ -30,11 +30,6 @@ from persistence.idempotency import DatabaseIdempotencyExecutor, IdempotencyInPr
 from persistence.ledger import SqlToolCallLedger
 from persistence.uow import MySqlUnitOfWork
 from pydantic import ValidationError
-from sampling import (
-    InvalidSamplingResponse,
-    SamplingUnavailable,
-    parse_requirement_with_sampling,
-)
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from tools.registry import AGENT_TOOL_NAMES
@@ -149,7 +144,7 @@ class McpToolService:
                 trace_id=str(payload.get("trace_id") or uuid4().hex),
             )
         request_type = _WRITE_REQUESTS.get(tool_name) or _READ_REQUESTS[tool_name]
-        clean_payload = {key: value for key, value in payload.items() if key != "_mcp_context"}
+        clean_payload = dict(payload)
         try:
             request = request_type.model_validate(clean_payload)
         except ValidationError as exc:
@@ -162,10 +157,10 @@ class McpToolService:
             )
 
         if tool_name in _READ_REQUESTS:
-            return await self._invoke_once(tool_name, request, payload)
+            return await self._invoke_once(tool_name, request)
 
         async def operation() -> dict[str, Any]:
-            response = await self._invoke_once(tool_name, request, payload)
+            response = await self._invoke_once(tool_name, request)
             return response.model_dump(mode="json")
 
         try:
@@ -190,14 +185,10 @@ class McpToolService:
         self,
         tool_name: str,
         request: Any,
-        raw_payload: Mapping[str, Any],
     ) -> ResponseEnvelope:
         try:
             method = getattr(self, f"_{tool_name}")
-            if tool_name == "validate_requirement":
-                result = await method(request, raw_payload.get("_mcp_context"))
-            else:
-                result = await method(request)
+            result = await method(request)
             return ResponseEnvelope.ok(
                 result.data,
                 trace_id=request.trace_id,
@@ -347,21 +338,11 @@ class McpToolService:
     async def _validate_requirement(
         self,
         request: ValidateRequirementRequest,
-        context: object | None,
     ) -> ServiceResult:
-        if context is None:
-            raise ToolFailure(
-                ErrorCode.SAMPLING_UNAVAILABLE,
-                "MCP client does not provide a Sampling context",
-            )
         try:
-            extraction = await parse_requirement_with_sampling(request.raw_messages, context)
+            extraction = request.parsed_requirement
             source_text = "\n".join(message.content for message in request.raw_messages)
             validated = validate_requirement_extraction(extraction, source_text)
-        except SamplingUnavailable as exc:
-            raise ToolFailure(ErrorCode.SAMPLING_UNAVAILABLE, str(exc)) from exc
-        except InvalidSamplingResponse as exc:
-            raise ToolFailure(ErrorCode.INVALID_RESPONSE_CONTRACT, str(exc)) from exc
         except InvalidRequirement as exc:
             raise ToolFailure(ErrorCode.VALIDATION_ERROR, str(exc)) from exc
 

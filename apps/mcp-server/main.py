@@ -1,7 +1,7 @@
 import os
 from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from runtime import configure_registry
 from tools.registry import ToolRegistry, default_registry
 from tools.schemas import (
@@ -47,7 +47,6 @@ def create_server(registry: ToolRegistry = default_registry) -> FastMCP:
         parsed_requirement: ParsedRequirement,
         trace_id: str,
         idempotency_key: str,
-        ctx: Context,
         project_context: ProjectContext | None = None,
         existing_demand_id: str | None = None,
         existing_demand_version: int | None = None,
@@ -63,7 +62,6 @@ def create_server(registry: ToolRegistry = default_registry) -> FastMCP:
             existing_demand_version=existing_demand_version,
         )
         payload = request.model_dump(mode="json", exclude_none=True)
-        payload["_mcp_context"] = ctx
         result = await registry.invoke("validate_requirement", payload, trace_id=trace_id)
         return result.model_dump(mode="json")
 

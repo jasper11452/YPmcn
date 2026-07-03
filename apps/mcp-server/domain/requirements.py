@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from sampling import RequirementExtraction
+from tools.schemas import ParsedRequirement
 
 BLOCKING_FIELDS = (
     "platforms",
@@ -65,7 +65,7 @@ _QUESTIONS = {
 }
 
 
-def _is_missing(field: str, extraction: RequirementExtraction) -> bool:
+def _is_missing(field: str, extraction: ParsedRequirement) -> bool:
     value = getattr(extraction, field)
     return value is None or value == [] or value == ""
 
@@ -85,7 +85,7 @@ def _validate_filter_rules(requirements_json: dict[str, Any]) -> None:
             raise InvalidRequirement(f"filter mode is not allowed: {rule.get('mode')!r}")
 
 
-def _validate_evidence(extraction: RequirementExtraction, source_text: str) -> None:
+def _validate_evidence(extraction: ParsedRequirement, source_text: str) -> None:
     for field, evidence in extraction.field_evidence.items():
         snippets = evidence if isinstance(evidence, list) else [evidence]
         for snippet in snippets:
@@ -94,7 +94,7 @@ def _validate_evidence(extraction: RequirementExtraction, source_text: str) -> N
 
 
 def validate_requirement_extraction(
-    extraction: RequirementExtraction,
+    extraction: ParsedRequirement,
     source_text: str,
 ) -> ValidatedRequirement:
     if extraction.budget_min_cents is not None and extraction.budget_max_cents is not None:

@@ -107,7 +107,7 @@ class DatabaseIdempotencyExecutor:
         semantic_payload = {
             key: value
             for key, value in payload.items()
-            if key not in {"trace_id", "idempotency_key", "_mcp_context"}
+            if key not in {"trace_id", "idempotency_key"}
         }
         canonical = json.dumps(
             semantic_payload,
