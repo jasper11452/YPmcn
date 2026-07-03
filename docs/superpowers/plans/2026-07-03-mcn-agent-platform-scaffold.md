@@ -167,7 +167,7 @@ def test_stale_state_version_is_rejected() -> None:
 
 def test_creator_score_matches_weighted_formula() -> None:
     score = creator_score(content=1, price=0.5, rebate=0.4, fit=0.8, delivery=0.9)
-    assert score == pytest.approx(0.745)
+    assert score == pytest.approx(0.755)
 ```
 
 - [ ] **Step 2: Verify RED**
