@@ -4,7 +4,7 @@ from typing import Any
 from contract.error_codes import ErrorCode
 from contract.response_envelope import ResponseEnvelope
 
-TOOL_NAMES = (
+AGENT_TOOL_NAMES = (
     "validate_requirement",
     "search_creators",
     "rank_mcns",
@@ -17,8 +17,9 @@ TOOL_NAMES = (
     "get_workflow_state",
     "get_creator_detail",
     "get_recommendation_run_detail",
-    "create_mcn_inquiries",
 )
+INTERNAL_TOOL_NAMES = ("create_mcn_inquiries",)
+TOOL_NAMES = AGENT_TOOL_NAMES
 
 ToolHandler = Callable[[dict[str, Any]], Awaitable[Any]]
 
@@ -28,7 +29,7 @@ class ToolRegistry:
         self._handlers: dict[str, ToolHandler] = {}
 
     def register(self, tool_name: str, handler: ToolHandler) -> None:
-        if tool_name not in TOOL_NAMES:
+        if tool_name not in (*AGENT_TOOL_NAMES, *INTERNAL_TOOL_NAMES):
             raise ValueError(f"unknown MCP tool: {tool_name}")
         self._handlers[tool_name] = handler
 
@@ -39,7 +40,7 @@ class ToolRegistry:
         *,
         trace_id: str | None = None,
     ) -> ResponseEnvelope:
-        if tool_name not in TOOL_NAMES:
+        if tool_name not in (*AGENT_TOOL_NAMES, *INTERNAL_TOOL_NAMES):
             return ResponseEnvelope.fail(
                 ErrorCode.VALIDATION_ERROR,
                 f"unknown MCP tool: {tool_name}",
@@ -52,6 +53,7 @@ class ToolRegistry:
                 ErrorCode.NOT_CONFIGURED,
                 f"no application handler configured for {tool_name}",
                 trace_id=trace_id,
+                idempotency_key=payload.get("idempotency_key"),
             )
 
         try:
@@ -61,8 +63,15 @@ class ToolRegistry:
                 ErrorCode.INTERNAL_ERROR,
                 "tool execution failed",
                 trace_id=trace_id,
+                idempotency_key=payload.get("idempotency_key"),
             )
-        return ResponseEnvelope.ok(data, trace_id=trace_id)
+        if isinstance(data, ResponseEnvelope):
+            return data
+        return ResponseEnvelope.ok(
+            data,
+            trace_id=trace_id,
+            idempotency_key=payload.get("idempotency_key"),
+        )
 
 
 default_registry = ToolRegistry()

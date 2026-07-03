@@ -2,8 +2,10 @@ from enum import StrEnum
 
 
 class WorkflowPhase(StrEnum):
-    DRAFT = "draft"
-    READY = "ready"
+    REQUIREMENT_DRAFT = "requirement_draft"
+    REQUIREMENT_READY = "requirement_ready"
+    DRAFT = REQUIREMENT_DRAFT
+    READY = REQUIREMENT_READY
     CANDIDATE_POOL_READY = "candidate_pool_ready"
     WAITING_BACKEND_INQUIRY = "waiting_backend_inquiry"
     RECOMMENDATION_READY = "recommendation_ready"

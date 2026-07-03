@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS mcp_schema_migrations (
+    version INT UNSIGNED NOT NULL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    checksum CHAR(64) NOT NULL,
+    execution_ms INT UNSIGNED NOT NULL,
+    applied_by VARCHAR(255) NOT NULL,
+    applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

@@ -2,6 +2,6 @@ from enum import StrEnum
 
 
 class CandidateSource(StrEnum):
-    RATECARD = "ratecard"
+    RATE_CARD = "rate_card"
     MCN_RETURNED = "mcn_returned"
-    MANUAL_SOURCED = "manual_sourced"
+    MANUAL_SEARCH = "manual_search"

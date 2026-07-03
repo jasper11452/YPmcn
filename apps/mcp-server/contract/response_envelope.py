@@ -1,7 +1,7 @@
 from typing import Any, Self
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from contract.error_codes import ErrorCode
 
@@ -11,7 +11,8 @@ class ErrorDetail(BaseModel):
 
     code: ErrorCode
     message: str
-    details: dict[str, Any] | None = None
+    retriable: bool = False
+    detail: dict[str, Any] | None = None
 
 
 class ResponseEnvelope(BaseModel):
@@ -21,6 +22,9 @@ class ResponseEnvelope(BaseModel):
     data: Any | None = None
     error: ErrorDetail | None = None
     trace_id: str
+    workflow_state: dict[str, Any] | None = None
+    allowed_actions: list[str] = Field(default_factory=list)
+    idempotency_key: str | None = None
 
     @model_validator(mode="after")
     def validate_shape(self) -> Self:
@@ -31,8 +35,23 @@ class ResponseEnvelope(BaseModel):
         return self
 
     @classmethod
-    def ok(cls, data: Any = None, *, trace_id: str | None = None) -> Self:
-        return cls(success=True, data=data, trace_id=trace_id or uuid4().hex)
+    def ok(
+        cls,
+        data: Any = None,
+        *,
+        trace_id: str | None = None,
+        workflow_state: dict[str, Any] | None = None,
+        allowed_actions: list[str] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Self:
+        return cls(
+            success=True,
+            data=data,
+            trace_id=trace_id or uuid4().hex,
+            workflow_state=workflow_state,
+            allowed_actions=allowed_actions or [],
+            idempotency_key=idempotency_key,
+        )
 
     @classmethod
     def fail(
@@ -40,11 +59,18 @@ class ResponseEnvelope(BaseModel):
         code: ErrorCode,
         message: str,
         *,
-        details: dict[str, Any] | None = None,
+        detail: dict[str, Any] | None = None,
+        retriable: bool = False,
         trace_id: str | None = None,
+        workflow_state: dict[str, Any] | None = None,
+        allowed_actions: list[str] | None = None,
+        idempotency_key: str | None = None,
     ) -> Self:
         return cls(
             success=False,
-            error=ErrorDetail(code=code, message=message, details=details),
+            error=ErrorDetail(code=code, message=message, retriable=retriable, detail=detail),
             trace_id=trace_id or uuid4().hex,
+            workflow_state=workflow_state,
+            allowed_actions=allowed_actions or [],
+            idempotency_key=idempotency_key,
         )

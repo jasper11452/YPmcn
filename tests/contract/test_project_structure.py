@@ -44,7 +44,7 @@ def test_required_top_level_paths_exist() -> None:
         "apps/wecom-integration/message_router.py",
         "apps/wecom-integration/inquiry_notifier.py",
         "apps/wecom-integration/feedback_listener.py",
-        "db/migrations/020_mcp_tool_call_ledger.sql",
+        "db/migrations/002_mcp_runtime_tables.sql",
         "shared/schemas/requirement_schema.py",
         "shared/schemas/score_detail_schema.py",
         "shared/schemas/formula_snapshot_schema.py",

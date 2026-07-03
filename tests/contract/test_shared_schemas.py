@@ -34,7 +34,7 @@ def test_formula_snapshot_requires_weights_to_sum_to_one() -> None:
 
 def test_candidate_source_values_are_stable() -> None:
     assert {source.value for source in CandidateSource} == {
-        "ratecard",
+        "rate_card",
         "mcn_returned",
-        "manual_sourced",
+        "manual_search",
     }

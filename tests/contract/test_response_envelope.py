@@ -10,6 +10,9 @@ def test_success_envelope_contains_data_and_trace_id() -> None:
         "data": {"creator_id": "creator-1"},
         "error": None,
         "trace_id": "trace-1",
+        "workflow_state": None,
+        "allowed_actions": [],
+        "idempotency_key": None,
     }
 
 

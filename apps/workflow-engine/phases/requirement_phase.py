@@ -2,5 +2,5 @@ from enum import StrEnum
 
 
 class RequirementPhase(StrEnum):
-    DRAFT = "draft"
-    READY = "ready"
+    DRAFT = "requirement_draft"
+    READY = "requirement_ready"

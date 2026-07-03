@@ -1,6 +1,6 @@
 import pytest
 from contract.error_codes import ErrorCode
-from tools.registry import TOOL_NAMES, ToolRegistry
+from tools.registry import INTERNAL_TOOL_NAMES, TOOL_NAMES, ToolRegistry
 
 EXPECTED_TOOL_NAMES = {
     "validate_requirement",
@@ -15,12 +15,12 @@ EXPECTED_TOOL_NAMES = {
     "get_workflow_state",
     "get_creator_detail",
     "get_recommendation_run_detail",
-    "create_mcn_inquiries",
 }
 
 
 def test_registry_exposes_exact_tool_names() -> None:
     assert set(TOOL_NAMES) == EXPECTED_TOOL_NAMES
+    assert INTERNAL_TOOL_NAMES == ("create_mcn_inquiries",)
 
 
 @pytest.mark.asyncio
