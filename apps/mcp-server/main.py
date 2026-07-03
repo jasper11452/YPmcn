@@ -51,7 +51,11 @@ def create_server(registry: ToolRegistry = default_registry) -> FastMCP:
         existing_demand_id: str | None = None,
         existing_demand_version: int | None = None,
     ) -> dict[str, Any]:
-        """Validate, version, and persist a host-parsed client requirement."""
+        """Validate and persist a host-parsed requirement.
+
+        Extract parsed_requirement from raw_messages, copy exact source snippets into
+        field_evidence for every non-empty field, and leave missing fields unset.
+        """
         request = ValidateRequirementRequest(
             raw_messages=raw_messages,
             parsed_requirement=parsed_requirement,

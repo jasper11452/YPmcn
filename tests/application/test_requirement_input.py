@@ -18,7 +18,10 @@ async def test_requirement_validation_uses_typed_input_without_sampling_context(
             "parsed_requirement": {
                 "platforms": ["xhs"],
                 "category_requirements": ["beauty"],
-                "field_evidence": {"platforms": "抖音"},
+                "field_evidence": {
+                    "platforms": "抖音",
+                    "category_requirements": "美妆",
+                },
             },
         }
     )

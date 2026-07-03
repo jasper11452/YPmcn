@@ -86,10 +86,17 @@ def _validate_filter_rules(requirements_json: dict[str, Any]) -> None:
 
 
 def _validate_evidence(extraction: ParsedRequirement, source_text: str) -> None:
+    for field in type(extraction).model_fields:
+        if field in {"confidence_map", "field_evidence"}:
+            continue
+        value = getattr(extraction, field)
+        if value not in (None, "", [], {}) and field not in extraction.field_evidence:
+            raise InvalidRequirement(f"field evidence is required for {field}")
+
     for field, evidence in extraction.field_evidence.items():
         snippets = evidence if isinstance(evidence, list) else [evidence]
         for snippet in snippets:
-            if not isinstance(snippet, str) or snippet not in source_text:
+            if not isinstance(snippet, str) or not snippet or snippet not in source_text:
                 raise InvalidRequirement(f"field evidence is inconsistent for {field}")
 
 

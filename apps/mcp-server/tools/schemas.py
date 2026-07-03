@@ -33,6 +33,8 @@ class ProjectContext(RequestModel):
 
 
 class ParsedRequirement(RequestModel):
+    """Host-extracted fields; every non-empty field requires exact source evidence."""
+
     platforms: list[Platform] = Field(default_factory=list)
     budget_min_cents: int | None = Field(default=None, ge=0)
     budget_max_cents: int | None = Field(default=None, ge=0)
