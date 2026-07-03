@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS creator_recommendation_items (
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (recommendation_run_id, creator_account_id)
 );
-

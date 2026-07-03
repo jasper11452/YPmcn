@@ -48,4 +48,3 @@ def test_skipping_a_phase_is_rejected() -> None:
             state.version,
             WorkflowPhase.RECOMMENDATION_READY,
         )
-

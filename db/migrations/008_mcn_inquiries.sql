@@ -9,4 +9,3 @@ CREATE TABLE IF NOT EXISTS mcn_inquiries (
     responded_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-

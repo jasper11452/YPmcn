@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS creator_accounts (
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (platform, platform_account_id)
 );
-

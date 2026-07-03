@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS mcn_monthly_creator_lists (
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (mcn_agency_id, creator_account_id, list_month)
 );
-

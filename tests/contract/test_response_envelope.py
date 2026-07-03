@@ -25,4 +25,3 @@ def test_error_envelope_never_contains_data() -> None:
     assert result.error is not None
     assert result.error.code == ErrorCode.NOT_CONFIGURED
     assert result.trace_id == "trace-2"
-

@@ -30,4 +30,3 @@ async def test_same_key_with_different_payload_conflicts() -> None:
 
     with pytest.raises(IdempotencyConflict):
         await store.execute("key-1", {"creator": "b"}, operation)
-

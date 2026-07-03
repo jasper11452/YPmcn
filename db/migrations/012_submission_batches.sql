@@ -7,4 +7,3 @@ CREATE TABLE IF NOT EXISTS submission_batches (
     created_at timestamptz NOT NULL DEFAULT now(),
     closed_at timestamptz
 );
-

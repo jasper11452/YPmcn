@@ -12,4 +12,3 @@ async def execute(
     registry: ToolRegistry = default_registry,
 ) -> ResponseEnvelope:
     return await registry.invoke(TOOL_NAME, payload)
-

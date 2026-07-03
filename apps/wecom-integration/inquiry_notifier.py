@@ -22,4 +22,3 @@ class InquiryNotifier:
             "payload": dict(payload),
         }
         return await self._send_message(recipient, message)
-

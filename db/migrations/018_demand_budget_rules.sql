@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS demand_budget_rules (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
-

@@ -7,4 +7,3 @@ CREATE TABLE IF NOT EXISTS creator_content_vectors (
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (creator_account_id, content_id, model_name)
 );
-

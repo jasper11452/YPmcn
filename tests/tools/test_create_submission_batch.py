@@ -10,4 +10,3 @@ async def test_create_submission_batch_fails_safely_without_backend() -> None:
     assert result.success is False
     assert result.error is not None
     assert result.error.code is ErrorCode.NOT_CONFIGURED
-

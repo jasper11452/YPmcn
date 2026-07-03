@@ -14,4 +14,3 @@ class WorkflowPhase(StrEnum):
 PHASE_SEQUENCE = tuple(WorkflowPhase)
 
 __all__ = ["PHASE_SEQUENCE", "WorkflowPhase"]
-

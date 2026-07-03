@@ -22,4 +22,3 @@ class MessageRouter:
         except KeyError as exc:
             raise LookupError(f"no handler registered for {event_type}") from exc
         return await handler(dict(event))
-

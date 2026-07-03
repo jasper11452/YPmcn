@@ -26,4 +26,3 @@ def creator_score(
     }
     validate_normalized(**values)
     return sum(values[name] * weight for name, weight in CREATOR_WEIGHTS.items())
-

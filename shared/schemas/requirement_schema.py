@@ -19,4 +19,3 @@ class Requirement(BaseModel):
         if len(self.platforms) != len(set(self.platforms)):
             raise ValueError("platforms must be unique")
         return self
-

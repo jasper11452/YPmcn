@@ -48,4 +48,3 @@ class ResponseEnvelope(BaseModel):
             error=ErrorDetail(code=code, message=message, details=details),
             trace_id=trace_id or uuid4().hex,
         )
-

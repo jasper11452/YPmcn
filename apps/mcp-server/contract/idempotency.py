@@ -46,4 +46,3 @@ class IdempotencyStore:
     def _fingerprint(payload: Mapping[str, Any]) -> str:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(canonical.encode()).hexdigest()
-

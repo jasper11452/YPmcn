@@ -11,4 +11,3 @@ CREATE TABLE IF NOT EXISTS customer_demands (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
-

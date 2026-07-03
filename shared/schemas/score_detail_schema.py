@@ -16,4 +16,3 @@ class ScoreDetail(BaseModel):
         if invalid:
             raise ValueError(f"score components must be between 0 and 1: {invalid}")
         return self
-

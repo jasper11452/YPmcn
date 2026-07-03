@@ -12,4 +12,3 @@ class FeedbackListener:
         if not event.get("event_type"):
             raise ValueError("event_type is required")
         return await self._router.route(event)
-

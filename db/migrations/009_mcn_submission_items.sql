@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS mcn_submission_items (
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (inquiry_id, creator_account_id)
 );
-

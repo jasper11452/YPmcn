@@ -10,4 +10,3 @@ CREATE TABLE IF NOT EXISTS mcn_agencies (
 
 ALTER TABLE creator_supply_offers
     ADD COLUMN IF NOT EXISTS mcn_agency_id uuid REFERENCES mcn_agencies(id);
-

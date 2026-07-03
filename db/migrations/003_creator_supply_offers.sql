@@ -9,4 +9,3 @@ CREATE TABLE IF NOT EXISTS creator_supply_offers (
     metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-

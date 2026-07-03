@@ -16,4 +16,3 @@ def risk_penalty(*, data_gap: float, price_volatility: float, delivery_risk: flo
 def apply_risk_penalty(base_score: float, penalty: float) -> float:
     validate_normalized(base_score=base_score, penalty=penalty)
     return max(0.0, base_score - penalty)
-

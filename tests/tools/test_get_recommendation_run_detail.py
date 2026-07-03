@@ -10,4 +10,3 @@ async def test_get_recommendation_run_detail_fails_safely_without_backend() -> N
     assert result.success is False
     assert result.error is not None
     assert result.error.code is ErrorCode.NOT_CONFIGURED
-

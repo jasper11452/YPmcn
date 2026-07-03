@@ -6,4 +6,3 @@ GATE_TYPE = GateType.CONFIRM_RISKY_SUBMISSION
 
 def confirm(actor_id: str, note: str | None = None) -> GateConfirmation:
     return _confirm(GATE_TYPE, actor_id, note)
-

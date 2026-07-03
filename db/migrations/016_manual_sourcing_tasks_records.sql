@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS manual_sourcing_tasks_records (
     created_at timestamptz NOT NULL DEFAULT now(),
     completed_at timestamptz
 );
-

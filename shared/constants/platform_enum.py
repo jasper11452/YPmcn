@@ -7,4 +7,3 @@ class Platform(StrEnum):
     KS = "ks"
     WX_CHANNELS = "wxchannels"
     WEIBO = "weibo"
-

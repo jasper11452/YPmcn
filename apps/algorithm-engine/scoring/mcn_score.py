@@ -7,4 +7,3 @@ def mcn_score(*, count: float, rebate: float, rating: float) -> float:
     values = {"count": count, "rebate": rebate, "rating": rating}
     validate_normalized(**values)
     return sum(values[name] * weight for name, weight in MCN_WEIGHTS.items())
-

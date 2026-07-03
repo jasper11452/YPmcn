@@ -7,4 +7,3 @@ CREATE TABLE IF NOT EXISTS platform_content_category_mappings (
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (platform, platform_category)
 );
-

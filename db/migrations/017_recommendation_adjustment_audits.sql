@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS recommendation_adjustment_audits (
     after_json jsonb NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-

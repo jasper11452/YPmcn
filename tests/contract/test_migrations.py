@@ -51,4 +51,3 @@ def test_vector_migration_uses_pgvector() -> None:
 
     assert "CREATE EXTENSION IF NOT EXISTS vector" in bootstrap
     assert "vector(1536)" in vectors
-

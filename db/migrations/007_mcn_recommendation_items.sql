@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS mcn_recommendation_items (
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (demand_id, mcn_agency_id)
 );
-

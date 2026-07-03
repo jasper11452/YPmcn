@@ -7,4 +7,3 @@ CREATE TABLE IF NOT EXISTS recommendation_runs (
     input_snapshot_json jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-

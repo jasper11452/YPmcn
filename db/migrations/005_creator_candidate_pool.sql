@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS creator_candidate_pool (
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (demand_id, creator_account_id)
 );
-

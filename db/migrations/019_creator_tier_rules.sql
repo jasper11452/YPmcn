@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS creator_tier_rules (
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (platform, tier_name)
 );
-

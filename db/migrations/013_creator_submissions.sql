@@ -9,4 +9,3 @@ CREATE TABLE IF NOT EXISTS creator_submissions (
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (submission_batch_id, creator_account_id)
 );
-

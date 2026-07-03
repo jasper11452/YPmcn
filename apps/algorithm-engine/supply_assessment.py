@@ -15,4 +15,3 @@ def assess_supply(*, available_count: int, required_count: int) -> SupplyAssessm
 
     multiplier = min(available_count / required_count, 1.0)
     return SupplyAssessment(multiplier=multiplier, high_risk=multiplier < 0.5)
-

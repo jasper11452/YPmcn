@@ -6,4 +6,3 @@ GATE_TYPE = GateType.CONFIRM_MEDIUM_RISK
 
 def confirm(actor_id: str, note: str | None = None) -> GateConfirmation:
     return _confirm(GATE_TYPE, actor_id, note)
-
