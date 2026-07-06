@@ -1,0 +1,40 @@
+{
+  "name": "ypmcn-media-assistant",
+  "version": "1.0.6",
+  "description": "YPmcn 媒介助手 OpenClaw 插件：流程编排、MCP 调用、人工 gate 与达人提报管理",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    ".claude-plugin/",
+    "dist/",
+    "skills/",
+    "openclaw.plugin.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "pack:yp": "npm run build && npm pack --pack-destination ..",
+    "dev": "tsc --watch"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
+  "devDependencies": {
+    "openclaw": "*",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "media",
+    "mcn",
+    "creator"
+  ],
+  "license": "MIT",
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

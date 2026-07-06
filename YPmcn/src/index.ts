@@ -1,0 +1,1021 @@
+import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+
+/**
+ * YPmcn 媒介助手 — OpenClaw Plugin Runtime
+ *
+ * 设计原则：
+ * - validate_requirement 只校验当前运行时 inputSchema 已暴露的字段。
+ * - workflow_state 存在时再执行状态、高风险和 gate 防护，不伪造未部署字段。
+ * - MCP 响应以 {success, data, error, trace_id} 为基础契约；可选状态扩展按需校验。
+ */
+
+export interface ToolCallContext {
+  toolName: string;
+  params: Record<string, unknown>;
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  sessionState?: Record<string, unknown>;
+  workflowState?: WorkflowState | null;
+}
+
+export interface BeforeToolCallResult {
+  params?: Record<string, unknown>;
+  block?: boolean;
+  blockReason?: string;
+  requireApproval?: {
+    title: string;
+    description: string;
+    severity?: "info" | "warning" | "critical";
+    timeoutMs?: number;
+    timeoutBehavior?: "allow" | "deny";
+    allowedDecisions?: Array<"allow-once" | "allow-always" | "deny">;
+    onResolution?: (decision: "allow-once" | "allow-always" | "deny" | "timeout" | "cancelled") => Promise<void> | void;
+  };
+}
+
+export interface ToolResultContext {
+  toolName: string;
+  success: boolean;
+  data: unknown;
+  params?: Record<string, unknown>;
+  error?: { code: string; message: string; retryable?: boolean; retriable?: boolean } | null;
+  traceId?: string;
+  workflowState?: WorkflowState | null;
+  allowedActions?: unknown;
+}
+
+export interface WorkflowState {
+  phase: string;
+  demand_id?: string;
+  demand_version?: number;
+  run_id?: string | null;
+  batch_no?: number | null;
+  platform_states?: Record<string, PlatformState>;
+  pending_gate?: PendingGate | null;
+  state_version?: number;
+  allowed_actions?: string[];
+}
+
+export interface PlatformState {
+  mcn_phase: string;
+  risk_level?: string | null;
+  inquiry_ids?: string[];
+  suggested_mcn_ids?: string[];
+  confirmed_mcn_ids?: string[];
+}
+
+export interface PendingGate {
+  gate: string;
+  gate_id: string;
+  reason: string;
+  required_fields: string[];
+  created_at?: string;
+  expires_at?: string;
+}
+
+export interface GuardError {
+  guardId: string;
+  message: string;
+  severity: "block" | "warn";
+}
+
+const ALLOWED_VALIDATE_TOP_LEVEL_KEYS = new Set([
+  "raw_messages",
+  "project_context",
+  "existing_demand_id",
+  "existing_demand_version",
+]);
+
+const RANKING_TOOLS = new Set(["rank_creators", "create_submission_batch"]);
+const CLARIFY_GATE = "clarify_requirement";
+const PROJECT_DISTRIBUTION_ACTION = "create_with_distributions";
+const PROJECT_DISTRIBUTION_TOOL_NAMES = new Set([PROJECT_DISTRIBUTION_ACTION]);
+const LEGACY_PROJECT_DISTRIBUTION_TOOL_NAMES = new Set(["create-with-distributions"]);
+const EXEC_TOOL_NAMES = new Set(["exec", "bash", "shell", "powershell", "pwsh"]);
+const ISO_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+const PROJECT_DISTRIBUTION_INVOCATION = /(?:^|(?:&&|\|\||;|\|)\s*)(?:(?:uv\s+run|npx|node|(?:[^\s"';&|]*\/)?python(?:3(?:\.\d+)?)?|powershell|pwsh)\s+)?["']?(?:[^\s"';&|]*\/)?create[-_]with[-_]distributions(?:\.(?:py|js|mjs|ts|ps1|sh))?["']?(?=\s|$)/;
+const PROJECT_DISTRIBUTION_API_INVOCATION = /\/api\/projects\/create-with-distributions\/?/;
+
+interface CreateWithDistributionsParams {
+  mcn_run_id: string;
+  deadline: string;
+  remindAt?: string;
+  projectName?: string;
+  description?: string;
+  columns?: string[];
+  sendWechatNotification?: boolean;
+}
+
+const createWithDistributionsParameters = {
+  type: "object",
+  required: ["mcn_run_id", "deadline"],
+  additionalProperties: false,
+  properties: {
+    mcn_run_id: {
+      type: "string",
+      description: "rank_mcns 返回的 MCN 推荐运行 ID，由后端用它查询供应商映射。",
+    },
+    deadline: {
+      type: "string",
+      description: "未来的带时区 ISO 8601 时间，例如 2026-08-31T18:00:00+08:00。",
+    },
+    remindAt: {
+      type: "string",
+      description: "可选提醒时间；未传时默认使用 deadline。",
+    },
+    projectName: { type: "string" },
+    description: { type: "string" },
+    columns: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sendWechatNotification: {
+      type: "boolean",
+      default: true,
+    },
+  },
+};
+
+export interface ProjectDistributionInvocation {
+  actionKey: string;
+  command?: string;
+  remindAt: string;
+  remindAtMs: number;
+}
+
+export interface ProjectDistributionParseResult {
+  invocation?: ProjectDistributionInvocation;
+  error?: string;
+}
+
+interface PendingProjectDistribution extends ProjectDistributionInvocation {
+  toolCallId: string;
+  sessionKey: string;
+  agentId?: string;
+  approved: boolean;
+}
+
+interface WaitingProjectDistributionSession {
+  remindAt: string;
+}
+
+const YPMCN_TOOLS = new Set([
+  "audit_manual_adjustment",
+  "create_submission_batch",
+  "get_creator_detail",
+  "get_recommendation_run_detail",
+  "ingest_mcn_submissions",
+  "manual_source_creators",
+  "rank_creators",
+  "rank_mcns",
+  "record_client_feedback",
+  "search_creators",
+  "validate_requirement",
+]);
+
+const workflowStateBySession = new Map<string, WorkflowState>();
+const pendingProjectDistributions = new Map<string, PendingProjectDistribution>();
+const completedProjectDistributions = new Set<string>();
+const completedProjectDistributionSessions = new Set<string>();
+const waitingProjectDistributionSessions = new Map<string, WaitingProjectDistributionSession>();
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function nonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+function block(guardId: string, message: string): GuardError {
+  return { guardId, message, severity: "block" };
+}
+
+export function normalizeYpmcnToolName(toolName: string): string | null {
+  const bareName = toolName.includes("__") ? toolName.slice(toolName.lastIndexOf("__") + 2) : toolName;
+  return YPMCN_TOOLS.has(bareName) ? bareName : null;
+}
+
+function resolveSessionKey(ctx?: Record<string, unknown>): string | null {
+  if (nonEmptyString(ctx?.sessionKey)) return ctx.sessionKey;
+  if (nonEmptyString(ctx?.sessionId)) return ctx.sessionId;
+  return null;
+}
+
+function bareToolName(toolName: string): string {
+  return toolName.includes("__") ? toolName.slice(toolName.lastIndexOf("__") + 2) : toolName;
+}
+
+function validateReminderTime(remindAt: unknown, missingMessage: string): ProjectDistributionParseResult {
+  if (!remindAt) {
+    return { error: missingMessage };
+  }
+  if (!nonEmptyString(remindAt)) {
+    return { error: "deadline/remindAt 必须是非空字符串" };
+  }
+  if (!ISO_WITH_TIMEZONE.test(remindAt)) {
+    return { error: "deadline/remindAt 必须是带时区的 ISO 8601 时间" };
+  }
+
+  const remindAtMs = Date.parse(remindAt);
+  if (!Number.isFinite(remindAtMs)) {
+    return { error: "deadline/remindAt 不是有效时间" };
+  }
+  if (remindAtMs <= Date.now()) {
+    return { error: "deadline/remindAt 必须是未来时间" };
+  }
+
+  return { invocation: { actionKey: "", remindAt, remindAtMs } };
+}
+
+function findReminderTime(params: Record<string, unknown>): unknown {
+  for (const key of ["remindAt", "remind_at", "remind-at", "deadline"]) {
+    if (params[key] !== undefined) return params[key];
+  }
+
+  for (const key of ["project", "body", "json", "payload"]) {
+    const nested = params[key];
+    if (isObject(nested)) {
+      const value = findReminderTime(nested);
+      if (value !== undefined) return value;
+    }
+  }
+
+  return undefined;
+}
+
+export function parseProjectDistributionInvocation(toolName: string, params: Record<string, unknown>): ProjectDistributionParseResult | null {
+  const bareName = bareToolName(toolName);
+
+  if (LEGACY_PROJECT_DISTRIBUTION_TOOL_NAMES.has(bareName)) {
+    return { error: `旧工具名 create-with-distributions 已停用；请改用 ${PROJECT_DISTRIBUTION_ACTION}` };
+  }
+
+  if (PROJECT_DISTRIBUTION_TOOL_NAMES.has(bareName)) {
+    const parsed = validateReminderTime(
+      findReminderTime(params),
+      `${PROJECT_DISTRIBUTION_ACTION} 工具调用必须包含未来的 deadline/remindAt`,
+    );
+    if (!parsed.invocation) return parsed;
+    return {
+      invocation: {
+        ...parsed.invocation,
+        actionKey: `tool:${bareName}:${parsed.invocation.remindAt}`,
+      },
+    };
+  }
+
+  if (!EXEC_TOOL_NAMES.has(bareName)) return null;
+
+  const command = nonEmptyString(params.command)
+    ? params.command
+    : nonEmptyString(params.cmd)
+      ? params.cmd
+      : null;
+  if (!command || (!PROJECT_DISTRIBUTION_INVOCATION.test(command) && !PROJECT_DISTRIBUTION_API_INVOCATION.test(command))) return null;
+
+  return {
+    error: `不要通过 Bash/PowerShell/curl 直接调用 ${PROJECT_DISTRIBUTION_ACTION}；请使用 YP Action 工具 ${PROJECT_DISTRIBUTION_ACTION}，完成 allow-once 审批后发送企微询价。`,
+  };
+}
+
+function waitingBlockReason(waiting: WaitingProjectDistributionSession): string {
+  return "项目分发已执行；当前必须停止并等待用户明确继续";
+}
+
+function normalizeCreateWithDistributionsParams(params: Record<string, unknown>): CreateWithDistributionsParams | { error: string } {
+  const mcnRunId = params.mcn_run_id;
+  if (!nonEmptyString(mcnRunId)) return { error: "mcn_run_id 必须是非空字符串" };
+
+  const deadline = params.deadline;
+  const parsedDeadline = validateReminderTime(deadline, "deadline 必填");
+  if (parsedDeadline.error || !parsedDeadline.invocation) return { error: parsedDeadline.error ?? "deadline 无法解析" };
+  if (!nonEmptyString(deadline)) return { error: "deadline 必须是非空字符串" };
+
+  const remindAt = params.remindAt;
+  if (remindAt !== undefined) {
+    const parsedRemindAt = validateReminderTime(remindAt, "remindAt 必填");
+    if (parsedRemindAt.error || !parsedRemindAt.invocation) return { error: parsedRemindAt.error ?? "remindAt 无法解析" };
+  }
+
+  const columns = params.columns;
+  if (columns !== undefined && (!Array.isArray(columns) || !columns.every((item) => typeof item === "string"))) {
+    return { error: "columns 必须是字符串数组" };
+  }
+
+  const sendWechatNotification = params.sendWechatNotification;
+  if (sendWechatNotification !== undefined && typeof sendWechatNotification !== "boolean") {
+    return { error: "sendWechatNotification 必须是布尔值" };
+  }
+
+  if (params.execute !== undefined || params.endpointUrl !== undefined) {
+    return { error: "create_with_distributions 不接受 execute 或 endpointUrl；发送模式和后端地址不得由 Agent 入参控制" };
+  }
+
+  return {
+    mcn_run_id: mcnRunId,
+    deadline,
+    remindAt: nonEmptyString(remindAt) ? remindAt : undefined,
+    projectName: nonEmptyString(params.projectName) ? params.projectName : undefined,
+    description: nonEmptyString(params.description) ? params.description : undefined,
+    columns: Array.isArray(columns) ? columns : undefined,
+    sendWechatNotification: typeof sendWechatNotification === "boolean" ? sendWechatNotification : true,
+  };
+}
+
+function buildCreateWithDistributionsPayload(params: CreateWithDistributionsParams): Record<string, unknown> {
+  return {
+    mcn_run_id: params.mcn_run_id,
+    deadline: params.deadline,
+    remindAt: params.remindAt ?? params.deadline,
+    projectName: params.projectName,
+    description: params.description,
+    columns: params.columns,
+    sendWechatNotification: params.sendWechatNotification ?? true,
+  };
+}
+
+async function executeCreateWithDistributionsTool(params: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+  const normalized = normalizeCreateWithDistributionsParams(params);
+  if ("error" in normalized) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify({ success: false, data: null, error: { code: "INVALID_ARGUMENT", message: normalized.error }, trace_id: null }, null, 2) }],
+    };
+  }
+
+  const payload = buildCreateWithDistributionsPayload(normalized);
+  return {
+    content: [{ type: "text", text: JSON.stringify({ success: true, data: { dry_run: true, payload }, error: null, trace_id: "local-dry-run" }, null, 2) }],
+  };
+}
+
+function registerCreateWithDistributionsTool(api: { registerTool?: (tool: unknown, options?: unknown) => void; logger?: { info: (msg: string) => void } }): void {
+  if (typeof api.registerTool !== "function") {
+    api.logger?.info("[ypmcn-media-assistant] registerTool not available, skipping create_with_distributions");
+    return;
+  }
+  api.registerTool({
+    name: PROJECT_DISTRIBUTION_ACTION,
+    description: "项目创建与供应商分发审批工具；1.0.5 安全版仅 dry-run，不接受 Agent 控制发送地址或执行开关。",
+    parameters: createWithDistributionsParameters,
+    async execute(_id: string, params: Record<string, unknown>) {
+      return executeCreateWithDistributionsTool(isObject(params) ? params : {});
+    },
+  });
+  api.logger?.info("[ypmcn-media-assistant] registered create_with_distributions tool");
+}
+
+function runBeforeProjectDistributionToolCall(
+  event: Record<string, unknown>,
+  ctx?: Record<string, unknown>,
+): BeforeToolCallResult | undefined {
+  const sessionKey = resolveSessionKey(ctx);
+  const waiting = sessionKey ? waitingProjectDistributionSessions.get(sessionKey) : undefined;
+  if (waiting) {
+    return { block: true, blockReason: waitingBlockReason(waiting) };
+  }
+
+  const params = isObject(event.params) ? event.params : {};
+  const parsed = parseProjectDistributionInvocation(String(event.toolName ?? ""), params);
+  if (!parsed) return undefined;
+  if (parsed.error) return { block: true, blockReason: parsed.error };
+  if (!parsed.invocation) return { block: true, blockReason: `${PROJECT_DISTRIBUTION_ACTION} 调用无法解析` };
+  if (!sessionKey) return { block: true, blockReason: `${PROJECT_DISTRIBUTION_ACTION} 缺少会话标识，无法记录发送状态` };
+
+  const toolCallId = nonEmptyString(event.toolCallId) ? event.toolCallId : null;
+  if (!toolCallId) return { block: true, blockReason: `${PROJECT_DISTRIBUTION_ACTION} 缺少 toolCallId，无法安全去重` };
+
+  pendingProjectDistributions.set(toolCallId, {
+    ...parsed.invocation,
+    toolCallId,
+    sessionKey,
+    agentId: nonEmptyString(ctx?.agentId) ? ctx.agentId : undefined,
+    approved: true,
+  });
+
+  // requireApproval bypassed — gateway pairing not available in YP Action
+  // Agent-level AskUserQuestion (mcn-wechat-send) provides user confirmation
+  return undefined;
+}
+
+function findExitCode(result: unknown): number | null {
+  if (!isObject(result)) return null;
+  for (const key of ["exitCode", "exit_code", "code"] as const) {
+    if (typeof result[key] === "number") return result[key];
+  }
+  return isObject(result.details) ? findExitCode(result.details) : null;
+}
+
+function projectDistributionToolCallSucceeded(event: Record<string, unknown>): boolean {
+  if (nonEmptyString(event.error)) return false;
+  const result = event.result;
+  if (isObject(result) && (result.isError === true || result.success === false)) return false;
+  const exitCode = findExitCode(result);
+  return exitCode === null || exitCode === 0;
+}
+
+async function runAfterProjectDistributionToolCall(event: Record<string, unknown>): Promise<void> {
+  const toolCallId = nonEmptyString(event.toolCallId) ? event.toolCallId : null;
+  if (!toolCallId || completedProjectDistributions.has(toolCallId)) return;
+
+  const pending = pendingProjectDistributions.get(toolCallId);
+  if (!pending) return;
+  const params = isObject(event.params) ? event.params : {};
+  const parsed = parseProjectDistributionInvocation(String(event.toolName ?? ""), params);
+  if (!parsed?.invocation || parsed.invocation.actionKey !== pending.actionKey || !pending.approved) {
+    pendingProjectDistributions.delete(toolCallId);
+    return;
+  }
+  if (!projectDistributionToolCallSucceeded(event)) {
+    pendingProjectDistributions.delete(toolCallId);
+    return;
+  }
+
+  completedProjectDistributions.add(toolCallId);
+  completedProjectDistributionSessions.add(pending.sessionKey);
+  waitingProjectDistributionSessions.set(pending.sessionKey, { remindAt: pending.remindAt });
+  pendingProjectDistributions.delete(toolCallId);
+}
+
+function cacheWorkflowState(ctx: Record<string, unknown> | undefined, workflowState: WorkflowState | null | undefined): void {
+  const sessionKey = resolveSessionKey(ctx);
+  if (sessionKey && workflowState && isObject(workflowState)) {
+    workflowStateBySession.set(sessionKey, workflowState);
+  }
+}
+
+function resolveWorkflowState(ctx: ToolCallContext): WorkflowState | null {
+  if (ctx.workflowState && isObject(ctx.workflowState)) return ctx.workflowState;
+
+  const sessionWorkflowState = ctx.sessionState?.workflow_state;
+  if (isObject(sessionWorkflowState)) return sessionWorkflowState as unknown as WorkflowState;
+
+  return null;
+}
+
+function resolveAllowedActions(ctx: ToolCallContext, workflowState: WorkflowState | null): string[] {
+  const fromState = workflowState?.allowed_actions;
+  if (Array.isArray(fromState)) return fromState.filter((item): item is string => typeof item === "string");
+
+  return [];
+}
+
+function hasCompletedProjectDistribution(ctx: ToolCallContext): boolean {
+  const sessionKey = ctx.sessionKey ?? ctx.sessionId ?? null;
+  if (sessionKey && completedProjectDistributionSessions.has(sessionKey)) return true;
+
+  return ctx.sessionState?.project_distribution_completed === true ||
+    ctx.sessionState?.create_with_distributions_completed === true;
+}
+
+function validateProjectDistributionBeforeRanking(ctx: ToolCallContext): GuardError[] {
+  if (ctx.toolName !== "rank_creators") return [];
+  if (hasCompletedProjectDistribution(ctx)) return [];
+
+  return [
+    block(
+      "state-guard",
+      `rank_creators 前必须先调用 ${PROJECT_DISTRIBUTION_ACTION} 完成企微询价发送；不得跳过询价直接精排`,
+    ),
+  ];
+}
+
+function isClarifyValidateRequirement(ctx: ToolCallContext, workflowState: WorkflowState | null): boolean {
+  return (
+    ctx.toolName === "validate_requirement" &&
+    workflowState?.pending_gate?.gate === CLARIFY_GATE
+  );
+}
+
+export function validateProtocolEnvelope(ctx: ToolCallContext): GuardError[] {
+  if (ctx.toolName !== "validate_requirement") return [];
+
+  const errors: GuardError[] = [];
+  const params = ctx.params;
+
+  for (const key of Object.keys(params)) {
+    if (!ALLOWED_VALIDATE_TOP_LEVEL_KEYS.has(key)) {
+      errors.push(block("protocol-envelope", `validate_requirement 入参包含非法顶层字段 ${key}`));
+    }
+  }
+
+  const rawMessages = params.raw_messages;
+  if (!Array.isArray(rawMessages)) {
+    errors.push(block("protocol-envelope", "validate_requirement 缺少 raw_messages 数组"));
+    return errors;
+  }
+
+  rawMessages.forEach((item, index) => {
+    if (!isObject(item)) {
+      errors.push(block("protocol-envelope", `raw_messages[${index}] 必须为对象`));
+      return;
+    }
+  });
+
+  if (params.project_context !== undefined && params.project_context !== null && !isObject(params.project_context)) {
+    errors.push(block("protocol-envelope", "project_context 必须为对象或 null"));
+  }
+
+  if (params.existing_demand_id !== undefined && params.existing_demand_id !== null && typeof params.existing_demand_id !== "string") {
+    errors.push(block("protocol-envelope", "existing_demand_id 必须为字符串或 null"));
+  }
+
+  if (params.existing_demand_version !== undefined && params.existing_demand_version !== null && !Number.isInteger(params.existing_demand_version)) {
+    errors.push(block("protocol-envelope", "existing_demand_version 必须为整数或 null"));
+  }
+
+  return errors;
+}
+
+function gateIsConfirmedByRuntimeField(ctx: ToolCallContext, pendingGate: PendingGate): boolean {
+  if (pendingGate.gate === "confirm_medium_risk") {
+    return ctx.toolName === "rank_mcns" && ctx.params.medium_risk_confirmed === true;
+  }
+
+  if (pendingGate.gate === "confirm_risky_submission") {
+    return ctx.toolName === "create_submission_batch" && ctx.params.allow_need_confirm_with_risk === true;
+  }
+
+  return false;
+}
+
+function validateGateConfirmation(ctx: ToolCallContext, workflowState: WorkflowState): GuardError[] {
+  const pendingGate = workflowState.pending_gate;
+  if (!pendingGate) return [];
+
+  if (isClarifyValidateRequirement(ctx, workflowState)) return [];
+  if (gateIsConfirmedByRuntimeField(ctx, pendingGate)) return [];
+
+  if (pendingGate.gate === "confirm_medium_risk" && ctx.toolName === "rank_mcns") {
+    return [block("state-guard", "中风险继续执行前，rank_mcns.medium_risk_confirmed 必须为 true")];
+  }
+
+  if (pendingGate.gate === "confirm_risky_submission" && ctx.toolName === "create_submission_batch") {
+    return [block("state-guard", "风险提报前，create_submission_batch.allow_need_confirm_with_risk 必须为 true")];
+  }
+
+  return [];
+}
+
+function validateStateGuard(ctx: ToolCallContext): GuardError[] {
+  const workflowState = resolveWorkflowState(ctx);
+  if (!workflowState) return [];
+
+  const errors: GuardError[] = [];
+  const allowedActions = resolveAllowedActions(ctx, workflowState);
+
+  if (allowedActions.length > 0 && !allowedActions.includes(ctx.toolName)) {
+    errors.push(block("state-guard", `当前状态不允许调用 ${ctx.toolName}，请检查 workflow_state.allowed_actions`));
+  }
+
+  errors.push(...validateGateConfirmation(ctx, workflowState));
+
+  const platformStates = workflowState.platform_states ?? {};
+
+  if (RANKING_TOOLS.has(ctx.toolName)) {
+    for (const [platform, state] of Object.entries(platformStates)) {
+      if (state.mcn_phase === "not_required") continue;
+      if (state.mcn_phase !== "ingested") {
+        errors.push(block("state-guard", `平台 ${platform} 的 mcn_phase=${state.mcn_phase}，未达 ingested，不得调用 ${ctx.toolName}`));
+      }
+    }
+  }
+
+  if (allowedActions.includes("rank_creators") || allowedActions.includes("create_submission_batch")) {
+    const allReady = Object.values(platformStates).every(
+      (state) => state.mcn_phase === "not_required" || state.mcn_phase === "ingested",
+    );
+
+    if (!allReady) {
+      errors.push(block("state-guard", "MCP 返回的 allowed_actions 与 platform_states 矛盾——allowed_actions 包含 rank_creators/create_submission_batch 但存在平台 mcn_phase 未达 ingested，停止并报告 integration_required"));
+    }
+  }
+
+  return errors;
+}
+
+function validateHighRiskGuard(ctx: ToolCallContext): GuardError[] {
+  if (!RANKING_TOOLS.has(ctx.toolName)) return [];
+
+  const workflowState = resolveWorkflowState(ctx);
+  if (!workflowState) return [];
+
+  const errors: GuardError[] = [];
+  for (const [platform, state] of Object.entries(workflowState.platform_states ?? {})) {
+    if (state.risk_level === "high_risk" && state.mcn_phase !== "ingested") {
+      errors.push(block("high-risk-guard", `平台 ${platform} 供给风险为 high_risk，必须先通过 supply_recovery 补量或降低风险评估，不得直接进入 ${ctx.toolName}`));
+    }
+  }
+
+  return errors;
+}
+
+function buildPendingGateApproval(ctx: ToolCallContext, workflowState: WorkflowState | null): BeforeToolCallResult["requireApproval"] | undefined {
+  const pendingGate = workflowState?.pending_gate;
+  if (!pendingGate) return undefined;
+  if (pendingGate.gate === CLARIFY_GATE) return undefined;
+  if (gateIsConfirmedByRuntimeField(ctx, pendingGate)) return undefined;
+
+  const severity: "info" | "warning" | "critical" =
+    pendingGate.gate === "supply_recovery" || pendingGate.gate === "manual_review_required"
+      ? "critical"
+      : pendingGate.gate === "confirm_medium_risk" || pendingGate.gate === "confirm_risky_submission"
+        ? "warning"
+        : "info";
+
+  return {
+    title: `YPmcn 需要确认：${pendingGate.gate}`,
+    description: pendingGate.reason,
+    severity,
+    timeoutBehavior: "deny",
+    allowedDecisions: ["allow-once", "deny"],
+  };
+}
+
+function buildRankCreatorsApproval(ctx: ToolCallContext): BeforeToolCallResult["requireApproval"] | undefined {
+  if (ctx.toolName !== "rank_creators") return undefined;
+  // requireApproval bypassed — gateway pairing not available in YP Action
+  // Agent-level AskUserQuestion (proceed-to-ranking) provides user confirmation
+  return undefined;
+}
+
+export async function runBeforeToolCallGuards(ctx: ToolCallContext): Promise<BeforeToolCallResult | void> {
+  const guardErrors = [
+    ...validateProtocolEnvelope(ctx),
+    ...validateHighRiskGuard(ctx),
+    ...validateStateGuard(ctx),
+    ...validateProjectDistributionBeforeRanking(ctx),
+  ];
+
+  const blockingErrors = guardErrors.filter((error) => error.severity === "block");
+  if (blockingErrors.length > 0) {
+    return {
+      block: true,
+      blockReason: blockingErrors.map((error) => error.message).join("; "),
+    };
+  }
+
+  const workflowState = resolveWorkflowState(ctx);
+  const approval = buildPendingGateApproval(ctx, workflowState);
+  if (approval) return { requireApproval: approval };
+
+  const rankCreatorsApproval = buildRankCreatorsApproval(ctx);
+  if (rankCreatorsApproval) return { requireApproval: rankCreatorsApproval };
+}
+
+export function responseContractGuard(result: ToolResultContext): GuardError[] {
+  const errors: GuardError[] = [];
+  const workflowState = result.workflowState;
+
+  if (!nonEmptyString(result.traceId)) {
+    errors.push(block("response-contract-guard", "MCP 响应缺少非空 trace_id，响应契约破坏"));
+  }
+
+  if (result.success) {
+    if (result.error !== null && result.error !== undefined) {
+      errors.push(block("response-contract-guard", "MCP success=true 时 error 必须为 null"));
+    }
+  } else {
+    if (result.data !== null) {
+      errors.push(block("response-contract-guard", "MCP success=false 时 data 必须为 null"));
+    }
+    if (!isObject(result.error)) {
+      errors.push(block("response-contract-guard", "MCP success=false 时 error 必须为对象"));
+    }
+  }
+
+  if (isObject(workflowState)) {
+    const pendingGate = workflowState.pending_gate;
+    if (pendingGate !== null && pendingGate !== undefined) {
+      if (!isObject(pendingGate)) {
+        errors.push(block("response-contract-guard", "MCP 可选 workflow_state.pending_gate 必须为对象或 null"));
+      } else {
+        const hasGateShape =
+          nonEmptyString(pendingGate.gate) &&
+          nonEmptyString(pendingGate.gate_id) &&
+          nonEmptyString(pendingGate.reason) &&
+          Array.isArray(pendingGate.required_fields);
+        if (!hasGateShape) {
+          errors.push(block("response-contract-guard", "MCP 可选 pending_gate 缺少 gate/gate_id/reason/required_fields"));
+        }
+      }
+    }
+  }
+
+  if (result.allowedActions !== undefined &&
+      (!Array.isArray(result.allowedActions) || result.allowedActions.some((action) => typeof action !== "string"))) {
+    errors.push(block("response-contract-guard", "MCP 可选 allowed_actions 必须为字符串数组"));
+  }
+
+  errors.push(...validateRequirementSemanticGuard(result));
+
+  return errors;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function rawMessagesText(params: Record<string, unknown> | undefined): string {
+  const rawMessages = params?.raw_messages;
+  if (!Array.isArray(rawMessages)) return "";
+  return rawMessages
+    .map((item) => isObject(item) && typeof item.content === "string" ? item.content : "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function requirementParsed(data: unknown): Record<string, unknown> | null {
+  if (!isObject(data)) return null;
+  return isObject(data.requirement_parsed) ? data.requirement_parsed : null;
+}
+
+function explicitPlatformScope(text: string): string {
+  const platformLine = text.match(/平台\s*[:：]\s*([^\n\r]+)/);
+  return platformLine?.[1] ?? text;
+}
+
+function explicitPlatforms(text: string): Set<string> {
+  const scope = explicitPlatformScope(text).toLowerCase();
+  const platforms = new Set<string>();
+  if (/小红书|xiaohongshu|\bxhs\b|\bred\b/.test(scope)) platforms.add("xhs");
+  if (/抖音|douyin|\bdy\b/.test(scope)) platforms.add("dy");
+  return platforms;
+}
+
+function hasFollowerTier(text: string): boolean {
+  return /(?:\d+(?:\.\d+)?\s*(?:w|万)\s*粉|\d+\s*-\s*\d+\s*w\s*粉|粉以下|粉以上|粉内)/i.test(text);
+}
+
+function parseSourceBudgetUpperYuan(text: string): number | null {
+  const candidates: number[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!/(预算|报价|单价|放宽)/.test(line)) continue;
+    const pattern = /(?:预算|报价|单价|放宽至|可放宽至)[^0-9]*(\d+(?:\.\d+)?)(?!\s*(?:w|万)\s*粉)\s*(?:元|块|以内|内)/gi;
+    for (const match of line.matchAll(pattern)) {
+      const value = Number(match[1]);
+      if (Number.isFinite(value)) candidates.push(value);
+    }
+  }
+  return candidates.length > 0 ? Math.max(...candidates) : null;
+}
+
+function validateRequirementSemanticGuard(result: ToolResultContext): GuardError[] {
+  if (result.toolName !== "validate_requirement" || !result.success) return [];
+
+  const sourceText = rawMessagesText(result.params);
+  const parsed = requirementParsed(result.data);
+  if (!sourceText || !parsed) return [];
+
+  const errors: GuardError[] = [];
+  const sourcePlatforms = explicitPlatforms(sourceText);
+  const returnedPlatforms = stringArray(parsed.platforms);
+  if (sourcePlatforms.size > 0 && returnedPlatforms.length > 0) {
+    const unexpectedPlatforms = returnedPlatforms.filter((platform) => !sourcePlatforms.has(platform));
+    if (unexpectedPlatforms.length > 0) {
+      errors.push(block(
+        "requirement-semantic-guard",
+        `validate_requirement 平台解析与原始 Brief 矛盾：返回 ${unexpectedPlatforms.join(",")}，但原文只明确 ${Array.from(sourcePlatforms).join(",")}`,
+      ));
+    }
+  }
+
+  const sourceBudgetUpperYuan = parseSourceBudgetUpperYuan(sourceText);
+  const parsedBudgetMaxYuan = typeof parsed.budget_max_cents === "number" ? parsed.budget_max_cents / 100 : null;
+  const budgetRaw = typeof parsed.budget_raw === "string" ? parsed.budget_raw : "";
+  const budgetRawLooksLikeFollowerTier = /\d+\s*-\s*\d+\s*w/i.test(budgetRaw) || /\d+(?:\.\d+)?\s*(?:w|万)\s*粉/i.test(budgetRaw);
+  if (
+    hasFollowerTier(sourceText) &&
+    sourceBudgetUpperYuan !== null &&
+    parsedBudgetMaxYuan !== null &&
+    (budgetRawLooksLikeFollowerTier || parsedBudgetMaxYuan > sourceBudgetUpperYuan * 2)
+  ) {
+    errors.push(block(
+      "requirement-semantic-guard",
+      `validate_requirement 预算解析疑似把粉丝量当金额：返回 ${parsedBudgetMaxYuan} 元，原文单达人预算上限 ${sourceBudgetUpperYuan} 元`,
+    ));
+  }
+
+  return errors;
+}
+
+function parseObjectJson(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string") return null;
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function envelopeFromContent(value: unknown): Record<string, unknown> | null {
+  if (typeof value === "string") return parseObjectJson(value);
+  if (!Array.isArray(value)) return null;
+
+  for (const item of value) {
+    if (!isObject(item) || item.type !== "text") continue;
+    const parsed = parseObjectJson(item.text);
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
+function looksLikeEnvelope(value: unknown): value is Record<string, unknown> {
+  if (!isObject(value)) return false;
+  return ["success", "data", "error", "workflow_state", "allowed_actions"].some((key) => key in value);
+}
+
+function structuredContent(value: unknown): Record<string, unknown> | null {
+  if (!isObject(value)) return null;
+  const details = isObject(value.details) ? value.details : null;
+  return details && isObject(details.structuredContent) ? details.structuredContent : null;
+}
+
+function resolveToolResultEnvelope(event: Record<string, unknown>): Record<string, unknown> {
+  const message = isObject(event.message) ? event.message : null;
+  const result = isObject(event.result) ? event.result : null;
+  const candidates: unknown[] = [
+    message ? structuredContent(message) : null,
+    result ? structuredContent(result) : null,
+    result?.structuredContent,
+    message?.structuredContent,
+    result?.envelope,
+    event.envelope,
+    message ? envelopeFromContent(message.content) : null,
+    result ? envelopeFromContent(result.content) : null,
+    result,
+    event,
+  ];
+
+  return candidates.find(looksLikeEnvelope) ?? {};
+}
+
+function normalizeToolResultEvent(event: Record<string, unknown>): ToolResultContext | null {
+  const message = isObject(event.message) ? event.message : null;
+  const rawToolName = String(event.toolName ?? event.name ?? message?.toolName ?? "");
+  const toolName = normalizeYpmcnToolName(rawToolName);
+  if (!toolName) return null;
+
+  const envelope = resolveToolResultEnvelope(event);
+
+  return {
+    toolName,
+    success: Boolean(envelope.success),
+    data: envelope.data,
+    params: isObject(event.params) ? event.params : undefined,
+    error: isObject(envelope.error) ? envelope.error as ToolResultContext["error"] : null,
+    traceId: typeof envelope.trace_id === "string" ? envelope.trace_id : undefined,
+    workflowState: isObject(envelope.workflow_state) ? envelope.workflow_state as unknown as WorkflowState : null,
+    allowedActions: envelope.allowed_actions,
+  };
+}
+
+export function rewriteInvalidToolResult(result: ToolResultContext): Record<string, unknown> | undefined {
+  const errors = responseContractGuard(result);
+  if (errors.length === 0) return undefined;
+
+  return {
+    success: false,
+    data: null,
+    error: {
+      code: errors.every((error) => error.guardId === "requirement-semantic-guard")
+        ? "INVALID_REQUIREMENT_PARSE"
+        : "INVALID_RESPONSE_CONTRACT",
+      message: errors.map((error) => error.message).join("; "),
+      retryable: false,
+    },
+    trace_id: result.traceId,
+  };
+}
+
+export function registerHooks(api: { on: (name: string, handler: (...args: any[]) => unknown, opts?: Record<string, unknown>) => void }): void {
+  api.on(
+    "message_received",
+    (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+      const sessionKey = resolveSessionKey(ctx) ?? (nonEmptyString(event.sessionKey) ? event.sessionKey : null);
+      if (sessionKey) waitingProjectDistributionSessions.delete(sessionKey);
+    },
+    { priority: 90, timeoutMs: 5_000 },
+  );
+
+  api.on(
+    "before_tool_call",
+    async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+      const projectDistributionResult = runBeforeProjectDistributionToolCall(event, ctx);
+      if (projectDistributionResult) return projectDistributionResult;
+
+      const toolName = normalizeYpmcnToolName(String(event.toolName ?? ""));
+      if (!toolName) return;
+
+      const sessionKey = resolveSessionKey(ctx);
+      const toolCtx: ToolCallContext = {
+        toolName,
+        params: isObject(event.params) ? event.params : {},
+        agentId: typeof ctx?.agentId === "string" ? ctx.agentId : undefined,
+        sessionKey: typeof ctx?.sessionKey === "string" ? ctx.sessionKey : undefined,
+        sessionId: typeof ctx?.sessionId === "string" ? ctx.sessionId : undefined,
+        sessionState: isObject((ctx as Record<string, unknown> | undefined)?.sessionState)
+          ? (ctx as { sessionState: Record<string, unknown> }).sessionState
+          : undefined,
+        workflowState: sessionKey ? workflowStateBySession.get(sessionKey) : undefined,
+      };
+      if (toolName === "validate_requirement" && sessionKey) {
+        completedProjectDistributionSessions.delete(sessionKey);
+      }
+      if (toolName === "validate_requirement") {
+        const rawMessages = toolCtx.params.raw_messages;
+        if (Array.isArray(rawMessages)) {
+          let serialized: string;
+          try {
+            serialized = JSON.stringify(toolCtx.params.raw_messages);
+          } catch (serializeError) {
+            return {
+              block: true,
+              blockReason: `raw_messages 包含不可序列化对象，MCP 解析将失败: ${serializeError instanceof Error ? serializeError.message : String(serializeError)}`,
+            };
+          }
+          try {
+            JSON.parse(serialized);
+          } catch (parseError) {
+            return {
+              block: true,
+              blockReason: `raw_messages 包含不可序列化对象，MCP 解析将失败: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+            };
+          }
+          console.log(JSON.stringify({
+            plugin: "ypmcn-media-assistant",
+            tool: "validate_requirement",
+            raw_messages_preview: serialized.slice(0, 500),
+          }, null, 2));
+        }
+      }
+      return runBeforeToolCallGuards(toolCtx);
+    },
+    { priority: 90, timeoutMs: 5_000 },
+  );
+
+  api.on(
+    "after_tool_call",
+    async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+      await runAfterProjectDistributionToolCall(event);
+
+      const normalized = normalizeToolResultEvent(event);
+      if (!normalized) return;
+      const errors = responseContractGuard(normalized);
+      if (errors.length === 0) cacheWorkflowState(ctx, normalized.workflowState);
+    },
+    { priority: 90, timeoutMs: 5_000 },
+  );
+
+  api.on(
+    "tool_result_persist",
+    (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+      const normalized = normalizeToolResultEvent(event);
+      if (!normalized) return;
+      const rewritten = rewriteInvalidToolResult(normalized);
+      if (!rewritten) {
+        cacheWorkflowState(ctx, normalized.workflowState);
+        return;
+      }
+
+      const message = isObject(event.message) ? event.message : {};
+      const details = isObject(message.details) ? message.details : {};
+      const ypmcnDetails = isObject(details.ypmcn) ? details.ypmcn : {};
+      return {
+        message: {
+          ...message,
+          content: [{ type: "text", text: JSON.stringify(rewritten, null, 2) }],
+          details: {
+            ...details,
+            structuredContent: rewritten,
+            ypmcn: {
+              ...ypmcnDetails,
+              invalidResponseContract: true,
+            },
+          },
+          isError: true,
+        },
+      };
+    },
+    { priority: 90, timeoutMs: 5_000 },
+  );
+}
+
+const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
+  id: "ypmcn-media-assistant",
+  name: "YPmcn 媒介助手",
+  description: "按业务阶段调用独立 MCP，并以人工 gate、短回复和可恢复状态管理达人提报流程。",
+  register(api) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const a = api as any;
+    registerCreateWithDistributionsTool(a);
+    registerHooks(a);
+  },
+});
+
+export default plugin;

@@ -1,0 +1,8 @@
+.DS_Store
+node_modules/
+YPmcn/node_modules/
+YPmcn/dist/
+*.tgz
+.omo/
+.codegraph/
+
