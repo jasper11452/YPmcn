@@ -18,6 +18,7 @@ export interface ToolCallContext {
   sessionId?: string;
   sessionState?: Record<string, unknown>;
   workflowState?: WorkflowState | null;
+  operatorRole?: string;
 }
 
 export interface BeforeToolCallResult {
@@ -94,6 +95,7 @@ const PROJECT_DISTRIBUTION_ACTION = "create_with_distributions";
 const PROJECT_DISTRIBUTION_TOOL_NAMES = new Set([PROJECT_DISTRIBUTION_ACTION]);
 const LEGACY_PROJECT_DISTRIBUTION_TOOL_NAMES = new Set(["create-with-distributions"]);
 const EXEC_TOOL_NAMES = new Set(["exec", "bash", "shell", "powershell", "pwsh"]);
+const WECOM_ROLES = new Set(["media", "procurement"]);
 const ISO_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const PROJECT_DISTRIBUTION_INVOCATION = /(?:^|(?:&&|\|\||;|\|)\s*)(?:(?:uv\s+run|npx|node|(?:[^\s"';&|]*\/)?python(?:3(?:\.\d+)?)?|powershell|pwsh)\s+)?["']?(?:[^\s"';&|]*\/)?create[-_]with[-_]distributions(?:\.(?:py|js|mjs|ts|ps1|sh))?["']?(?=\s|$)/;
 const PROJECT_DISTRIBUTION_API_INVOCATION = /\/api\/projects\/create-with-distributions\/?/;
@@ -155,7 +157,9 @@ function block(guardId: string, message: string): GuardError {
 
 export function normalizeYpmcnToolName(toolName: string): string | null {
   const bareName = toolName.includes("__") ? toolName.slice(toolName.lastIndexOf("__") + 2) : toolName;
-  return YPMCN_TOOLS.has(bareName) ? bareName : null;
+  if (YPMCN_TOOLS.has(bareName)) return bareName;
+  if (PROJECT_DISTRIBUTION_TOOL_NAMES.has(bareName)) return bareName;
+  return null;
 }
 
 function resolveSessionKey(ctx?: Record<string, unknown>): string | null {
@@ -528,12 +532,59 @@ function buildRankCreatorsApproval(ctx: ToolCallContext): BeforeToolCallResult["
   return undefined;
 }
 
+function validateStagedGate(ctx: ToolCallContext): GuardError[] {
+  const workflowState = resolveWorkflowState(ctx);
+  const gateState = isObject(ctx.sessionState?.ypmcn_gate_state)
+    ? ctx.sessionState.ypmcn_gate_state as Record<string, unknown>
+    : null;
+
+  const errors: GuardError[] = [];
+
+  if (ctx.toolName === "search_creators") {
+    const pendingGate = workflowState?.pending_gate;
+    if (pendingGate && pendingGate.gate !== CLARIFY_GATE) {
+      const isConfirmed = gateState ? gateState.structured_brief_confirmed === true : false;
+      if (!isConfirmed) {
+        errors.push(block("staged-gate", pendingGate.reason));
+      }
+    }
+  }
+
+  if (PROJECT_DISTRIBUTION_TOOL_NAMES.has(ctx.toolName)) {
+    const pendingGate = workflowState?.pending_gate;
+    if (pendingGate && pendingGate.gate !== CLARIFY_GATE) {
+      const gateKey = pendingGate.gate.startsWith("confirm_")
+        ? pendingGate.gate.replace("confirm_", "") + "_confirmed"
+        : pendingGate.gate + "_confirmed";
+      const isConfirmed = gateState ? gateState[gateKey] === true : false;
+      if (!isConfirmed) {
+        errors.push(block("staged-gate", pendingGate.reason));
+      }
+    }
+  }
+
+  return errors;
+}
+
+function validateWecomRole(ctx: ToolCallContext): GuardError[] {
+  if (!PROJECT_DISTRIBUTION_TOOL_NAMES.has(ctx.toolName) && !LEGACY_PROJECT_DISTRIBUTION_TOOL_NAMES.has(ctx.toolName)) return [];
+
+  const role = ctx.operatorRole ?? ctx.sessionState?.operator_role ?? ctx.sessionState?.operatorRole;
+  if (typeof role === "string" && !WECOM_ROLES.has(role)) {
+    return [block("wecom-role", `企微发送仅限媒介和采购角色，当前角色 ${role} 无权限`)];
+  }
+
+  return [];
+}
+
 export async function runBeforeToolCallGuards(ctx: ToolCallContext): Promise<BeforeToolCallResult | void> {
   const guardErrors = [
     ...validateProtocolEnvelope(ctx),
     ...validateHighRiskGuard(ctx),
     ...validateStateGuard(ctx),
     ...validateProjectDistributionBeforeRanking(ctx),
+    ...validateStagedGate(ctx),
+    ...validateWecomRole(ctx),
   ];
 
   const blockingErrors = guardErrors.filter((error) => error.severity === "block");
@@ -805,6 +856,7 @@ export function registerHooks(api: { on: (name: string, handler: (...args: any[]
           ? (ctx as { sessionState: Record<string, unknown> }).sessionState
           : undefined,
         workflowState: sessionKey ? workflowStateBySession.get(sessionKey) : undefined,
+        operatorRole: typeof ctx?.operatorRole === "string" ? ctx.operatorRole : undefined,
       };
       if (toolName === "validate_requirement" && sessionKey) {
         completedProjectDistributionSessions.delete(sessionKey);

@@ -27,10 +27,10 @@
 
 | 阶段 | 进入证据 | 下一业务动作 |
 |---|---|---|
-| requirement | `validate_requirement` 成功 | draft 时澄清；ready 且用户确认后搜索 |
-| candidate_pool | `search_creators` 成功 | 按平台 `rank_mcns` |
-| mcn_planning | `rank_mcns` 成功 | 停止，依次确认：选中 MCN → 确认消息内容 → 发送 |
-| distribution | `create_with_distributions` 成功 | 停止，询问是否调用 `rank_creators` 精排 |
+| requirement | `validate_requirement` 成功 | draft 时澄清；ready 时停在结构化 brief 确认 |
+| candidate_pool | 结构化 brief 确认后 `search_creators` 成功 | 数据字段/筛选口径确认后按平台 `rank_mcns` |
+| mcn_planning | `rank_mcns` 成功 | 停，依次确认：MCN/野生比例 → MCN 机构名单 → 表单字段 → 企微角色权限 → 发送内容 |
+| distribution | 全部确认后 `create_with_distributions` 成功 | 停，等待回填/用户精排确认 |
 | ranking | `rank_creators` 成功并返回 `run_id` | 生成提报批次 |
 | submission | `create_submission_batch` 成功 | 等客户反馈 |
 | feedback | `record_client_feedback` 成功 | 按 `next_action` 路由 |
@@ -45,8 +45,12 @@
 |---|---|---|---|
 | 首次业务调用前 | `pre-validate-requirement` | 展示参数，询问补充（文本） | 用户确认后调用 `validate_requirement` |
 | status=draft | `requirement-draft` | 用户提供补充信息 | 携带补充消息重新调用 |
-| rank_mcns 成功后 | `mcn-select-for-wechat` | 选择需发送询价的 MCN（编号选择）| 进入消息内容确认 |
-| MCN 选中后 | `mcn-wechat-send` | 确认企微消息内容 | 调用 `create_with_distributions` |
+| status=ready | `confirm-structured-brief` | 确认结构化 brief 和数据指标 | 用户确认后调用 `search_creators` |
+| rank_mcns 成功后 | `confirm-supply-ratio` | 确认 MCN/野生比例，是否需要手扒 | 进入 MCN 名单确认 |
+| 比例确认后 | `mcn-select-for-wechat` | 选择需发送询价的 MCN（编号选择）| 进入表单字段确认 |
+| MCN 名单确认后 | `confirm-form-fields` | 确认表单字段是否覆盖 brief 数据要求 | 进入企微角色权限 gate |
+| 表单确认后 | `confirm-wecom-permission` | 企微角色权限 gate（仅媒介/采购） | 进入消息内容确认 |
+| 权限通过后 | `mcn-wechat-send` | 确认企微消息内容 | 调用 `create_with_distributions` |
 | create_with_distributions 成功后 | `proceed-to-ranking` | 是否进入达人精排 | 调用 `rank_creators` |
 | 中风险 MCN | `confirm-medium-risk` | 接受中风险继续 | 调用 `rank_mcns`（medium_risk_confirmed=true） |
 | 风险账号提报 | `confirm-risky-submission` | 接受风险账号 | 调用 `create_submission_batch`（allow_need_confirm_with_risk=true） |

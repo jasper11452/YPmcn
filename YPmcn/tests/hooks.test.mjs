@@ -40,34 +40,6 @@ function collectRegisteredEvents() {
   return events;
 }
 
-function collectRegisteredTools() {
-  return collectRegisteredToolRegistrations().map(({ tool }) => tool);
-}
-
-function collectRegisteredToolsWithConfig(config) {
-  const registrations = [];
-  plugin.register({
-    on() {},
-    registerTool(tool, options) {
-      registrations.push({ tool, options });
-    },
-    getConfig() {
-      return config;
-    },
-  });
-  return registrations.map(({ tool }) => tool);
-}
-
-function collectRegisteredToolRegistrations() {
-  const registrations = [];
-  plugin.register({
-    on() {},
-    registerTool(tool, options) {
-      registrations.push({ tool, options });
-    },
-  });
-  return registrations;
-}
 
 function registeredHandler(eventName) {
   const entry = collectRegisteredEvents().find(({ event }) => event === eventName);
@@ -123,6 +95,112 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(result.blockReason, /raw_messages/);
   });
 
+  it("blocks search_creators until the structured brief is confirmed", async () => {
+    const result = await runBeforeToolCallGuards({
+      toolName: "search_creators",
+      params: { demand_id: "demand-1", demand_version: 1 },
+      sessionState: {
+        workflow_state: {
+          phase: "requirement_ready",
+          allowed_actions: ["search_creators"],
+          pending_gate: {
+            gate: "confirm_structured_brief",
+            gate_id: "gate-brief",
+            reason: "结构化 brief 需要媒介确认后才能筛选",
+            required_fields: ["structured_brief_confirmed"],
+          },
+          platform_states: {},
+        },
+      },
+    });
+
+    assert.equal(result?.block, true);
+    assert.match(result.blockReason, /结构化 brief|confirm_structured_brief/);
+  });
+
+  it("blocks create_with_distributions until supply ratio, MCN list, form fields, and send content are confirmed", async () => {
+    const before = registeredHandler("before_tool_call");
+    const result = await before(
+      {
+        toolName: "create_with_distributions",
+        toolCallId: "distribution-gated-1",
+        params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+      },
+      {
+        sessionKey: "distribution-gated-session",
+        sessionState: {
+          workflow_state: {
+            phase: "mcn_planning",
+            allowed_actions: ["create_with_distributions"],
+            pending_gate: {
+              gate: "confirm_supply_ratio",
+              gate_id: "gate-ratio",
+              reason: "发送前必须确认 MCN/野生比例",
+              required_fields: ["supply_ratio_confirmed"],
+            },
+            platform_states: {},
+          },
+        },
+      },
+    );
+
+    assert.equal(result?.block, true);
+    assert.match(result.blockReason, /MCN\/野生比例|confirm_supply_ratio/);
+  });
+
+  it("blocks create_with_distributions for roles outside media and procurement", async () => {
+    const before = registeredHandler("before_tool_call");
+    const result = await before(
+      {
+        toolName: "create_with_distributions",
+        toolCallId: "distribution-role-1",
+        params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+      },
+      {
+        sessionKey: "distribution-role-session",
+        operatorRole: "account",
+        sessionState: {
+          ypmcn_gate_state: {
+            structured_brief_confirmed: true,
+            supply_ratio_confirmed: true,
+            mcn_list_confirmed: true,
+            form_fields_confirmed: true,
+            send_content_confirmed: true,
+          },
+        },
+      },
+    );
+
+    assert.equal(result?.block, true);
+    assert.match(result.blockReason, /媒介|采购|权限/);
+  });
+
+  it("allows create_with_distributions when all send gates and role checks pass", async () => {
+    const before = registeredHandler("before_tool_call");
+    const result = await before(
+      {
+        toolName: "create_with_distributions",
+        toolCallId: "distribution-role-ok-1",
+        params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+      },
+      {
+        sessionKey: "distribution-role-ok-session",
+        operatorRole: "media",
+        sessionState: {
+          ypmcn_gate_state: {
+            structured_brief_confirmed: true,
+            supply_ratio_confirmed: true,
+            mcn_list_confirmed: true,
+            form_fields_confirmed: true,
+            send_content_confirmed: true,
+          },
+        },
+      },
+    );
+
+    assert.equal(result?.block, undefined);
+  });
+
   it("blocks rank_creators when allowed_actions and platform state contradict each other", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "rank_creators",
@@ -143,7 +221,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(result.blockReason, /mcn_phase=waiting_return|allowed_actions 与 platform_states 矛盾/);
   });
 
-  it("asks for approval instead of requiring fields absent from the runtime schema", async () => {
+  it("blocks pending gates that have no current runtime confirmation field", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "search_creators",
       params: { demand_id: "demand-1", demand_version: 1 },
@@ -164,8 +242,8 @@ describe("YPmcn OpenClaw hook layering", () => {
       },
     });
 
-    assert.equal(result?.block, undefined);
-    assert.equal(result?.requireApproval?.title, "YPmcn 需要确认：confirm_ready");
+    assert.equal(result?.block, true);
+    assert.match(result.blockReason, /需求已校验|confirm_ready/);
   });
 
   it("uses medium_risk_confirmed from the actual rank_mcns schema", async () => {
@@ -260,7 +338,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(result.blockReason, /high_risk/);
   });
 
-  it("requires one-time approval before ranking the candidate pool", async () => {
+  it("allows rank_creators after distribution succeeds and the user confirms through text flow", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "rank_creators",
       params: { demand_id: "demand-1", demand_version: 1, platform: "xhs" },
@@ -278,9 +356,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     });
 
     assert.equal(result?.block, undefined);
-    assert.equal(result?.requireApproval?.title, "确认对候选池进行达人精排");
-    assert.equal(result?.requireApproval?.timeoutBehavior, "deny");
-    assert.deepEqual(result?.requireApproval?.allowedDecisions, ["allow-once", "deny"]);
+    assert.equal(result?.requireApproval, undefined);
   });
 
   it("blocks rank_creators before create_with_distributions sends inquiries", async () => {
@@ -436,7 +512,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(result.blockReason, /不要通过 Bash\/PowerShell\/curl|YP Action 工具|create_with_distributions/);
   });
 
-  it("requires one-time approval before a create_with_distributions tool call", async () => {
+  it("allows create_with_distributions after text confirmations and hook gate checks pass", async () => {
     const result = await registeredHandler("before_tool_call")(
       {
         toolName: "create_with_distributions",
@@ -447,12 +523,24 @@ describe("YPmcn OpenClaw hook layering", () => {
           sendWechatNotification: true,
         },
       },
-      { sessionKey: "distribution-tool-session", agentId: "main" },
+      {
+        sessionKey: "distribution-tool-session",
+        agentId: "main",
+        operatorRole: "media",
+        sessionState: {
+          ypmcn_gate_state: {
+            structured_brief_confirmed: true,
+            supply_ratio_confirmed: true,
+            mcn_list_confirmed: true,
+            form_fields_confirmed: true,
+            send_content_confirmed: true,
+          },
+        },
+      },
     );
 
     assert.equal(result?.block, undefined);
-    assert.equal(result?.requireApproval?.title, "创建项目并分发供应商前确认");
-    assert.match(result?.requireApproval?.description, /create_with_distributions/);
+    assert.equal(result?.requireApproval, undefined);
   });
 
   it("does not treat a plain text mention as a create_with_distributions call", async () => {
@@ -494,7 +582,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(expired.blockReason, /未来时间/);
   });
 
-  it("does not create a cron reminder after an approved successful distribution and waits for the user", async () => {
+  it("does not create a cron reminder after a successful distribution and waits for the user", async () => {
     const before = registeredHandler("before_tool_call");
     const after = registeredHandler("after_tool_call");
     const event = {
@@ -502,10 +590,22 @@ describe("YPmcn OpenClaw hook layering", () => {
       toolCallId: "distribution-success-1",
       params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
     };
-    const ctx = { sessionKey: "distribution-success-session", agentId: "main" };
+    const ctx = {
+      sessionKey: "distribution-success-session",
+      agentId: "main",
+      operatorRole: "media",
+      sessionState: {
+        ypmcn_gate_state: {
+          structured_brief_confirmed: true,
+          supply_ratio_confirmed: true,
+          mcn_list_confirmed: true,
+          form_fields_confirmed: true,
+          send_content_confirmed: true,
+        },
+      },
+    };
 
-    const approval = await before(event, ctx);
-    await approval.requireApproval.onResolution("allow-once");
+    assert.equal(await before(event, ctx), undefined);
     await after({ ...event, result: { exitCode: 0 } }, ctx);
     await after({ ...event, result: { exitCode: 0 } }, ctx);
 
@@ -541,21 +641,41 @@ describe("YPmcn OpenClaw hook layering", () => {
         toolCallId: "distribution-no-cron-1",
         params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
       },
-      { sessionKey: "distribution-no-cron-session", agentId: "main" },
+      {
+        sessionKey: "distribution-no-cron-session",
+        agentId: "main",
+        operatorRole: "procurement",
+        sessionState: {
+          ypmcn_gate_state: {
+            structured_brief_confirmed: true,
+            supply_ratio_confirmed: true,
+            mcn_list_confirmed: true,
+            form_fields_confirmed: true,
+            send_content_confirmed: true,
+          },
+        },
+      },
     );
 
     assert.equal(result?.block, undefined);
-    assert.equal(result?.requireApproval?.title, "创建项目并分发供应商前确认");
+    assert.equal(result?.requireApproval, undefined);
   });
 
-  it("does not schedule or lock after distribution denial or failure", async () => {
+  it("does not schedule or lock after distribution failure", async () => {
     const before = registeredHandler("before_tool_call");
     const after = registeredHandler("after_tool_call");
-    const ctx = { sessionKey: "distribution-failure-session" };
-    const denied = {
-      toolName: "create_with_distributions",
-      toolCallId: "distribution-denied-1",
-      params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+    const ctx = {
+      sessionKey: "distribution-failure-session",
+      operatorRole: "media",
+      sessionState: {
+        ypmcn_gate_state: {
+          structured_brief_confirmed: true,
+          supply_ratio_confirmed: true,
+          mcn_list_confirmed: true,
+          form_fields_confirmed: true,
+          send_content_confirmed: true,
+        },
+      },
     };
     const failed = {
       toolName: "create_with_distributions",
@@ -563,12 +683,7 @@ describe("YPmcn OpenClaw hook layering", () => {
       params: { deadline: "2099-07-06T19:00:00+08:00", supplierIds: ["supplier-1"] },
     };
 
-    const deniedApproval = await before(denied, ctx);
-    await deniedApproval.requireApproval.onResolution("deny");
-    await after({ ...denied, result: { exitCode: 0 } }, ctx);
-
-    const failedApproval = await before(failed, ctx);
-    await failedApproval.requireApproval.onResolution("allow-once");
+    assert.equal(await before(failed, ctx), undefined);
     await after({ ...failed, result: { exitCode: 1 }, error: "exit 1" }, ctx);
 
     const next = await before(
@@ -578,19 +693,30 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(next, undefined);
   });
 
-  it("allows rank_creators approval after distribution succeeds and the user continues", async () => {
+  it("allows rank_creators after distribution succeeds and the user continues", async () => {
     const before = registeredHandler("before_tool_call");
     const after = registeredHandler("after_tool_call");
     const messageReceived = registeredHandler("message_received");
-    const ctx = { sessionKey: "distribution-then-rank-session" };
+    const ctx = {
+      sessionKey: "distribution-then-rank-session",
+      operatorRole: "media",
+      sessionState: {
+        ypmcn_gate_state: {
+          structured_brief_confirmed: true,
+          supply_ratio_confirmed: true,
+          mcn_list_confirmed: true,
+          form_fields_confirmed: true,
+          send_content_confirmed: true,
+        },
+      },
+    };
     const event = {
       toolName: "create_with_distributions",
       toolCallId: "distribution-then-rank-1",
       params: { deadline: "2099-07-06T20:00:00+08:00", supplierIds: ["supplier-1"] },
     };
 
-    const approval = await before(event, ctx);
-    await approval.requireApproval.onResolution("allow-once");
+    assert.equal(await before(event, ctx), undefined);
     await after({ ...event, result: { exitCode: 0 } }, ctx);
 
     await messageReceived(
@@ -603,7 +729,7 @@ describe("YPmcn OpenClaw hook layering", () => {
       ctx,
     );
     assert.equal(ranking?.block, undefined);
-    assert.equal(ranking?.requireApproval?.title, "确认对候选池进行达人精排");
+    assert.equal(ranking?.requireApproval, undefined);
   });
 
   it("response contract guard accepts the actual common response envelope", () => {
@@ -836,10 +962,8 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(result.blockReason, /mcn_phase=waiting_return|allowed_actions 与 platform_states 矛盾/);
   });
 
-  it("plugin entry registers optional tool and message hooks", () => {
+  it("plugin entry registers hook-only runtime without local send tools", () => {
     const registered = collectRegisteredEvents().map((entry) => entry.event).sort();
-    const registrations = collectRegisteredToolRegistrations();
-    const tools = registrations.map(({ tool }) => tool.name);
 
     assert.deepEqual(registered, [
       "after_tool_call",
@@ -847,131 +971,6 @@ describe("YPmcn OpenClaw hook layering", () => {
       "message_received",
       "tool_result_persist",
     ]);
-    assert.deepEqual(tools, ["create_with_distributions"]);
-    assert.equal(registrations[0]?.options?.optional, true);
-  });
-
-  it("create_with_distributions local tool returns preview with fallback when no endpoint configured", async () => {
-    const [tool] = collectRegisteredTools();
-    // With no endpoint, it uses FALLBACK endpoint — mock fetch
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (_url, _init) => {
-      return {
-        ok: true,
-        json: async () => ({
-          success: true,
-          data: { project_id: "proj-001", message: "sent" },
-          error: null,
-          trace_id: "api-trace-001",
-        }),
-      };
-    };
-    try {
-      const result = await tool.execute("fallback-call", {
-        supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
-        deadline: "2099-08-31T18:00:00+08:00",
-        projectName: "测试项目",
-      });
-      const envelope = JSON.parse(result.content[0].text);
-
-      assert.equal(envelope.success, true);
-      assert.equal(envelope._preview.project_name, "测试项目");
-      assert.equal(envelope._preview.mode, "send");
-      assert.ok(envelope._preview.message.includes("测试项目"), "message should contain project name");
-      assert.ok(envelope._preview.message.includes("2099-08-31"), "message should contain deadline");
-      assert.equal(envelope.error, null);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it("create_with_distributions preview_only returns preview without calling API", async () => {
-    const [tool] = collectRegisteredTools();
-    const result = await tool.execute("preview-call", {
-      supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
-      supplier_names: ["123"],
-      deadline: "2099-08-31T18:00:00+08:00",
-      projectName: "预览项目",
-      notification_template: "【定制通知】\n项目：{project_name}\n截止：{deadline}",
-      preview_only: true,
-    });
-    const envelope = JSON.parse(result.content[0].text);
-
-    assert.equal(envelope.success, true);
-    assert.equal(envelope.data.mode, "preview_only");
-    assert.equal(envelope.data.project_name, "预览项目");
-    assert.equal(envelope.data.recipients.length, 1);
-    assert.equal(envelope.data.recipients[0].name, "123");
-    assert.ok(envelope.data.message.includes("【定制通知】"), "should use custom template");
-    assert.ok(envelope.data.message.includes("预览项目"), "should render project name");
-    assert.ok(envelope.data.message.includes("2099-08-31"), "should render deadline");
-    assert.equal(envelope.error, null);
-    assert.equal(envelope.trace_id, "preview");
-  });
-
-  it("create_with_distributions local tool makes real HTTP call when endpoint configured", async () => {
-    const [tool] = collectRegisteredToolsWithConfig({
-      createWithDistributionsEndpoint: "https://api.example.com/projects/create-with-distributions/",
-    });
-
-    const calls = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (url, init) => {
-      calls.push({ url, init });
-      return {
-        ok: true,
-        json: async () => ({
-          success: true,
-          data: { project_id: "proj-001", message: "企微询价已发送" },
-          error: null,
-          trace_id: "api-trace-001",
-        }),
-      };
-    };
-
-    try {
-      const result = await tool.execute("live-call", {
-        supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
-        deadline: "2099-08-31T18:00:00+08:00",
-        projectName: "真实项目",
-      });
-      const envelope = JSON.parse(result.content[0].text);
-
-      assert.equal(envelope.success, true);
-      assert.equal(envelope.data.project_id, "proj-001");
-      assert.equal(envelope.trace_id, "api-trace-001");
-      assert.equal(calls.length, 1);
-      assert.equal(calls[0].url, "https://api.example.com/projects/create-with-distributions/");
-      assert.equal(calls[0].init.method, "POST");
-      const sentBody = JSON.parse(calls[0].init.body);
-      assert.ok(Array.isArray(sentBody.supplierIds), "should include supplierIds array");
-      assert.equal(sentBody.supplierIds[0], "900be48b-983b-4300-95f1-a559457cd723");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it("create_with_distributions tool schema does not expose live-send controls", () => {
-    const [tool] = collectRegisteredTools();
-
-    assert.equal(tool.parameters.properties.execute, undefined);
-    assert.equal(tool.parameters.properties.endpointUrl, undefined);
-  });
-
-  it("create_with_distributions local tool rejects legacy live-send controls", async () => {
-    const [tool] = collectRegisteredTools();
-    const result = await tool.execute("legacy-live-call", {
-      supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
-      deadline: "2099-08-31T18:00:00+08:00",
-      execute: true,
-      endpointUrl: "http://100.107.143.45:8000/api/projects/create-with-distributions/",
-    });
-    const envelope = JSON.parse(result.content[0].text);
-
-    assert.equal(result.isError, true);
-    assert.equal(envelope.success, false);
-    assert.equal(envelope.error.code, "INVALID_ARGUMENT");
-    assert.match(envelope.error.message, /execute|endpointUrl/);
   });
 
   it("registered before hook passes validate_requirement with normal raw_messages through the JSON pre-parse", async () => {
@@ -1004,68 +1003,5 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(result?.block, true);
     assert.match(result.blockReason, /raw_messages/);
     assert.match(result.blockReason, /序列化/);
-  });
-
-  it("returns NETWORK_ERROR when endpoint is unreachable", async () => {
-    const [tool] = collectRegisteredToolsWithConfig({
-      createWithDistributionsEndpoint: "http://127.0.0.1:1/api/create/",
-    });
-
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => {
-      throw new Error("connect ECONNREFUSED 127.0.0.1:1");
-    };
-
-    try {
-      const result = await tool.execute("network-error-call", {
-        supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
-        deadline: "2099-08-31T18:00:00+08:00",
-      });
-      const envelope = JSON.parse(result.content[0].text);
-
-      assert.equal(result.isError, true);
-      assert.equal(envelope.success, false);
-      assert.equal(envelope.data, null);
-      assert.equal(envelope.error.code, "NETWORK_ERROR");
-      assert.match(envelope.error.message, /ECONNREFUSED/);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it("returns API error when backend rejects", async () => {
-    const [tool] = collectRegisteredToolsWithConfig({
-      createWithDistributionsEndpoint: "https://api.example.com/projects/create-with-distributions/",
-    });
-
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (_url, _init) => {
-      return {
-        ok: false,
-        status: 422,
-        json: async () => ({
-          success: false,
-          data: null,
-          error: { code: "VALIDATION_ERROR", message: "MCN run not found" },
-          trace_id: "api-trace-422",
-        }),
-      };
-    };
-
-    try {
-      const result = await tool.execute("api-error-call", {
-        supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
-        deadline: "2099-08-31T18:00:00+08:00",
-      });
-      const envelope = JSON.parse(result.content[0].text);
-
-      assert.equal(result.isError, true);
-      assert.equal(envelope.success, false);
-      assert.equal(envelope.data, null);
-      assert.match(envelope.error.code, /VALIDATION_ERROR/);
-      assert.match(envelope.error.message, /MCN run not found/);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
   });
 });

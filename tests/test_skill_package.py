@@ -21,6 +21,22 @@ EXPECTED_REFERENCES = {
     "frontend-response.md",
     "hook-behavior.md",
     "validation-playbook.md",
+    "form-field-mapping.md",
+}
+
+EXPECTED_TOOL_CARDS = {
+    "validate_requirement.md",
+    "search_creators.md",
+    "rank_mcns.md",
+    "manual_source_creators.md",
+    "ingest_mcn_submissions.md",
+    "rank_creators.md",
+    "create_submission_batch.md",
+    "record_client_feedback.md",
+    "audit_manual_adjustment.md",
+    "get_creator_detail.md",
+    "get_recommendation_run_detail.md",
+    "create_with_distributions.md",
 }
 
 ROUTED_REFERENCES = {
@@ -180,6 +196,36 @@ class SkillPackageTest(unittest.TestCase):
             "schema 冲突",
         ):
             self.assertIn(required, text)
+
+    def test_main_skill_uses_staged_confirmations_and_tool_cards(self):
+        text = read(SKILL)
+        joined = "\n".join(read(path) for path in source_files())
+        for required in (
+            "结构化 brief 确认",
+            "MCN/野生比例确认",
+            "表单字段确认",
+            "企微角色权限",
+            "核心算法在 MCP",
+            "references/tools/validate_requirement.md",
+            "references/form-field-mapping.md",
+        ):
+            self.assertIn(required, text)
+        for forbidden in (
+            "`validate_requirement`、`search_creators`、`rank_mcns` 连续调用",
+            "status=ready 时不暂停",
+            "ready 后连续调用",
+        ):
+            self.assertNotIn(forbidden, joined)
+
+    def test_tool_cards_exist_for_each_runtime_tool(self):
+        tools_dir = REFERENCES / "tools"
+        self.assertTrue(tools_dir.is_dir())
+        actual = {path.name for path in tools_dir.glob("*.md")}
+        self.assertEqual(EXPECTED_TOOL_CARDS, actual)
+        for tool_card in EXPECTED_TOOL_CARDS:
+            text = read(tools_dir / tool_card)
+            for required in ("何时调用", "输入", "输出成功证据", "调用后必须停在哪里", "禁止"):
+                self.assertIn(required, text)
 
     def test_tool_cheatsheet_matches_live_required_limits(self):
         text = read(REFERENCES / "mcp-tool-cheatsheet.md")

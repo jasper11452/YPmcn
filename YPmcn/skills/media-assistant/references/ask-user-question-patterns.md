@@ -31,7 +31,6 @@
 | 场景 | 原因 |
 |---|---|
 | 纯信息展示（无决策） | 直接输出结果，不等待 |
-| validate_requirement 返回 status=ready | pre-validate-requirement 已获确认，直接继续调用 search_creators |
 
 ---
 
@@ -108,8 +107,12 @@ Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；h
 |---|---|---|---|---|
 | `pre-validate-requirement` | requirement | 首次业务工具调用前 | 展示参数，询问是否有补充（文本表格） | 用户确认后调用 validate_requirement |
 | `requirement-draft` | requirement | validate_requirement 返回 status=draft | 用户补填缺失字段 | 携带补充消息重新调用 |
-| `mcn-select-for-wechat` | mcn_planning | rank_mcns 成功后 | 选择需要发送询价的 MCN（编号选择） | 进入消息内容确认 |
-| `mcn-wechat-send` | mcn_planning | 用户选中 MCN 后 | 确认企微消息文本内容 | 调用 create_with_distributions |
+| `confirm-structured-brief` | requirement | validate_requirement 返回 status=ready | 确认平台、数量、deadline、预算/内容、数据指标和表单字段影响 | 用户确认后调用 search_creators |
+| `confirm-supply-ratio` | mcn_planning | rank_mcns 成功后 | 确认 MCN 与野生比例、是否需要手扒 | 进入 MCN 名单确认 |
+| `mcn-select-for-wechat` | mcn_planning | 比例确认后 | 选择需要发送询价的 MCN（编号选择） | 进入表单字段确认 |
+| `confirm-form-fields` | mcn_planning | MCN 名单确认后 | 确认回填表单字段能否覆盖 brief 要求、增减字段 | 进入企微权限 gate |
+| `confirm-wecom-permission` | distribution | 表单字段确认后 | 企微角色权限 gate（仅媒介/采购） | 进入消息内容确认 |
+| `mcn-wechat-send` | distribution | 权限 gate 通过后 | 确认企微消息文本内容和发送对象 | 调用 create_with_distributions |
 | `proceed-to-ranking` | distribution | create_with_distributions 成功后 | 是否进入达人精排 | 调用 rank_creators |
 | `confirm-medium-risk` | mcn_planning | rank_mcns 含中风险 MCN | 接受中风险继续 | 调用 rank_mcns（medium_risk_confirmed=true） |
 | `confirm-risky-submission` | submission | create_submission_batch 含 need_confirm 账号 | 接受风险账号提报 | 调用 create_submission_batch（allow_need_confirm_with_risk=true） |
@@ -117,7 +120,7 @@ Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；h
 | `requirement-modify` | requirement | 用户实质修改 Brief | 确认是否重新校验需求 | 携带补充消息调用 validate_requirement |
 | `insufficient-supply` | candidate_pool | search_creators 供给不足 | 是否手工补量或放宽筛选 | 调用 manual_source_creators 或放宽 search_creators |
 
-**注意**: `validate_requirement` 返回 status=ready 时不暂停。`pre-validate-requirement` 阶段已确认参数；ready 后连续调用 `search_creators` → `rank_mcns`，中间不插入额外等待。
+**注意**: `validate_requirement` 返回 status=ready 后必须停在结构化 brief 确认，不再自动连续调用 `search_creators`；`rank_mcns` 后必须依次完成比例、机构名单、表单字段和企微权限四步确认。
 
 ---
 
@@ -172,7 +175,72 @@ Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；h
 
 ---
 
-### 3. `mcn-select-for-wechat` — 选择需要发送询价的 MCN
+### 2.5. `confirm-structured-brief` — 结构化 brief 确认
+
+**触发**：`validate_requirement.success=true, status=ready`。
+
+**Agent 前置发言**：
+> 需求解析完成。以下是系统理解的需求结构，请确认。
+
+**文本输出**：
+
+```markdown
+结构化需求确认：
+
+| 字段 | 解析结果 |
+|------|----------|
+| 平台 | {platforms} |
+| 数量 | {quantity} 位达人 |
+| 预算 | {budget_range} 元/篇 |
+| 截止提交 | {deadline} |
+| 内容要求 | {content_summary} |
+| 数据指标 | CPM≤{cpm} / CPE≤{cpe} / CTR≥{ctr} |
+| 影响表单字段 | CPM / CPE / CTR / 报价 / 返点 / 档期 |
+
+> ⚠️ 以上数据指标将影响后续 MCN 回填表单字段。如有其他数据要求，请现在补充。
+
+| 选项 | 说明 |
+|------|------|
+| **确认** | 确认需求理解无误，进入筛选 |
+| **补充数据指标** | 需要添加 CPM/CPC/CPE/CTR 等字段要求 |
+| **修改** | 修改解析结果，重新校验 |
+| **取消** | 停止，不继续 |
+```
+
+**处理**：
+- 用户回复「确认」→ 调 `search_creators`
+- 用户回复补充或修改内容 → 合并消息后重新调 `validate_requirement`
+
+---
+
+### 2.6. `confirm-supply-ratio` — MCN/野生比例确认
+
+**触发**：`rank_mcns.success=true`，获得 `inquiry_advice`。
+
+**Agent 前置发言**：
+> MCN 排序完成。系统判定库存量：{sufficient/insufficient}。建议 MCN 和野生比例：{ratio}。
+
+**文本输出**：
+
+```markdown
+当前供给评估：
+• 刊例硬筛候选：{rate_card_count} 位
+• 建议 MCN 来源：{mcn_ratio}%
+• 建议野生/手扒：{wild_ratio}%
+
+| 选项 | 说明 |
+|------|------|
+| **接受建议比例** | 按建议比例分配，进入 MCN 名单确认 |
+| **调整比例** | 手动调整 MCN/野生比例（如 70/30） |
+| **全 MCN** | 全部走 MCN 询价 |
+| **全野生/手扒** | 全部手扒补量 |
+```
+
+**处理**：
+- 用户回复比例选择 → 进入 MCN 机构名单确认
+- 比例确认前不得发送企微或进入名单确认
+
+---
 
 **触发**：`rank_mcns.success=true`，获得 `mcn_recommendation_items`。
 
@@ -203,7 +271,56 @@ Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；h
 
 ---
 
-### 4. `mcn-wechat-send` — 确认企微消息内容
+### 4. `confirm-form-fields` — 表单字段确认
+
+**触发**：MCN 名单已确认，准备发送企微询价前。
+
+**Agent 前置发言**：
+> 以下是根据 brief 生成的回填表单字段，请确认是否需要增减。
+
+**文本输出**：
+
+```markdown
+回填表单字段：
+
+| 字段 | 来源 | 是否必填 |
+|------|------|----------|
+| 达人账号 | 系统 | 是 |
+| 报价（含税/不含税）| brief | 是 |
+| 返点 | brief | 是 |
+| CPM | brief 数据要求 | 是 |
+| CPE | brief 数据要求 | 是 |
+| CTR | brief 数据要求 | 是 |
+| 阅读量 | 系统可选 | 否 |
+| 互动率 | 系统可选 | 否 |
+| 档期 | 系统 | 是 |
+| 是否可开票 | brief | 是 |
+
+| 选项 | 说明 |
+|------|------|
+| **确认** | 表单字段无误，进入企微权限 gate |
+| **增加字段** | 添加数据指标或其他回填项 |
+| **删除字段** | 移除不需要的字段 |
+```
+
+**处理**：
+- 用户确认后 → 进入企微角色权限 gate
+- 表单字段未确认前不得调用 `create_with_distributions`
+
+---
+
+### 4.5. `confirm-wecom-permission` — 企微角色权限 gate
+
+**触发**：所有前置确认完成，准备发送企微询价。
+
+**Agent 前置发言**：
+> 企微发送权限检查：当前角色为 {media/procurement/other}。
+
+**只允许媒介和采购角色继续**。account、策划、com 等角色调用企微发送将被直接阻断，不会到达此确认。
+
+---
+
+### 5. `mcn-wechat-send` — 确认企微消息内容
 
 **触发**：用户在 `mcn-select-for-wechat` 中选中 MCN 后。
 

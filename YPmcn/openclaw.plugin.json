@@ -11,11 +11,15 @@
     "properties": {}
   },
   "contracts": {
-    "tools": ["create_with_distributions"],
+    "tools": [
+      "create_with_distributions"
+    ],
     "mcp": {
       "url": "https://mcp.eshypdata.com/sse",
       "type": "sse"
     }
   },
-  "skills": ["./skills"]
+  "skills": [
+    "./skills"
+  ]
 }

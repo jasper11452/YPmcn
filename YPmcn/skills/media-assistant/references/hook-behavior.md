@@ -9,8 +9,9 @@
 | `before_tool_call` | `validate_requirement` | 只允许当前四个顶层字段，并校验基础类型 |
 | `before_tool_call` | 可选状态扩展存在 | 检查 `allowed_actions`、平台前置条件和高风险状态 |
 | `before_tool_call` | 两类风险 gate | 映射到当前 schema 的真实布尔确认字段 |
+| `before_tool_call` | `search_creators` | 未完成结构化 brief 确认先阻断 |
 | `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；完成后由用户文本确认决定是否继续 |
-| `before_tool_call` | `create_with_distributions` | 校验 `deadline/remindAt`，Bash/PowerShell/curl 直连阻断；用户文本确认后通过 SSE MCP 发送 |
+| `before_tool_call` | `create_with_distributions` | 校验 `deadline/remindAt`、角色权限（仅媒介/采购）、Bash/PowerShell/curl 直连阻断；确认 gate 列表（比例/名单/表单/权限/发送内容）全部通过后才放行 |
 | `after_tool_call` | YPmcn 响应 | 校验基础响应契约，合法时缓存可选状态扩展 |
 | `after_tool_call` | `create_with_distributions` 成功 | 记录企微询价已发送并进入等待锁；当前不创建 Cron 任务 |
 | `tool_result_persist` | YPmcn 响应 | 破损基础信封改写为 `INVALID_RESPONSE_CONTRACT`；明显违背原 Brief 的需求解析改写为 `INVALID_REQUIREMENT_PARSE` |
@@ -62,6 +63,7 @@ Hook 会阻断 `trace_id`、`idempotency_key`、`parsed_requirement`、`parsed_r
 ## 项目分发确认与等待
 
 - 只允许 YP Action 工具 `create_with_distributions` 执行分发；旧名 `create-with-distributions` 直接阻断并提示改名。
+- 工具参数校验通过后，将 `requireApproval` 设为 `allow-once` 单次确认；拒绝或超时均不执行。
 - `exec`、`bash`、`shell`、`powershell`、`pwsh` 中的 `create_with_distributions` 脚本或 `/api/projects/create-with-distributions/` 直连会被明确阻断；普通文本提及不触发。
 - 工具参数必须包含未来的带时区 ISO 8601 `deadline`、`remindAt`、`remind_at` 或嵌套 `project.deadline`；不得包含 `execute` 或 `endpointUrl`，发送模式和后端地址不能由 Agent 入参控制。
 - 无效时间在创建分发前阻断；Cron 服务不可用不阻断发送。
@@ -70,6 +72,29 @@ Hook 会阻断 `trace_id`、`idempotency_key`、`parsed_requirement`、`parsed_r
 - 发送模式固定为由 SSE MCP Server (`https://mcp.eshypdata.com/sse`) 处理。
 - 调用失败不进入等待锁；同一 `toolCallId` 不重复处理。
 - 收到同一会话的用户新消息前，所有工具调用均被阻断。
+
+## 企微角色权限
+
+`create_with_distributions` 调用前 Hook 必须执行角色校验：
+
+- 仅 `media`（媒介）和 `procurement`（采购）角色可继续。
+- `account`、`planner`、`com` 等角色直接阻断，提示无企微发送权限。
+- 角色信息来自会话上下文 `operatorRole` 或 `sessionState.operator_role`。
+- 后端必须额外做二次鉴权、operator_id 和 toolCallId 审计留痕；前端 gate 不能替代后端鉴权。
+
+## 发送前 gate 状态
+
+如果会话上下文 `sessionState.ypmcn_gate_state` 可用，Hook 在 `create_with_distributions` 前校验以下全部为 `true`：
+
+| gate | 含义 |
+|---|---|
+| `structured_brief_confirmed` | 结构化 brief 已由媒介确认 |
+| `supply_ratio_confirmed` | MCN/野生比例已确认 |
+| `mcn_list_confirmed` | MCN 机构名单已确认 |
+| `form_fields_confirmed` | 回填表单字段已确认 |
+| `send_content_confirmed` | 发送内容和对象已确认 |
+
+任一 gate 缺失时阻断并提示确认项。gate 状态由 Agent 层文本确认写入，不可由模型默认填 true。
 
 ## 可选状态扩展
 
