@@ -260,7 +260,10 @@ function runBeforeProjectDistributionToolCall(
   if (!parsed) return undefined;
   if (parsed.error) return { block: true, blockReason: parsed.error };
   if (!parsed.invocation) return { block: true, blockReason: `${PROJECT_DISTRIBUTION_ACTION} 调用无法解析` };
-  if (!sessionKey) return { block: true, blockReason: `${PROJECT_DISTRIBUTION_ACTION} 缺少会话标识，无法记录发送状态` };
+  if (!sessionKey) {
+    // MCP 工具调用可能不带 sessionKey，允许发送但跳过等待锁状态追踪
+    return undefined;
+  }
 
   const toolCallId = nonEmptyString(event.toolCallId) ? event.toolCallId : null;
   if (!toolCallId) return { block: true, blockReason: `${PROJECT_DISTRIBUTION_ACTION} 缺少 toolCallId，无法安全去重` };
