@@ -1,6 +1,6 @@
 {
   "name": "ypmcn-media-assistant",
-  "version": "1.0.6",
+  "version": "2.0.0",
   "description": "YPmcn 媒介助手 OpenClaw 插件：流程编排、MCP 调用、人工 gate 与达人提报管理",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,6 +35,7 @@
   "openclaw": {
     "extensions": [
       "./dist/index.js"
-    ]
+    ],
+    "hooks": "./dist/index.js"
   }
 }

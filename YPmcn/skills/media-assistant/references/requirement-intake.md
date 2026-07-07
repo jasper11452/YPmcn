@@ -1,6 +1,6 @@
 # 需求入口
 
-Brief 入口的第一条业务调用固定为 `validate_requirement`。调用前必须读取当前运行时 `inputSchema`，通过 `AskUserQuestion`（`pre-validate-requirement` 模式）向用户汇总拟传参数并等待确认。
+Brief 入口的第一条业务调用固定为 `validate_requirement`。调用前必须读取当前运行时 `inputSchema`，通过文本交互（`pre-validate-requirement` 模式）向用户汇总拟传参数并等待确认。
 
 ## 当前请求边界
 
@@ -41,9 +41,9 @@ Brief 入口的第一条业务调用固定为 `validate_requirement`。调用前
 
 ## 首次确认
 
-> **机制标签**: `AskUserQuestion` — 所有 Agent 层用户交互的单一机制
+> **机制标签**: 文本表格 — 所有 Agent 层用户交互的单一机制
 
-调用前通过 `AskUserQuestion` 按 [AskUserQuestion 模式](ask-user-question-patterns.md) `pre-validate-requirement` 向用户一次性确认：
+调用前按 [用户交互模式](ask-user-question-patterns.md) `pre-validate-requirement` 向用户一次性确认：
 
 - 目标工具：`validate_requirement`
 - 当前必填：`raw_messages`
@@ -57,8 +57,8 @@ Brief 入口的第一条业务调用固定为 `validate_requirement`。调用前
 ## 结果处理
 
 - `success=false`：展示错误摘要，停止。
-- `success=true, status=draft`：通过 `AskUserQuestion` 展示 MCP 返回的缺失字段或澄清问题（参照 `requirement-draft` 模式），不自行推断缺失项。
-- `success=true, status=ready`：简报告知平台、数量、单账号预算、返点等关键摘要，但不等待确认，直接继续调用 `search_creators` 和 `rank_mcns`。`pre-validate-requirement` 的 AskUserQuestion 确认已覆盖推进决策，ready 后不插入额外等待。
-- 用户实质修改 Brief：通过 `AskUserQuestion` 确认（参照 `requirement-modify` 模式），追加新的原始消息后再次调用 `validate_requirement`；旧 ID/版本只使用 MCP 已返回的真实值。
+- `success=true, status=draft`：通过文本表格展示 MCP 返回的缺失字段或澄清问题（参照 `requirement-draft` 模式），不自行推断缺失项。
+- `success=true, status=ready`：简报告知平台、数量、单账号预算、返点等关键摘要，但不等待确认，直接继续调用 `search_creators` 和 `rank_mcns`。`pre-validate-requirement` 的文本确认已覆盖推进决策，ready 后不插入额外等待。
+- 用户实质修改 Brief：通过文本表格确认（参照 `requirement-modify` 模式），追加新的原始消息后再次调用 `validate_requirement`；旧 ID/版本只使用 MCP 已返回的真实值。
 
 结构化需求由 MCP 在响应中返回并落库。Agent 不在请求中自行构造 `parsed_requirement`，也不因类目、金额或返点语义不确定而绕过 MCP。

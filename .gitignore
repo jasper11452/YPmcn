@@ -5,4 +5,6 @@ YPmcn/dist/
 *.tgz
 .omo/
 .codegraph/
+__pycache__/
+*.pyc
 

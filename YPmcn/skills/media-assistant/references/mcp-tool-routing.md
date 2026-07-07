@@ -25,7 +25,7 @@
 | `get_creator_detail` | 查询单个达人 | creator 详情 |
 | `get_recommendation_run_detail` | 查询/恢复推荐运行 | run、批次及所选详情 |
 
-当前没有 `get_workflow_state`。`create_with_distributions` 取代旧 create_mcn_inquiries，是当前唯一企微分发工具名；不得再调用旧工具或近似内部服务。
+当前没有 `get_workflow_state`。`create_with_distributions` 取代旧 create_mcn_inquiries，是当前唯一企微分发工具名；通过插件端点发送真实企微询价。先 `preview_only: true` 获取预览，确认后 `preview_only: false` 真实发送。不得再调用旧工具或近似内部服务。
 
 ## 主链路
 
@@ -33,25 +33,26 @@
 validate_requirement
 → search_creators
 → rank_mcns（每个平台独立）
-→ **AskUserQuestion：`mcn-wechat-send`** — 展示比例、MCN 机构、企微消息，询问是否发送
-→ create_with_distributions
-→ **AskUserQuestion：`proceed-to-ranking`** — 询问是否调用 rank_creators
+→ **文本表格：`mcn-select-for-wechat`** — 选择需发送询价的 MCN（编号选择）
+→ **文本表格：`mcn-wechat-send`** — 确认企微消息内容
+→ create_with_distributions（preview_only: false 真实发送）
+→ **文本表格：`proceed-to-ranking`** — 询问是否调用 rank_creators
 → rank_creators
 → create_submission_batch
 → record_client_feedback
 ```
 
 - `validate_requirement`、`search_creators`、`rank_mcns` 是连续段，补全需求后不要在中间等待确认。
-- `rank_mcns` 输出是建议，不是已发送询价。必须通过 `AskUserQuestion`（`mcn-wechat-send` 模式）展示当前比例、选取 MCN、拟写企微消息，等待媒介确认发送。
-- 用户确认发送后调用 `create_with_distributions` 进行企微询价；发送成功前不得调用 `rank_creators`。
-- `create_with_distributions` 成功后通过 `AskUserQuestion`（`proceed-to-ranking` 模式）再次停，等待用户确认是否精排；不要仅凭模型推断。
+- `rank_mcns` 输出是建议，不是已发送询价。必须依次通过两次文本表格确认：选中 MCN → 确认消息内容，最后才调用 `create_with_distributions` 发送。
+- 用户确认发送后调用 `create_with_distributions`（`preview_only: false`）进行企微询价；发送成功前不得调用 `rank_creators`。
+- `create_with_distributions` 成功后通过 `文本表格`（`proceed-to-ranking` 模式）再次停，等待用户确认是否精排；不要仅凭模型推断。
 - `create_submission_batch` 只使用 `rank_creators` 返回的真实 `run_id`。
 - `record_client_feedback.data.next_action` 是反馈后的业务路由；未知枚举停止并报告接入冲突。
 
 ## 风险分支
 
-- 中风险 MCN：先通过 `AskUserQuestion`（`confirm-medium-risk` 模式）获得用户明确确认，再在 `rank_mcns` 请求中传 `medium_risk_confirmed: true`。
-- 风险账号提报：先通过 `AskUserQuestion`（`confirm-risky-submission` 模式）获得用户明确确认，再在 `create_submission_batch` 请求中传 `allow_need_confirm_with_risk: true`。
+- 中风险 MCN：先通过 `文本表格`（`medium-risk-confirm` 模式）获得用户明确确认，再在 `rank_mcns` 请求中传 `medium_risk_confirmed: true`。
+- 风险账号提报：先通过 `文本表格`（`risky-submission-confirm` 模式）获得用户明确确认，再在 `create_submission_batch` 请求中传 `allow_need_confirm_with_risk: true`。
 - 不添加结构化 gate 对象；当前 schema 没有 `gate_id` 或 `confirmation_type`。
 
 ## 调整与反馈

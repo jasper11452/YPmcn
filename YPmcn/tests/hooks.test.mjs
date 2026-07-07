@@ -44,6 +44,20 @@ function collectRegisteredTools() {
   return collectRegisteredToolRegistrations().map(({ tool }) => tool);
 }
 
+function collectRegisteredToolsWithConfig(config) {
+  const registrations = [];
+  plugin.register({
+    on() {},
+    registerTool(tool, options) {
+      registrations.push({ tool, options });
+    },
+    getConfig() {
+      return config;
+    },
+  });
+  return registrations.map(({ tool }) => tool);
+}
+
 function collectRegisteredToolRegistrations() {
   const registrations = [];
   plugin.register({
@@ -837,22 +851,104 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(registrations[0]?.options?.optional, true);
   });
 
-  it("create_with_distributions local tool returns a dry-run envelope by default", async () => {
+  it("create_with_distributions local tool returns preview with fallback when no endpoint configured", async () => {
     const [tool] = collectRegisteredTools();
-    const result = await tool.execute("dry-run-call", {
-      mcn_run_id: "c2a1a52977c545cfb9e98fa8625bbc4d",
+    // With no endpoint, it uses FALLBACK endpoint — mock fetch
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, _init) => {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: { project_id: "proj-001", message: "sent" },
+          error: null,
+          trace_id: "api-trace-001",
+        }),
+      };
+    };
+    try {
+      const result = await tool.execute("fallback-call", {
+        supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
+        deadline: "2099-08-31T18:00:00+08:00",
+        projectName: "测试项目",
+      });
+      const envelope = JSON.parse(result.content[0].text);
+
+      assert.equal(envelope.success, true);
+      assert.equal(envelope._preview.project_name, "测试项目");
+      assert.equal(envelope._preview.mode, "send");
+      assert.ok(envelope._preview.message.includes("测试项目"), "message should contain project name");
+      assert.ok(envelope._preview.message.includes("2099-08-31"), "message should contain deadline");
+      assert.equal(envelope.error, null);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("create_with_distributions preview_only returns preview without calling API", async () => {
+    const [tool] = collectRegisteredTools();
+    const result = await tool.execute("preview-call", {
+      supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
+      supplier_names: ["123"],
       deadline: "2099-08-31T18:00:00+08:00",
-      projectName: "测试项目",
+      projectName: "预览项目",
+      notification_template: "【定制通知】\n项目：{project_name}\n截止：{deadline}",
+      preview_only: true,
     });
     const envelope = JSON.parse(result.content[0].text);
 
     assert.equal(envelope.success, true);
-    assert.equal(envelope.data.dry_run, true);
-    assert.equal(envelope.data.endpointUrl, undefined);
-    assert.equal(envelope.data.payload.mcn_run_id, "c2a1a52977c545cfb9e98fa8625bbc4d");
-    assert.equal(envelope.data.payload.remindAt, "2099-08-31T18:00:00+08:00");
+    assert.equal(envelope.data.mode, "preview_only");
+    assert.equal(envelope.data.project_name, "预览项目");
+    assert.equal(envelope.data.recipients.length, 1);
+    assert.equal(envelope.data.recipients[0].name, "123");
+    assert.ok(envelope.data.message.includes("【定制通知】"), "should use custom template");
+    assert.ok(envelope.data.message.includes("预览项目"), "should render project name");
+    assert.ok(envelope.data.message.includes("2099-08-31"), "should render deadline");
     assert.equal(envelope.error, null);
-    assert.equal(envelope.trace_id, "local-dry-run");
+    assert.equal(envelope.trace_id, "preview");
+  });
+
+  it("create_with_distributions local tool makes real HTTP call when endpoint configured", async () => {
+    const [tool] = collectRegisteredToolsWithConfig({
+      createWithDistributionsEndpoint: "https://api.example.com/projects/create-with-distributions/",
+    });
+
+    const calls = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: { project_id: "proj-001", message: "企微询价已发送" },
+          error: null,
+          trace_id: "api-trace-001",
+        }),
+      };
+    };
+
+    try {
+      const result = await tool.execute("live-call", {
+        supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
+        deadline: "2099-08-31T18:00:00+08:00",
+        projectName: "真实项目",
+      });
+      const envelope = JSON.parse(result.content[0].text);
+
+      assert.equal(envelope.success, true);
+      assert.equal(envelope.data.project_id, "proj-001");
+      assert.equal(envelope.trace_id, "api-trace-001");
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url, "https://api.example.com/projects/create-with-distributions/");
+      assert.equal(calls[0].init.method, "POST");
+      const sentBody = JSON.parse(calls[0].init.body);
+      assert.ok(Array.isArray(sentBody.supplierIds), "should include supplierIds array");
+      assert.equal(sentBody.supplierIds[0], "900be48b-983b-4300-95f1-a559457cd723");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("create_with_distributions tool schema does not expose live-send controls", () => {
@@ -865,7 +961,7 @@ describe("YPmcn OpenClaw hook layering", () => {
   it("create_with_distributions local tool rejects legacy live-send controls", async () => {
     const [tool] = collectRegisteredTools();
     const result = await tool.execute("legacy-live-call", {
-      mcn_run_id: "c2a1a52977c545cfb9e98fa8625bbc4d",
+      supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
       deadline: "2099-08-31T18:00:00+08:00",
       execute: true,
       endpointUrl: "http://100.107.143.45:8000/api/projects/create-with-distributions/",
@@ -908,5 +1004,68 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(result?.block, true);
     assert.match(result.blockReason, /raw_messages/);
     assert.match(result.blockReason, /序列化/);
+  });
+
+  it("returns NETWORK_ERROR when endpoint is unreachable", async () => {
+    const [tool] = collectRegisteredToolsWithConfig({
+      createWithDistributionsEndpoint: "http://127.0.0.1:1/api/create/",
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:1");
+    };
+
+    try {
+      const result = await tool.execute("network-error-call", {
+        supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
+        deadline: "2099-08-31T18:00:00+08:00",
+      });
+      const envelope = JSON.parse(result.content[0].text);
+
+      assert.equal(result.isError, true);
+      assert.equal(envelope.success, false);
+      assert.equal(envelope.data, null);
+      assert.equal(envelope.error.code, "NETWORK_ERROR");
+      assert.match(envelope.error.message, /ECONNREFUSED/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("returns API error when backend rejects", async () => {
+    const [tool] = collectRegisteredToolsWithConfig({
+      createWithDistributionsEndpoint: "https://api.example.com/projects/create-with-distributions/",
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, _init) => {
+      return {
+        ok: false,
+        status: 422,
+        json: async () => ({
+          success: false,
+          data: null,
+          error: { code: "VALIDATION_ERROR", message: "MCN run not found" },
+          trace_id: "api-trace-422",
+        }),
+      };
+    };
+
+    try {
+      const result = await tool.execute("api-error-call", {
+        supplierIds: ["900be48b-983b-4300-95f1-a559457cd723"],
+        deadline: "2099-08-31T18:00:00+08:00",
+      });
+      const envelope = JSON.parse(result.content[0].text);
+
+      assert.equal(result.isError, true);
+      assert.equal(envelope.success, false);
+      assert.equal(envelope.data, null);
+      assert.match(envelope.error.code, /VALIDATION_ERROR/);
+      assert.match(envelope.error.message, /MCN run not found/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

@@ -33,13 +33,19 @@ npm install
 npm run pack:yp
 ```
 
-命令会先构建，再在上级目录生成 `ypmcn-media-assistant-1.0.5.tgz`。在 YP Action 中打开「设置 → 插件 → 安装插件 → 本地路径」，选择该 `.tgz` 文件。
+命令会先构建，再在上级目录生成 `ypmcn-media-assistant-2.0.0.tgz`。在 OpenCode/YP Action 中安装插件后，还需在 `opencode.json` 配置 SSE MCP Server：
 
-每次重新打包前必须先更新版本号，并保持 `package.json`、`package-lock.json`、`openclaw.plugin.json` 和 `.claude-plugin/plugin.json` 版本一致；否则新包可能被 YP Action 当成旧版本处理。
+```json
+"mcp": {
+  "ypmcn": {
+    "type": "remote",
+    "url": "https://mcp.eshypdata.com/sse",
+    "enabled": true
+  }
+}
+```
 
-不要直接填写源码目录 `YPmcn/`：YP Action 2026.6.1 会用本地来源路径反推插件 ID，而源码目录名与 manifest ID `ypmcn-media-assistant` 不同，会在 OpenClaw 已完成 staging 后误报 `Plugin installed but could not determine plugin ID`。使用上述同名 `.tgz` 是稳定安装方式。插件入口为 `openclaw.plugin.json`。
-
-`create_with_distributions` 是 optional 工具。安装后如果运行时提示「工具未暴露」，说明尚未在 YP Action/OpenClaw 的 `tools.alsoAllow` 中增量允许该工具；这是安全策略，不是 MCP 未启动。正式发送企微询价前需放行 `create_with_distributions`，否则流程会停在询价前，不能继续精排或提报。不要用 `tools.allow` 只写这一项，否则可能把其他工具收窄掉。
+`create_with_distributions` 工具由 MCP Server 提供，无需 `tools.alsoAllow`。
 
 ## Hooks 说明
 
@@ -47,14 +53,14 @@ npm run pack:yp
 
 ### YP Action 通知能力
 
-当前插件不直接调用独立的 YP Action 通知 API。1.0.5 安全版将 `create_with_distributions` 注册为 optional 工具，默认不暴露；需通过 `tools.alsoAllow` 增量放行后才会出现在 Agent 可用工具中。本地工具只返回 dry-run，不接受 Agent 入参控制真实发送地址或执行开关。插件负责审批、阻断 Bash/PowerShell/curl 绕过、校验 `deadline/remindAt`、记录成功状态并等待用户继续。当前不创建 Cron/提醒任务。
+当前插件将 `create_with_distributions` 注册为钩子拦截工具，真正的工具实现由 SSE MCP Server 提供：`https://mcp.eshypdata.com/sse`。插件自身不持有 API Key、不作 HTTP 调用；只负责 hooks 拦截、参数校验和状态管理。
 
 | Hook | 匹配 | 行为 |
 |---|---|---|
 | `before_tool_call` | `validate_requirement` | 只允许 `raw_messages`、`project_context`、`existing_demand_id`、`existing_demand_version`，并校验基础类型 |
 | `before_tool_call` | 风险 gate | 使用 `medium_risk_confirmed` / `allow_need_confirm_with_risk`，不要求 schema 外字段 |
-| `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；通过后仍要求 `allow-once` 审批 |
-| `before_tool_call` | `create_with_distributions` | 只支持 YP Action 工具形态；Bash/PowerShell/curl 直连会被阻断；校验 `deadline/remindAt`，要求 `allow-once` 审批，等待期间阻断所有工具 |
+| `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；完成后由用户文本确认决定是否继续 |
+| `before_tool_call` | `create_with_distributions` | 校验 `deadline/remindAt`，Bash/PowerShell/curl 直连阻断；用户文本确认后通过 SST MCP 发送 |
 | `before_tool_call` | 可选状态扩展存在 | 校验 `allowed_actions`、平台前置条件和高风险状态 |
 | `after_tool_call` | 所有 YPmcn 结果 | 校验基础响应契约并缓存可选状态扩展 |
 | `after_tool_call` | 项目分发成功 | 记录企微询价已发送并进入等待锁；当前不创建 Cron 任务 |

@@ -1,22 +1,21 @@
 {
   "id": "ypmcn-media-assistant",
-  "version": "1.0.6",
-  "description": "YPmcn 媒介助手：按业务阶段调用独立 MCP，以人工 gate、短回复和可恢复状态管理达人提报流程。Agent 只负责阶段路由、MCP 调用、人工 gate 和短回复；需求解析、筛选、排序、写入、版本校验与数据库事实查询全部由独立接入的 MCP 实现。",
+  "version": "2.0.0",
+  "description": "YPmcn 媒介助手：按业务阶段调用 MCP（SSE），以人工 gate、短回复和可恢复状态管理达人提报流程。create_with_distributions 工具由 SSE MCP Server 提供，本插件仅负责 hooks 拦截。",
   "author": {
     "name": "Jasper"
   },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {
-      "createWithDistributionsEndpoint": {
-        "type": "string",
-        "description": "Reserved endpoint for a future live-send implementation. Version 1.0.5 does not use this value."
-      }
-    }
+    "properties": {}
   },
   "contracts": {
-    "tools": ["create_with_distributions"]
+    "tools": ["create_with_distributions"],
+    "mcp": {
+      "url": "https://mcp.eshypdata.com/sse",
+      "type": "sse"
+    }
   },
   "skills": ["./skills"]
 }

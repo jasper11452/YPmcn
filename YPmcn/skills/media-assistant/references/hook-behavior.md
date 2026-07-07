@@ -9,8 +9,8 @@
 | `before_tool_call` | `validate_requirement` | 只允许当前四个顶层字段，并校验基础类型 |
 | `before_tool_call` | 可选状态扩展存在 | 检查 `allowed_actions`、平台前置条件和高风险状态 |
 | `before_tool_call` | 两类风险 gate | 映射到当前 schema 的真实布尔确认字段 |
-| `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；通过后仍强制单次审批 |
-| `before_tool_call` | `create_with_distributions` | 校验未来 `deadline/remindAt` 并强制单次审批；等待期间阻断所有工具 |
+| `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；完成后由用户文本确认决定是否继续 |
+| `before_tool_call` | `create_with_distributions` | 校验 `deadline/remindAt`，Bash/PowerShell/curl 直连阻断；用户文本确认后通过 SSE MCP 发送 |
 | `after_tool_call` | YPmcn 响应 | 校验基础响应契约，合法时缓存可选状态扩展 |
 | `after_tool_call` | `create_with_distributions` 成功 | 记录企微询价已发送并进入等待锁；当前不创建 Cron 任务 |
 | `tool_result_persist` | YPmcn 响应 | 破损基础信封改写为 `INVALID_RESPONSE_CONTRACT`；明显违背原 Brief 的需求解析改写为 `INVALID_REQUIREMENT_PARSE` |
@@ -18,18 +18,9 @@
 
 ## requireApproval 覆盖清单
 
-当前插件所有通过 `before_tool_call` 钩子返回 `requireApproval` 的入口，**单一可信源**在 `src/index.ts`：
+当前插件不再为 `create_with_distributions` 或 `rank_creators` 返回 `requireApproval`。这两个入口只依赖 Agent 层文本表格确认；确认后 hook 只做参数、状态和直连绕过校验。
 
-| 触发场景 | 钩子函数 | 源位置 | `allowedDecisions` | 触发条件 |
-|---|---|---|---|---|
-| `create_with_distributions` 工具调用 | `runBeforeProjectDistributionToolCall` | `src/index.ts:275-292` | `["allow-once", "deny"]` | deadline/remindAt 校验通过 |
-| 所有 pending gate（非 clarify） | `buildPendingGateApproval` | `src/index.ts:507-527` | `["allow-once", "deny"]` | workflow_state.pending_gate 存在且非 clarify_requirement |
-| `rank_creators` 工具调用 | `buildRankCreatorsApproval` | `src/index.ts:529-539` | `["allow-once", "deny"]` | 完成 create_with_distributions 后 |
-
-补全行为：
-- 所有 requireApproval 入口 `timeoutBehavior` 为 `"deny"`，超时按拒绝处理
-- 不可逆操作（项目分发、补量、风险提报）使用 `["allow-once", "deny"]` 而非 `["allow-once", "allow-always", "deny"]`，避免误点永久免审批
-- 审批只接受本次放行；`allow-always` 由插件在 `onResolution` 回调中自行持久化（当前未持久化）
+仍可能返回 `requireApproval` 的入口只有没有对应业务字段的 pending gate；生产 schema 已有真实布尔字段的风险确认继续走工具参数。
 
 ## `validate_requirement` 请求
 
@@ -58,25 +49,25 @@ Hook 会阻断 `trace_id`、`idempotency_key`、`parsed_requirement`、`parsed_r
 - `confirm_medium_risk`：只有 `rank_mcns.medium_risk_confirmed === true` 才可继续。
 - `confirm_risky_submission`：只有 `create_submission_batch.allow_need_confirm_with_risk === true` 才可继续。
 
-这两个值必须来自用户本轮明确确认。对于没有对应业务字段的其他人工 gate，hook 返回 YP Action `requireApproval`，不要求 Agent 虚构 `gate_id`、`confirmation_type` 或 `operator_id`。
+这两个值必须来自用户本轮明确确认。对于没有对应业务字段的其他人工 gate，hook 不要求 Agent 虚构 `gate_id`、`confirmation_type` 或 `operator_id`；当前链路优先停下报告 `integration_required`。
 
 ## 候选池精排确认
 
 - `rank_creators` 前必须先有 `create_with_distributions` 成功发送企微询价的会话证据。
 - 若企微询价未发送成功，hook 直接阻断 `rank_creators`，提示先调用 `create_with_distributions`。
-- `rank_creators` 前还必须通过状态/风险检查；如果检查失败直接阻断，不进入审批。
-- 检查通过后仍返回 YP Action `requireApproval`，标题为“确认对候选池进行达人精排”。
-- 审批只允许 `allow-once` 或 `deny`，超时按拒绝处理；不得使用 `allow-always`。
-- 未获得用户确认时不得调用 `rank_creators`，也不得用 prompt 约束替代 hook。
+- `rank_creators` 前还必须通过状态/风险检查；如果检查失败直接阻断。
+- 检查通过后不返回 YP Action `requireApproval`；用户文本确认即为继续精排的唯一交互。
+- 未获得用户确认时不得调用 `rank_creators`。
 
 ## 项目分发确认与等待
 
-- 只允许 YP Action 工具 `create_with_distributions` 进入审批；旧名 `create-with-distributions` 直接阻断并提示改名。
-- `exec`、`bash`、`shell`、`powershell`、`pwsh` 中的 `create_with_distributions` 脚本或 `/api/projects/create-with-distributions/` 直连会被明确阻断，避免出现审批网关不可用后的绕行；普通文本提及不触发。
+- 只允许 YP Action 工具 `create_with_distributions` 执行分发；旧名 `create-with-distributions` 直接阻断并提示改名。
+- `exec`、`bash`、`shell`、`powershell`、`pwsh` 中的 `create_with_distributions` 脚本或 `/api/projects/create-with-distributions/` 直连会被明确阻断；普通文本提及不触发。
 - 工具参数必须包含未来的带时区 ISO 8601 `deadline`、`remindAt`、`remind_at` 或嵌套 `project.deadline`；不得包含 `execute` 或 `endpointUrl`，发送模式和后端地址不能由 Agent 入参控制。
 - 无效时间在创建分发前阻断；Cron 服务不可用不阻断发送。
-- 用户确认前不得创建分发或发送通知。审批只允许 `allow-once` 或 `deny`，超时按拒绝处理。
+- 用户确认前不得创建分发或发送通知；用户文本确认后直接执行，不再触发 OpenClaw `requireApproval`。
 - 调用成功后，只记录该会话已完成企微询价，并立即进入等待锁；当前不创建 Cron/`agentTurn` 提醒任务。
+- 发送模式固定为由 SSE MCP Server (`https://mcp.eshypdata.com/sse`) 处理。
 - 调用失败不进入等待锁；同一 `toolCallId` 不重复处理。
 - 收到同一会话的用户新消息前，所有工具调用均被阻断。
 

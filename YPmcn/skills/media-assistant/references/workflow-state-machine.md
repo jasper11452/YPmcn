@@ -29,7 +29,7 @@
 |---|---|---|
 | requirement | `validate_requirement` 成功 | draft 时澄清；ready 且用户确认后搜索 |
 | candidate_pool | `search_creators` 成功 | 按平台 `rank_mcns` |
-| mcn_planning | `rank_mcns` 成功 | 停止，展示比例、MCN 机构、企微消息，询问是否发送 |
+| mcn_planning | `rank_mcns` 成功 | 停止，依次确认：选中 MCN → 确认消息内容 → 发送 |
 | distribution | `create_with_distributions` 成功 | 停止，询问是否调用 `rank_creators` 精排 |
 | ranking | `rank_creators` 成功并返回 `run_id` | 生成提报批次 |
 | submission | `create_submission_batch` 成功 | 等客户反馈 |
@@ -39,23 +39,24 @@
 
 ## 人工确认
 
-所有 Agent 层暂停点统一使用 `AskUserQuestion`，不再使用自由文本对话。完整模式定义见 [AskUserQuestion 模式](ask-user-question-patterns.md)。
+所有 Agent 层暂停点统一使用文本表格输出，用户在聊天中打字回复选择。完整模式定义见 [用户交互模式](ask-user-question-patterns.md)。
 
-| 暂停点 | AskUserQuestion 模式 | 决策 | 下一动作 |
+| 暂停点 | 交互模式 | 决策 | 下一动作 |
 |---|---|---|---|
-| 首次业务调用前 | `pre-validate-requirement` | 确认目标工具、必填字段、拟传值 | 调用 `validate_requirement` |
+| 首次业务调用前 | `pre-validate-requirement` | 展示参数，询问补充（文本） | 用户确认后调用 `validate_requirement` |
 | status=draft | `requirement-draft` | 用户提供补充信息 | 携带补充消息重新调用 |
-| rank_mcns 成功后 | `mcn-wechat-send` | 是否发送企微询价 | 调用 `create_with_distributions` |
+| rank_mcns 成功后 | `mcn-select-for-wechat` | 选择需发送询价的 MCN（编号选择）| 进入消息内容确认 |
+| MCN 选中后 | `mcn-wechat-send` | 确认企微消息内容 | 调用 `create_with_distributions` |
 | create_with_distributions 成功后 | `proceed-to-ranking` | 是否进入达人精排 | 调用 `rank_creators` |
 | 中风险 MCN | `confirm-medium-risk` | 接受中风险继续 | 调用 `rank_mcns`（medium_risk_confirmed=true） |
 | 风险账号提报 | `confirm-risky-submission` | 接受风险账号 | 调用 `create_submission_batch`（allow_need_confirm_with_risk=true） |
 | 用户修改需求 | `requirement-modify` | 确认重新校验 | 重新调用 `validate_requirement` |
 | 供给不足 | `insufficient-supply` | 补量/放宽/继续 | 按选择调用对应工具 |
 
-- 每个 AskUserQuestion 调用前，Agent 先给一句简短结论（当前阶段结果 + 需要用户决策什么）。
+- 每次文本表格输出前，Agent 先给一句简短结论（当前阶段结果 + 需要用户决策什么）。
 - 用户选择「确认/继续」类选项后，Agent 立即执行对应业务动作，不二次询问。
 - 用户选择「取消/拒绝」后，Agent 停止，不得自动推进。
-- `AskUserQuestion` 处理「用户想怎么做」；hook 层 `requireApproval` 处理「系统允不允许」。两者独立，不可互相替代。
+- 文本表格交互处理「用户想怎么做」；hook 层 `requireApproval` 处理「系统允不允许」。两者独立，不可互相替代。
 
 ## 项目分发等待
 

@@ -37,7 +37,7 @@ npm test
 
 用 mock 验证：
 
-1. 第一条业务调用前，Agent 先读取运行时 schema 并通过 `AskUserQuestion`（`pre-validate-requirement` 模式）向用户汇总目标工具、必填字段、拟传值和歧义项。
+1. 第一条业务调用前，Agent 先读取运行时 schema 并以文本形式（`pre-validate-requirement` 模式）向用户汇总目标工具、必填字段、拟传值和歧义项。
 2. 用户「确认调用」前不调用业务工具。
 3. 请求体只使用 schema 已声明字段，不用试错调用探测参数。
 4. ready/draft/失败分别按前端回复规范呈现，不泄露完整 JSON。

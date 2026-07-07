@@ -7,6 +7,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
  * - validate_requirement 只校验当前运行时 inputSchema 已暴露的字段。
  * - workflow_state 存在时再执行状态、高风险和 gate 防护，不伪造未部署字段。
  * - MCP 响应以 {success, data, error, trace_id} 为基础契约；可选状态扩展按需校验。
+ * - create_with_distributions 工具由 SSE MCP Server (https://mcp.eshypdata.com/sse) 提供，插件仅做 hooks 拦截。
  */
 
 export interface ToolCallContext {
@@ -96,46 +97,6 @@ const EXEC_TOOL_NAMES = new Set(["exec", "bash", "shell", "powershell", "pwsh"])
 const ISO_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const PROJECT_DISTRIBUTION_INVOCATION = /(?:^|(?:&&|\|\||;|\|)\s*)(?:(?:uv\s+run|npx|node|(?:[^\s"';&|]*\/)?python(?:3(?:\.\d+)?)?|powershell|pwsh)\s+)?["']?(?:[^\s"';&|]*\/)?create[-_]with[-_]distributions(?:\.(?:py|js|mjs|ts|ps1|sh))?["']?(?=\s|$)/;
 const PROJECT_DISTRIBUTION_API_INVOCATION = /\/api\/projects\/create-with-distributions\/?/;
-
-interface CreateWithDistributionsParams {
-  mcn_run_id: string;
-  deadline: string;
-  remindAt?: string;
-  projectName?: string;
-  description?: string;
-  columns?: string[];
-  sendWechatNotification?: boolean;
-}
-
-const createWithDistributionsParameters = {
-  type: "object",
-  required: ["mcn_run_id", "deadline"],
-  additionalProperties: false,
-  properties: {
-    mcn_run_id: {
-      type: "string",
-      description: "rank_mcns 返回的 MCN 推荐运行 ID，由后端用它查询供应商映射。",
-    },
-    deadline: {
-      type: "string",
-      description: "未来的带时区 ISO 8601 时间，例如 2026-08-31T18:00:00+08:00。",
-    },
-    remindAt: {
-      type: "string",
-      description: "可选提醒时间；未传时默认使用 deadline。",
-    },
-    projectName: { type: "string" },
-    description: { type: "string" },
-    columns: {
-      type: "array",
-      items: { type: "string" },
-    },
-    sendWechatNotification: {
-      type: "boolean",
-      default: true,
-    },
-  },
-};
 
 export interface ProjectDistributionInvocation {
   actionKey: string;
@@ -284,89 +245,6 @@ function waitingBlockReason(waiting: WaitingProjectDistributionSession): string 
   return "项目分发已执行；当前必须停止并等待用户明确继续";
 }
 
-function normalizeCreateWithDistributionsParams(params: Record<string, unknown>): CreateWithDistributionsParams | { error: string } {
-  const mcnRunId = params.mcn_run_id;
-  if (!nonEmptyString(mcnRunId)) return { error: "mcn_run_id 必须是非空字符串" };
-
-  const deadline = params.deadline;
-  const parsedDeadline = validateReminderTime(deadline, "deadline 必填");
-  if (parsedDeadline.error || !parsedDeadline.invocation) return { error: parsedDeadline.error ?? "deadline 无法解析" };
-  if (!nonEmptyString(deadline)) return { error: "deadline 必须是非空字符串" };
-
-  const remindAt = params.remindAt;
-  if (remindAt !== undefined) {
-    const parsedRemindAt = validateReminderTime(remindAt, "remindAt 必填");
-    if (parsedRemindAt.error || !parsedRemindAt.invocation) return { error: parsedRemindAt.error ?? "remindAt 无法解析" };
-  }
-
-  const columns = params.columns;
-  if (columns !== undefined && (!Array.isArray(columns) || !columns.every((item) => typeof item === "string"))) {
-    return { error: "columns 必须是字符串数组" };
-  }
-
-  const sendWechatNotification = params.sendWechatNotification;
-  if (sendWechatNotification !== undefined && typeof sendWechatNotification !== "boolean") {
-    return { error: "sendWechatNotification 必须是布尔值" };
-  }
-
-  if (params.execute !== undefined || params.endpointUrl !== undefined) {
-    return { error: "create_with_distributions 不接受 execute 或 endpointUrl；发送模式和后端地址不得由 Agent 入参控制" };
-  }
-
-  return {
-    mcn_run_id: mcnRunId,
-    deadline,
-    remindAt: nonEmptyString(remindAt) ? remindAt : undefined,
-    projectName: nonEmptyString(params.projectName) ? params.projectName : undefined,
-    description: nonEmptyString(params.description) ? params.description : undefined,
-    columns: Array.isArray(columns) ? columns : undefined,
-    sendWechatNotification: typeof sendWechatNotification === "boolean" ? sendWechatNotification : true,
-  };
-}
-
-function buildCreateWithDistributionsPayload(params: CreateWithDistributionsParams): Record<string, unknown> {
-  return {
-    mcn_run_id: params.mcn_run_id,
-    deadline: params.deadline,
-    remindAt: params.remindAt ?? params.deadline,
-    projectName: params.projectName,
-    description: params.description,
-    columns: params.columns,
-    sendWechatNotification: params.sendWechatNotification ?? true,
-  };
-}
-
-async function executeCreateWithDistributionsTool(params: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
-  const normalized = normalizeCreateWithDistributionsParams(params);
-  if ("error" in normalized) {
-    return {
-      isError: true,
-      content: [{ type: "text", text: JSON.stringify({ success: false, data: null, error: { code: "INVALID_ARGUMENT", message: normalized.error }, trace_id: null }, null, 2) }],
-    };
-  }
-
-  const payload = buildCreateWithDistributionsPayload(normalized);
-  return {
-    content: [{ type: "text", text: JSON.stringify({ success: true, data: { dry_run: true, payload }, error: null, trace_id: "local-dry-run" }, null, 2) }],
-  };
-}
-
-function registerCreateWithDistributionsTool(api: { registerTool?: (tool: unknown, options?: unknown) => void; logger?: { info: (msg: string) => void } }): void {
-  if (typeof api.registerTool !== "function") {
-    api.logger?.info("[ypmcn-media-assistant] registerTool not available, skipping create_with_distributions");
-    return;
-  }
-  api.registerTool({
-    name: PROJECT_DISTRIBUTION_ACTION,
-    description: "项目创建与供应商分发审批工具；1.0.5 安全版仅 dry-run，不接受 Agent 控制发送地址或执行开关。",
-    parameters: createWithDistributionsParameters,
-    async execute(_id: string, params: Record<string, unknown>) {
-      return executeCreateWithDistributionsTool(isObject(params) ? params : {});
-    },
-  });
-  api.logger?.info("[ypmcn-media-assistant] registered create_with_distributions tool");
-}
-
 function runBeforeProjectDistributionToolCall(
   event: Record<string, unknown>,
   ctx?: Record<string, unknown>,
@@ -396,7 +274,7 @@ function runBeforeProjectDistributionToolCall(
   });
 
   // requireApproval bypassed — gateway pairing not available in YP Action
-  // Agent-level AskUserQuestion (mcn-wechat-send) provides user confirmation
+  // Agent-level text table confirmation (mcn-wechat-send) provides user confirmation
   return undefined;
 }
 
@@ -429,6 +307,12 @@ async function runAfterProjectDistributionToolCall(event: Record<string, unknown
     return;
   }
   if (!projectDistributionToolCallSucceeded(event)) {
+    pendingProjectDistributions.delete(toolCallId);
+    return;
+  }
+
+  // preview_only 模式不触发等待锁，允许后续真实发送
+  if (params.preview_only === true) {
     pendingProjectDistributions.delete(toolCallId);
     return;
   }
@@ -637,7 +521,7 @@ function buildPendingGateApproval(ctx: ToolCallContext, workflowState: WorkflowS
 function buildRankCreatorsApproval(ctx: ToolCallContext): BeforeToolCallResult["requireApproval"] | undefined {
   if (ctx.toolName !== "rank_creators") return undefined;
   // requireApproval bypassed — gateway pairing not available in YP Action
-  // Agent-level AskUserQuestion (proceed-to-ranking) provides user confirmation
+  // Agent-level text table confirmation (proceed-to-ranking) provides user confirmation
   return undefined;
 }
 
@@ -657,12 +541,7 @@ export async function runBeforeToolCallGuards(ctx: ToolCallContext): Promise<Bef
     };
   }
 
-  const workflowState = resolveWorkflowState(ctx);
-  const approval = buildPendingGateApproval(ctx, workflowState);
-  if (approval) return { requireApproval: approval };
-
-  const rankCreatorsApproval = buildRankCreatorsApproval(ctx);
-  if (rankCreatorsApproval) return { requireApproval: rankCreatorsApproval };
+  return undefined;
 }
 
 export function responseContractGuard(result: ToolResultContext): GuardError[] {
@@ -1013,7 +892,6 @@ const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
   register(api) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const a = api as any;
-    registerCreateWithDistributionsTool(a);
     registerHooks(a);
   },
 });
