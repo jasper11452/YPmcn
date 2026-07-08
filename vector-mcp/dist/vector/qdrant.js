@@ -1,13 +1,3 @@
-/**
- * Qdrant collection schema types and fake client for the vector MCP layer.
- *
- * No real Qdrant network client — this module defines interfaces and an
- * in-memory fake so later todos can wire a real Qdrant instance.
- */
-/**
- * Build a QdrantCollectionSchema from a QdrantConfig.
- * Payload indexes cover identity fields needed for filtered search.
- */
 export function buildCollectionSchema(config) {
     return {
         collectionName: config.collectionName,
@@ -22,11 +12,35 @@ export function buildCollectionSchema(config) {
         ],
     };
 }
-/**
- * In-memory fake Qdrant client for testing.
- * Stores ensured schemas and upserted points.
- * Can simulate unavailability via `{ unavailable: true }`.
- */
+function tokenize(text) {
+    const tokens = [];
+    const words = text.toLowerCase().split(/[\s,，。！？、；：""''（）\[\]{}<>|\\/`~!@#$%^&*()+=\-_]+/).filter(Boolean);
+    tokens.push(...words);
+    for (const ch of text) {
+        if (ch.trim().length > 0) {
+            tokens.push(ch);
+        }
+    }
+    return tokens;
+}
+function computeBM25Score(queryTokens, docTokens, idfMap, avgDocLen, k1, b) {
+    const docLen = docTokens.length;
+    let score = 0;
+    const tfMap = new Map();
+    for (const t of docTokens) {
+        tfMap.set(t, (tfMap.get(t) ?? 0) + 1);
+    }
+    for (const qt of queryTokens) {
+        const idf = idfMap.get(qt) ?? 0;
+        if (idf === 0)
+            continue;
+        const tf = tfMap.get(qt) ?? 0;
+        const numerator = tf * (k1 + 1);
+        const denominator = tf + k1 * (1 - b + b * (docLen / avgDocLen));
+        score += idf * (numerator / denominator);
+    }
+    return score;
+}
 export class FakeQdrantClient {
     schemas = [];
     points = [];
@@ -47,7 +61,6 @@ export class FakeQdrantClient {
     }
     async upsert(points) {
         this.assertAvailable();
-        // Upsert semantics: replace points with same id, append new ones
         for (const point of points) {
             const existingIdx = this.points.findIndex((p) => p.id === point.id);
             if (existingIdx >= 0) {
@@ -77,5 +90,46 @@ export class FakeQdrantClient {
         results.sort((a, b) => b.score - a.score);
         const filtered = results.filter((r) => r.score >= threshold);
         return filtered.slice(0, params.limit);
+    }
+    bm25Search(params) {
+        this.assertAvailable();
+        const k1 = 1.2;
+        const b = 0.75;
+        const queryTokens = tokenize(params.query);
+        const docs = this.points.map((point) => {
+            const docText = [...point.payload.raw_tags, point.payload.normalized_text].join(" ");
+            return {
+                id: point.id,
+                tokens: tokenize(docText),
+                payload: point.payload,
+            };
+        });
+        if (docs.length === 0)
+            return [];
+        const N = docs.length;
+        const totalLen = docs.reduce((sum, d) => sum + d.tokens.length, 0);
+        const avgDocLen = totalLen / N;
+        const dfMap = new Map();
+        for (const doc of docs) {
+            const seen = new Set();
+            for (const t of doc.tokens) {
+                if (!seen.has(t)) {
+                    seen.add(t);
+                    dfMap.set(t, (dfMap.get(t) ?? 0) + 1);
+                }
+            }
+        }
+        const idfMap = new Map();
+        for (const [term, df] of dfMap) {
+            const idf = Math.log((N - df + 0.5) / (df + 0.5) + 1);
+            idfMap.set(term, idf);
+        }
+        const results = docs.map((doc) => ({
+            id: doc.id,
+            score: computeBM25Score(queryTokens, doc.tokens, idfMap, avgDocLen, k1, b),
+            payload: doc.payload,
+        }));
+        results.sort((a, b) => b.score - a.score);
+        return results.slice(0, params.limit);
     }
 }

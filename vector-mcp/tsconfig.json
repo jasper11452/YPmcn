@@ -4,7 +4,9 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "skipLibCheck": true,
-    "noEmit": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
     "allowJs": true,
     "esModuleInterop": true,
     "strict": false

@@ -1,13 +1,7 @@
-/**
- * Minimal JSON-RPC-over-stdio MCP server.
- *
- * Reads newline-delimited JSON from stdin, writes responses to stdout.
- * Logs ONLY to stderr — stdout is the MCP transport.
- */
+// @ts-nocheck
 import { createInterface } from "node:readline";
 import { handleToolCall } from "./tools/handlers.js";
 import { TOOL_DEFINITIONS } from "./tools/listTools.js";
-// ── Stdout writer ───────────────────────────────────────────────────
 function sendResponse(response) {
     process.stdout.write(JSON.stringify(response) + "\n");
 }
@@ -15,13 +9,8 @@ function sendResult(id, result) {
     sendResponse({ jsonrpc: "2.0", id, result });
 }
 function sendError(id, code, message) {
-    sendResponse({
-        jsonrpc: "2.0",
-        id,
-        error: { code, message },
-    });
+    sendResponse({ jsonrpc: "2.0", id, error: { code, message } });
 }
-// ── Request handler ─────────────────────────────────────────────────
 async function handleRequest(request) {
     const { id, method, params } = request;
     switch (method) {
@@ -36,22 +25,19 @@ async function handleRequest(request) {
             sendResult(id, { tools: TOOL_DEFINITIONS });
             break;
         case "tools/call": {
-            const { name, arguments: args } = (params ?? {});
-            if (!name) {
+            const p = params;
+            const toolName = p?.name;
+            if (!toolName) {
                 sendError(id, -32602, "Missing tool name in params");
                 return;
             }
-            const result = await handleToolCall(name, args ?? {});
+            const result = await handleToolCall(toolName, p?.arguments ?? {});
             sendResult(id, result);
             break;
         }
         default:
             sendError(id, -32601, `Method not found: ${method}`);
     }
-}
-// ── Stdio transport ─────────────────────────────────────────────────
-function log(msg) {
-    process.stderr.write(`[vector-mcp] ${msg}\n`);
 }
 function startServer() {
     const rl = createInterface({ input: process.stdin });
@@ -67,8 +53,8 @@ function startServer() {
             sendError(null, -32700, "Parse error");
             return;
         }
-        if (!request.method || request.id === undefined) {
-            sendError(null, -32600, "Invalid request: missing method or id");
+        if (!request?.method || request.id === undefined) {
+            sendError(null, -32600, "Invalid request");
             return;
         }
         handleRequest(request).catch((err) => {
@@ -77,9 +63,9 @@ function startServer() {
         });
     });
     rl.on("close", () => {
-        log("stdin closed, exiting");
+        process.stderr.write("[vector-mcp] stdin closed, exiting\n");
         process.exit(0);
     });
-    log("server started on stdio");
+    process.stderr.write("[vector-mcp] server started on stdio\n");
 }
 startServer();

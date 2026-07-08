@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit"
+    "build": "npx tsc",
+    "test": "node --test dist/vector/rrf.test.js dist/vector/sync.test.js"
   }
 }
