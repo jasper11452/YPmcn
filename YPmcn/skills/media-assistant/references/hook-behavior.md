@@ -25,21 +25,13 @@
 
 ## `validate_requirement` 请求
 
-允许的顶层字段只有：
+Hook 不再拦截任何请求字段。仅检查 CSV 合并表中标记"必填"的字段有值时的类型正确性。
+Agent 可以将解析后的需求字段直接作为顶层入参传入，`raw_messages`、`trace_id`、`parsed_requirement` 等均不拦截。
 
-- `raw_messages`
-- `project_context`
-- `existing_demand_id`
-- `existing_demand_version`
-
-Hook 会阻断 `trace_id`、`idempotency_key`、`parsed_requirement`、`parsed_requirement_draft` 和其他未声明字段，并一次性列出所有非法键。
-
-基础类型：
-
-- `raw_messages` 必须为数组，每个元素必须为对象。
-- `project_context` 必须为对象或 null。
-- `existing_demand_id` 必须为字符串或 null。
-- `existing_demand_version` 必须为整数或 null。
+CSV 必填字段类型校验：
+- `demand_id`、`submission_deadline_at`、`submission_deadline_raw`、`raw_messages_json`、`budget_raw`、`rebate_raw`、`status`、`created_at`、`updated_at`、`platform` — 若传入须为字符串
+- `demand_version` — 若传入须为整数
+- `budget_min_cents`、`budget_max_cents`、`rebate_min_rate`、`rebate_max_rate`、`quantity_total` — 若传入须为数字
 
 具体消息内容和业务完整性由 MCP 校验，hook 不在 MCP 前重复实现业务规则。
 

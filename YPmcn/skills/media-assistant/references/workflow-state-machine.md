@@ -73,7 +73,7 @@
 2. 有平台账号：用 `get_creator_detail` 核对达人详情。
 3. 只有 `demand_id/demand_version`：当前没有状态查询工具；不要调用不存在的 `get_workflow_state`，按最近成功业务响应继续，证据不足则停止。
 4. 写调用超时或断连：当前请求 schema 没有幂等键，不得自动重试。若已取得 `run_id` 用详情查询；否则用 `trace_id` 请后端查证。
-5. 用户修改需求：携带原始补充消息重新调用 `validate_requirement`；旧 ID/版本只按运行时 schema 和后端返回使用。
+5. 用户修改需求：Agent 重新解析为结构化字段后调用 `validate_requirement`；旧 ID/版本只按运行时 schema 和后端返回使用。
 
 ## 可选状态扩展
 

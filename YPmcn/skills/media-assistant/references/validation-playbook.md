@@ -7,9 +7,9 @@
 先执行远端 `tools/list`，验证：
 
 - YPmcn 业务工具共 12 个，且没有 `get_workflow_state`。
-- `validate_requirement.required` 只有 `raw_messages`。
-- `validate_requirement.properties` 只有 `raw_messages`、`project_context`、`existing_demand_id`、`existing_demand_version`。
-- 任一请求 schema 都不强制添加 `trace_id` 或 `idempotency_key`。
+- `validate_requirement.required` 至少需要解析字段或 `raw_messages` 之一。
+- `validate_requirement.properties` 包含解析字段 + `raw_messages`、`project_context`、`existing_demand_id`、`existing_demand_version`。
+- 任一请求 schema 都不强制添加 `trace_id`、`idempotency_key`、`gate_id` 或 `confirmation_type`。
 - `rank_mcns` 使用 `medium_risk_confirmed: boolean`。
 - `create_submission_batch` 使用 `allow_need_confirm_with_risk: boolean`。
 
@@ -26,7 +26,7 @@ npm test
 至少覆盖：
 
 - 当前 `validate_requirement` 合法请求放行。
-- `trace_id`、`idempotency_key`、`parsed_requirement` 等 schema 外请求字段一次性阻断。
+- `trace_id`、`idempotency_key` 等 schema 外请求字段不拦截但也不强制。
 - 缺少 `raw_messages` 或基础类型错误被阻断。
 - 两个风险确认字段为 true 时放行，未确认时阻断。
 - `{success,data,error,trace_id}` 合法响应不因缺少状态扩展被改写。

@@ -11,15 +11,7 @@
 - [ ] 不用业务调用探测 schema，不猜字段，不发送占位符。
 - [ ] ID/版本/`run_id`/`inquiry_id` 来自此前成功响应；平台使用 `xhs`/`dy`。
 
-当前生产请求中禁止添加：
-
-- `trace_id`
-- `idempotency_key`
-- `parsed_requirement`
-- `gate_id`
-- `confirmation_type`
-
-这些字段不在当前 11 个工具的相应请求 schema 中。`trace_id` 是响应字段。
+当前生产请求中不限制额外字段。
 
 ## 2. 响应信封
 
@@ -53,18 +45,30 @@
 
 ### 5.1 `validate_requirement`
 
-必填：
+Agent 解析后的需求字段直接作为顶层入参传入，字段名与 `creator_candidate_pool_schema.csv`"合并结果"列完全对应。
+
+必填（至少一项）：解析字段 或 `raw_messages`。
+
+可选：
 
 | 字段 | 类型 |
 |---|---|
 | `raw_messages` | array[object] |
+| `project_context` | object 或 null |
+| `existing_demand_id` | string 或 null |
+| `existing_demand_version` | integer 或 null |
 
-可选：`project_context: object|null`、`existing_demand_id: string|null`、`existing_demand_version: integer|null`。
-
-首轮通常只传：
+示例：
 
 ```json
 {
+  "platform": "xhs",
+  "quantity_total": 10,
+  "submission_deadline_at": "2026-07-20T18:00:00+08:00",
+  "budget_max_cents": 500000,
+  "content_requirements": "美妆 护肤 好物分享",
+  "followercount": {"min": 100000},
+  "project_name": "夏季新品",
   "raw_messages": [
     {"role": "client", "content": "客户原始 Brief"}
   ]

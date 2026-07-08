@@ -69,7 +69,22 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(result?.block, undefined);
   });
 
-  it("blocks fields that the actual validate_requirement schema does not expose", async () => {
+  it("allows validate_requirement with parsed top-level fields instead of raw_messages", async () => {
+    const result = await runBeforeToolCallGuards({
+      toolName: "validate_requirement",
+      params: {
+        platform: "xhs",
+        quantity_total: 10,
+        budget_max_cents: 500000,
+        content_requirements: "美妆 护肤",
+        project_context: { project_name: "夏季投放" },
+      },
+    });
+
+    assert.equal(result?.block, undefined);
+  });
+
+  it("allows trace_id and parsed_requirement in params (hook no longer blocks these)", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "validate_requirement",
       params: initialValidateParams({
@@ -79,20 +94,25 @@ describe("YPmcn OpenClaw hook layering", () => {
       }),
     });
 
-    assert.equal(result?.block, true);
-    assert.match(result.blockReason, /trace_id/);
-    assert.match(result.blockReason, /idempotency_key/);
-    assert.match(result.blockReason, /parsed_requirement/);
+    assert.equal(result?.block, undefined);
   });
 
-  it("blocks validate_requirement when raw_messages is missing", async () => {
+  it("allows validate_requirement with empty params (no fields to validate)", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "validate_requirement",
       params: {},
     });
 
-    assert.equal(result?.block, true);
-    assert.match(result.blockReason, /raw_messages/);
+    assert.equal(result?.block, undefined);
+  });
+
+  it("allows validate_requirement with trace_id (no longer blocked)", async () => {
+    const result = await runBeforeToolCallGuards({
+      toolName: "validate_requirement",
+      params: { trace_id: "trace-001" },
+    });
+
+    assert.equal(result?.block, undefined);
   });
 
   it("blocks search_creators until the structured brief is confirmed", async () => {
@@ -540,14 +560,13 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(result?.block, undefined);
   });
 
-  it("blocks validate_requirement when parsed_requirement is sent", async () => {
+  it("allows validate_requirement even when parsed_requirement is sent (no longer blocked)", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "validate_requirement",
       params: initialValidateParams({ parsed_requirement: {} }),
     });
 
-    assert.equal(result?.block, true);
-    assert.match(result.blockReason, /parsed_requirement/);
+    assert.equal(result?.block, undefined);
   });
 
   it("registered activate hook uses the same dispatcher behavior", async () => {
@@ -569,8 +588,8 @@ describe("YPmcn OpenClaw hook layering", () => {
       { sessionKey: "test:prefixed-before" },
     );
 
-    assert.equal(result?.block, true);
-    assert.match(result.blockReason, /trace_id/);
+    // trace_id 不再被 hook 拦截
+    assert.equal(result?.block, undefined);
   });
 
   it("blocks shell create_with_distributions invocations and requires the YP Action tool", async () => {

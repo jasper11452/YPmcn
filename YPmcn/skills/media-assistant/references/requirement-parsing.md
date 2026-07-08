@@ -1,8 +1,8 @@
 # 需求字段边界
 
-当前生产 `validate_requirement` 只接收原始消息和可选上下文。Agent 在调用**前**必须先将用户自然语言 Brief 解析成结构化 JSON，对照 `references/creator_candidate_pool_schema.csv` 的"合并结果"列进行字段映射。解析规则见 [需求入口](requirement-intake.md)。
+当前生产 `validate_requirement` 接收两类入参：Agent 解析的顶层需求字段 + 可选的 `raw_messages`（用于语义仲裁参考）。Agent 在调用**前**必须先将用户自然语言 Brief 解析成结构化 JSON，对照 `references/creator_candidate_pool_schema.csv` 的"合并结果"列进行字段映射。解析规则见 [需求入口](requirement-intake.md)。
 
-`validate_requirement` 调用后，MCP 的 `requirement_parsed` 响应必须按 `customer_demands` 字段语义和 `creator_candidate_pool_schema.csv` 字段规范返回，而不是只返回当前链路少量展示字段。客户需求表是筛选、向量召回、排序和企微分发的事实源。
+Agent 将解析后的字段作为 `validate_requirement` 的顶层参数直接传入；`raw_messages` 可选保留用户原文用于语义校验。MCP 的 `requirement_parsed` 响应必须按 `customer_demands` 字段语义和 `creator_candidate_pool_schema.csv` 字段规范返回，而不是只返回当前链路少量展示字段。客户需求表是筛选、向量召回、排序和企微分发的事实源。
 
 ## Ready 阻断字段
 
@@ -50,8 +50,8 @@ MCP 输出应覆盖客户需求表中可落库的字段，包括：
 
 ## Agent 负责
 
-- 保留客户/媒介原文与真实消息角色。
-- 收到媒介输入、补充或修改后，schema 预检通过即调用 `validate_requirement`；不得在调用前先向用户核对拟传参数。
+- 保留客户/媒介原文到 `raw_messages`（可选，用于语义参考）。
+- 收到媒介输入、补充或修改后，立即解析为结构化字段并调用 `validate_requirement`；不得在调用前先向用户核对拟传参数。
 - 不确定的业务事实留在原文中，不自行补值。
 - 读取 MCP 返回的 `requirement_parsed`、`missing_fields`、`blocking_fields`、`clarifying_questions`。
 - 面向用户展示短摘要，不泄露完整结构化对象。
@@ -64,7 +64,6 @@ MCP 输出应覆盖客户需求表中可落库的字段，包括：
 
 ## 禁止
 
-- 请求体中添加 `parsed_requirement` 或 `parsed_requirement_draft`。
 - 把 Agent 推断写进 `raw_messages` 并标成 `client`/`media`。
 - 为满足必填而编造平台、内容、预算、数量、截止日期、ID 或版本。
 - 用业务调用试错探测 schema。

@@ -179,10 +179,10 @@ class SkillPackageTest(unittest.TestCase):
             "当前生产 provider 暴露 12 个 YPmcn 工具",
             "hook-behavior.md",
             "人工 gate",
-            "当前请求体只使用 `raw_messages`",
-            "不发送 Agent 自行解析的 `parsed_requirement`",
             "`medium_risk_confirmed: true`",
             "`allow_need_confirm_with_risk: true`",
+            "CSV 合并表必填字段",
+            "CSV 合并表必填字段",
         ):
             self.assertIn(required, text)
 
@@ -269,7 +269,6 @@ class SkillPackageTest(unittest.TestCase):
             "after_tool_call",
             "tool_result_persist",
             "`validate_requirement` 请求",
-            "当前四个顶层字段",
             "不替代 MCP 业务校验",
             "allowed_actions",
             "workflow_state.pending_gate",
@@ -321,16 +320,13 @@ class SkillPackageTest(unittest.TestCase):
             self.assertIn(f"`{key}`", text)
         self.assertIn("每个元素使用对象", text)
         self.assertIn("`sent_at`", text)
-        self.assertIn("使用 null", text)
         self.assertIn("不得用当前时间伪造", text)
-        self.assertIn("收到媒介输入后直接调用 `validate_requirement`", text)
+        self.assertIn("收到媒介输入后，Agent 必须先对照", text)
         self.assertIn("不得在调用前先向媒介确认", text)
         self.assertNotIn("用户「确认调用」前不得调用", text)
         self.assertNotIn("pre-validate-requirement", text)
-        self.assertIn("Agent 不在请求中自行构造 `parsed_requirement`", text)
-        self.assertIn("Agent 自我修正", text)
-        self.assertIn("不得伪装成 `client` 或 `media`", text)
-        self.assertIn("不得发送 `trace_id`、`idempotency_key`、`parsed_requirement`、`parsed_requirement_draft`", text)
+        self.assertIn("解析字段直接作为 `validate_requirement` 顶层入参传入", text)
+        self.assertIn("CSV 合并表必填字段", text)
 
     def test_askuserquestion_is_the_only_confirmation_pattern(self):
         text = read(REFERENCES / "ask-user-question-patterns.md")
@@ -481,7 +477,7 @@ class SkillPackageTest(unittest.TestCase):
                 ],
             }
             envelope = mock_validate_requirement(payload)
-            self.assertEqual({"raw_messages"}, set(payload))
+            self.assertIn("raw_messages", set(payload))
             self.assertEqual(row["content"], payload["raw_messages"][0]["content"])
             self.assertIsNone(payload["raw_messages"][0]["sent_at"])
             self.assertTrue(envelope["success"])

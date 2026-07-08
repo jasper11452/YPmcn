@@ -15,12 +15,14 @@ function parseTags(value: unknown): string[] {
   if (value === null || value === undefined) return [];
   if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
   if (typeof value === "string") {
+    if (value.trim().length === 0) return [];
     try {
       const p = JSON.parse(value);
-      return Array.isArray(p) ? p.filter((v): v is string => typeof v === "string") : [];
+      if (Array.isArray(p)) return p.filter((v): v is string => typeof v === "string");
     } catch {
-      return [];
+      // not JSON — treat as delimiter-separated string
     }
+    return value.split(/[、,，\s]+/).map((s) => s.trim()).filter((s) => s.length > 0);
   }
   return [];
 }
@@ -34,7 +36,7 @@ function collectTags(row: Record<string, unknown>, columns: string[]): string[] 
 }
 
 function getGeo(row: Record<string, unknown>): string {
-  const parts = [row["city"], row["province"], row["ip_location"]]
+  const parts = [row["kw_city"], row["kw_province"], row["kw_ip_dependency"]]
     .filter((v): v is string => typeof v === "string" && v.length > 0);
   return parts.join(" ");
 }
@@ -78,25 +80,25 @@ export async function fetchCreatorRows(
 
   try {
     const xhsTagCols = [
-      "pugongying_category",
-      "grow_category",
-      "persona_tags",
-      "content_feature_tags",
-      "tone_tags",
-      "other_tags",
+      "content_type_label",
+      "content_theme_label",
+      "industry_tag_label",
+      "xt_talent_type_label",
+      "grow_talent_type_label",
+      "talent_type_label",
     ];
     const xhsCols = [
-      "xhs_account_id",
-      "account_nickname",
-      "city",
-      "province",
-      "ip_location",
-      "profile_url",
-      "data_updated_at",
+      "id",
+      "nickname",
+      "kw_city",
+      "kw_province",
+      "kw_ip_dependency",
+      "kw_user_url",
+      "date",
       ...xhsTagCols,
     ];
     const [xhsRows] = await conn.query(
-      `SELECT ${xhsCols.join(", ")} FROM xhs_creator_accounts WHERE data_updated_at IS NOT NULL${limitClause}`
+      `SELECT ${xhsCols.join(", ")} FROM xhs_creator_accounts WHERE date IS NOT NULL${limitClause}`
     );
     if (Array.isArray(xhsRows)) {
       for (const r of xhsRows as Record<string, unknown>[]) {
@@ -106,35 +108,39 @@ export async function fetchCreatorRows(
         if (geo) tags.push(geo);
         allRows.push({
           platform: "xhs",
-          platform_account_id: String(r["xhs_account_id"] ?? ""),
+          platform_account_id: String(r["id"] ?? ""),
           source_table: "xhs_creator_accounts",
           content_tags: tags,
           grow_tags: [],
-          source_updated_at: String(r["data_updated_at"] ?? ""),
-          display_name: r["account_nickname"] ? String(r["account_nickname"]) : undefined,
-          profile_url: r["profile_url"] ? String(r["profile_url"]) : undefined,
+          source_updated_at: String(r["date"] ?? ""),
+          display_name: r["nickname"] ? String(r["nickname"]) : undefined,
+          profile_url: r["kw_user_url"] ? String(r["kw_user_url"]) : undefined,
         } as CreatorSourceRow);
       }
     }
 
     const dyTagCols = [
-      "xingtu_creator_type",
-      "grow_creator_type",
-      "content_topic_tags",
-      "industry_tags",
+      "content_type_label",
+      "kol_persona_label",
+      "content_feature_label",
+      "content_tag",
+      "business_industry",
+      "pgy_blogger_type_label",
+      "grow_blogger_type_label",
+      "talent_type_label",
     ];
     const dyCols = [
-      "dy_account_id",
-      "account_nickname",
-      "city",
-      "province",
-      "ip_location",
-      "profile_url",
-      "data_updated_at",
+      "id",
+      "nickname",
+      "kw_city",
+      "kw_province",
+      "kw_ip_dependency",
+      "kw_user_url",
+      "date",
       ...dyTagCols,
     ];
     const [dyRows] = await conn.query(
-      `SELECT ${dyCols.join(", ")} FROM dy_creator_accounts WHERE data_updated_at IS NOT NULL${limitClause}`
+      `SELECT ${dyCols.join(", ")} FROM dy_creator_accounts WHERE date IS NOT NULL${limitClause}`
     );
     if (Array.isArray(dyRows)) {
       for (const r of dyRows as Record<string, unknown>[]) {
@@ -144,13 +150,13 @@ export async function fetchCreatorRows(
         if (geo) tags.push(geo);
         allRows.push({
           platform: "dy",
-          platform_account_id: String(r["dy_account_id"] ?? ""),
+          platform_account_id: String(r["id"] ?? ""),
           source_table: "dy_creator_accounts",
           content_tags: tags,
           grow_tags: [],
-          source_updated_at: String(r["data_updated_at"] ?? ""),
-          display_name: r["account_nickname"] ? String(r["account_nickname"]) : undefined,
-          profile_url: r["profile_url"] ? String(r["profile_url"]) : undefined,
+          source_updated_at: String(r["date"] ?? ""),
+          display_name: r["nickname"] ? String(r["nickname"]) : undefined,
+          profile_url: r["kw_user_url"] ? String(r["kw_user_url"]) : undefined,
         } as CreatorSourceRow);
       }
     }

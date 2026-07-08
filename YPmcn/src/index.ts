@@ -82,12 +82,31 @@ export interface GuardError {
   severity: "block" | "warn";
 }
 
-const ALLOWED_VALIDATE_TOP_LEVEL_KEYS = new Set([
-  "raw_messages",
-  "project_context",
-  "existing_demand_id",
-  "existing_demand_version",
-]);
+/**
+ * validate_requirement 入参校验：
+ * 仅检查 CSV 合并表中标记"必填"的字段值不为空/不为 null。
+ * 其他字段（trace_id、parsed_requirement 等）全部放行，不拦截。
+ */
+const CSV_REQUIRED_FIELDS: Array<{ key: string; type: string; label: string }> = [
+  // CSV 合并表行 133-148 标记"必填"的基础需求字段
+  { key: "demand_id",            type: "string",  label: "需求ID" },
+  { key: "demand_version",       type: "integer", label: "需求版本" },
+  { key: "submission_deadline_at", type: "string", label: "提交时间" },
+  { key: "submission_deadline_raw", type: "string", label: "提交时间原文" },
+  { key: "raw_messages_json",    type: "string",  label: "原始输入的需求内容json" },
+  { key: "budget_min_cents",     type: "number",  label: "预算下限" },
+  { key: "budget_max_cents",     type: "number",  label: "预算上限" },
+  { key: "budget_raw",           type: "string",  label: "预算原文" },
+  { key: "rebate_min_rate",      type: "number",  label: "返点下限" },
+  { key: "rebate_max_rate",      type: "number",  label: "返点上限" },
+  { key: "rebate_raw",           type: "string",  label: "返点原文" },
+  { key: "quantity_total",       type: "number",  label: "需要数量" },
+  { key: "status",               type: "string",  label: "状态" },
+  { key: "created_at",           type: "string",  label: "创建时间" },
+  { key: "updated_at",           type: "string",  label: "更新时间" },
+  // CSV 行 3 — platform 也是必填
+  { key: "platform",             type: "string",  label: "平台" },
+];
 
 const RANKING_TOOLS = new Set(["rank_creators", "create_submission_batch"]);
 const CLARIFY_GATE = "clarify_requirement";
@@ -516,35 +535,19 @@ export function validateProtocolEnvelope(ctx: ToolCallContext): GuardError[] {
   const errors: GuardError[] = [];
   const params = ctx.params;
 
-  for (const key of Object.keys(params)) {
-    if (!ALLOWED_VALIDATE_TOP_LEVEL_KEYS.has(key)) {
-      errors.push(block("protocol-envelope", `validate_requirement 入参包含非法顶层字段 ${key}`));
+  // CSV 合并表必填字段非空校验 — 传了就必须有值
+  for (const field of CSV_REQUIRED_FIELDS) {
+    const value = params[field.key];
+    if (value !== undefined && value !== null) {
+      // 类型检查
+      if (field.type === "string" && typeof value !== "string") {
+        errors.push(block("protocol-envelope", `${field.key}(${field.label}) 必须为字符串`));
+      } else if (field.type === "number" && typeof value !== "number") {
+        errors.push(block("protocol-envelope", `${field.key}(${field.label}) 必须为数字`));
+      } else if (field.type === "integer" && !Number.isInteger(value)) {
+        errors.push(block("protocol-envelope", `${field.key}(${field.label}) 必须为整数`));
+      }
     }
-  }
-
-  const rawMessages = params.raw_messages;
-  if (!Array.isArray(rawMessages)) {
-    errors.push(block("protocol-envelope", "validate_requirement 缺少 raw_messages 数组"));
-    return errors;
-  }
-
-  rawMessages.forEach((item, index) => {
-    if (!isObject(item)) {
-      errors.push(block("protocol-envelope", `raw_messages[${index}] 必须为对象`));
-      return;
-    }
-  });
-
-  if (params.project_context !== undefined && params.project_context !== null && !isObject(params.project_context)) {
-    errors.push(block("protocol-envelope", "project_context 必须为对象或 null"));
-  }
-
-  if (params.existing_demand_id !== undefined && params.existing_demand_id !== null && typeof params.existing_demand_id !== "string") {
-    errors.push(block("protocol-envelope", "existing_demand_id 必须为字符串或 null"));
-  }
-
-  if (params.existing_demand_version !== undefined && params.existing_demand_version !== null && !Number.isInteger(params.existing_demand_version)) {
-    errors.push(block("protocol-envelope", "existing_demand_version 必须为整数或 null"));
   }
 
   return errors;
