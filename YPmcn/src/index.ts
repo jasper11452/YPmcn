@@ -171,6 +171,25 @@ const pendingProjectDistributions = new Map<string, PendingProjectDistribution>(
 const completedProjectDistributions = new Set<string>();
 const completedProjectDistributionSessions = new Set<string>();
 const waitingProjectDistributionSessions = new Map<string, WaitingProjectDistributionSession>();
+const visitedStepsBySession = new Map<string, string[]>();
+
+const STEP_LABELS: Record<string, string> = {
+  "validate_requirement": "需求录入",
+  "search_creators": "创作者搜索",
+  "rank_mcns": "MCN 排序",
+  "create_with_distributions": "项目分发",
+  "rank_creators": "达人精排",
+  "create_submission_batch": "提报",
+};
+
+const PHASE_LABELS: Record<string, string> = {
+  requirement: "需求录入",
+  candidate_pool: "候选池",
+  mcn_planning: "MCN 规划",
+  distribution: "项目分发",
+  ranking: "达人精排",
+  submission: "提报",
+};
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -529,10 +548,39 @@ function isClarifyValidateRequirement(ctx: ToolCallContext, workflowState: Workf
   );
 }
 
+const PLATFORM_ENUM = new Set(["xhs", "dy"]);
+
+function validatePlatformEnum(params: Record<string, unknown>): GuardError[] {
+  const platform = params.platform;
+  if (platform !== undefined && platform !== null) {
+    if (typeof platform !== "string" || !PLATFORM_ENUM.has(platform)) {
+      return [block("platform-enum", `platform 必须是 "xhs"（小红书）或 "dy"（抖音），当前值为 "${platform}"`)];
+    }
+  }
+  return [];
+}
+
+const PLURAL_ALIASES: Record<string, string> = {
+  "platforms": "platform",
+  "quantities": "quantity_total",
+  "budgets": "budget_max_cents",
+};
+
+function validatePluralAliases(ctx: ToolCallContext): GuardError[] {
+  if (ctx.toolName !== "validate_requirement") return [];
+  const params = ctx.params;
+  for (const [plural, singular] of Object.entries(PLURAL_ALIASES)) {
+    if (plural in params) {
+      return [block("plural-alias", `参数 "${plural}" 不在 inputSchema 中。请用 "${singular}"（单数）。MCP schema 字段名以 CSV 为准。`)];
+    }
+  }
+  return [];
+}
+
 export function validateProtocolEnvelope(ctx: ToolCallContext): GuardError[] {
   if (ctx.toolName !== "validate_requirement") return [];
 
-  const errors: GuardError[] = [];
+  const errors: GuardError[] = [...validatePlatformEnum(ctx.params), ...validatePluralAliases(ctx)];
   const params = ctx.params;
 
   // CSV 合并表必填字段非空校验 — 传了就必须有值
@@ -959,12 +1007,59 @@ export function rewriteInvalidToolResult(result: ToolResultContext): Record<stri
   };
 }
 
+function buildStateSummary(sessionKey: string | null): string {
+  if (!sessionKey) return "";
+
+  const wf = workflowStateBySession.get(sessionKey);
+  const visited = visitedStepsBySession.get(sessionKey) ?? [];
+  const distDone = completedProjectDistributionSessions.has(sessionKey);
+  const waitLock = waitingProjectDistributionSessions.has(sessionKey);
+
+  const lines: string[] = ["[YPmcn 当前状态]"];
+  if (wf?.phase && PHASE_LABELS[wf.phase]) {
+    lines.push(`阶段: ${PHASE_LABELS[wf.phase]} (${wf.phase})`);
+  }
+
+  if (visited.length > 0) {
+    const labels = visited.map((s) => STEP_LABELS[s] || s);
+    lines.push(`已完成: ${labels.join(" → ")}`);
+  }
+
+  if (wf?.allowed_actions && wf.allowed_actions.length > 0) {
+    const nextLabels = wf.allowed_actions.map((s) => STEP_LABELS[s] || s);
+    lines.push(`允许动作: ${nextLabels.join(", ")}`);
+  }
+
+  if (distDone) lines.push("项目分发已完成（等待精排确认）");
+  if (waitLock) lines.push("正在等待用户决策，请用 askuserquestion 弹窗");
+
+  if (wf?.pending_gate) {
+    lines.push(`等待确认: ${wf.pending_gate.gate} — ${wf.pending_gate.reason}`);
+  }
+
+  lines.push("按 SKILL.md 流程推进，字段名以 CSV 和 inputSchema 为准。");
+
+  return lines.join("\n");
+}
+
 export function registerHooks(api: { on: (name: string, handler: (...args: any[]) => unknown, opts?: Record<string, unknown>) => void }): void {
   api.on(
     "message_received",
     (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
       const sessionKey = resolveSessionKey(ctx) ?? (nonEmptyString(event.sessionKey) ? event.sessionKey : null);
       if (sessionKey) waitingProjectDistributionSessions.delete(sessionKey);
+    },
+    { priority: 90, timeoutMs: 5_000 },
+  );
+
+  api.on(
+    "agent_turn_prepare",
+    (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+      const sessionKey = resolveSessionKey(ctx);
+      if (!sessionKey) return;
+      const summary = buildStateSummary(sessionKey);
+      if (!summary) return;
+      return { prependContext: summary };
     },
     { priority: 90, timeoutMs: 5_000 },
   );
@@ -1039,6 +1134,18 @@ export function registerHooks(api: { on: (name: string, handler: (...args: any[]
       if (!normalized) return;
       const errors = responseContractGuard(normalized);
       if (errors.length === 0) cacheWorkflowState(ctx, normalized.workflowState);
+
+      // Track successful tool calls for state summary
+      if (normalized.success && STEP_LABELS[normalized.toolName]) {
+        const sessionKey = resolveSessionKey(ctx);
+        if (sessionKey) {
+          const visited = visitedStepsBySession.get(sessionKey) ?? [];
+          if (!visited.includes(normalized.toolName)) {
+            visited.push(normalized.toolName);
+            visitedStepsBySession.set(sessionKey, visited);
+          }
+        }
+      }
     },
     { priority: 90, timeoutMs: 5_000 },
   );

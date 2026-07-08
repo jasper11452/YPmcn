@@ -1131,6 +1131,7 @@ describe("YPmcn OpenClaw hook layering", () => {
 
     assert.deepEqual(registered, [
       "after_tool_call",
+      "agent_turn_prepare",
       "before_tool_call",
       "message_received",
       "tool_result_persist",

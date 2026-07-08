@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""
+validate_requirement 传参精度自检脚本。
+
+Agent 在调用 validate_requirement 前运行此脚本。
+输入：待传入 validate_requirement 的 JSON 参数 + 用户原文（可选）
+输出：{"ok": true} 或 {"ok": false, "errors": ["...", ...]}
+"""
+
+import json
+import sys
+
+
+def check(params: dict, raw_text: str = "") -> list[str]:
+    errors = []
+
+    # 1. platform 枚举
+    platform = params.get("platform")
+    if platform is not None:
+        if isinstance(platform, str):
+            pl = platform.lower()
+            if pl in ("xiaohongshu", "red", "小红书"):
+                errors.append(f'platform="{platform}" 应改为 "xhs"（小红书）')
+            elif pl in ("douyin", "抖音"):
+                errors.append(f'platform="{platform}" 应改为 "dy"（抖音）')
+            elif pl not in ("xhs", "dy"):
+                errors.append(f'platform="{platform}" 不在允许范围: xhs, dy')
+
+    # 2. 金额单位：分
+    for field in ("budget_min_cents", "budget_max_cents"):
+        val = params.get(field)
+        if val is not None:
+            if not isinstance(val, (int, float)):
+                errors.append(f"{field} 应为数字，当前 {type(val).__name__}")
+            elif isinstance(val, float) and val == int(val):
+                pass  # 允许 3000000.0
+            elif val < 100:  # 很可能是元而不是分
+                errors.append(f"{field}={val} 看起来是元（太小），单位应为分。3万→3000000")
+            elif val > 100_000_000:
+                errors.append(f"{field}={val} 数值过大，检查是否单位错误")
+
+    # 3. 返点单位：小数
+    for field in ("rebate_min_rate", "rebate_max_rate"):
+        val = params.get(field)
+        if val is not None:
+            if not isinstance(val, (int, float)):
+                errors.append(f"{field} 应为数字，当前 {type(val).__name__}")
+            elif val > 1:
+                errors.append(f'{field}={val} 看起来是百分比数值（>1），应为小数。20%→0.2，不是20')
+
+    # 4. 原文未提下限不应编造
+    if raw_text and "预算" in raw_text and "以下" not in raw_text and "内" not in raw_text:
+        min_val = params.get("budget_min_cents")
+        if min_val is not None and min_val > 0:
+            # 原文没明确下限但传了值，可能是编造的。这只是 warning，不阻断
+            pass  # 让业务逻辑决定
+
+    return errors
+
+
+def main():
+    raw = sys.stdin.read().strip()
+    if not raw:
+        print(json.dumps({"ok": False, "errors": ["无输入"]}))
+        sys.exit(1)
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(json.dumps({"ok": False, "errors": [f"JSON 解析失败: {e}"]}))
+        sys.exit(1)
+
+    params = data.get("params", data)
+    raw_text = data.get("raw_text", "")
+
+    errors = check(params, raw_text)
+    if errors:
+        print(json.dumps({"ok": False, "errors": errors}))
+        sys.exit(1)
+    else:
+        print(json.dumps({"ok": True}))
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
