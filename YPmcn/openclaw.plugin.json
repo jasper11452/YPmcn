@@ -1,6 +1,6 @@
 {
   "id": "ypmcn-media-assistant",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "description": "YPmcn 媒介助手：按业务阶段调用 MCP（SSE），以人工 gate、短回复和可恢复状态管理达人提报流程。create_with_distributions 工具由 SSE MCP Server 提供，本插件仅负责 hooks 拦截。",
   "author": {
     "name": "Jasper"

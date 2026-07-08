@@ -6,7 +6,7 @@
 
 ## 输入
 
-必填 `demand_id`、`demand_version`、`ranking_strategy`。其他候选、权重、反馈偏好等字段只按运行时 schema 和用户确认传入。
+必填 `demand_id`、`demand_version`、`ranking_strategy`。其他候选（`kw_uids`）、权重、反馈偏好等字段只按运行时 schema 和用户确认传入。
 
 ## 输出成功证据
 

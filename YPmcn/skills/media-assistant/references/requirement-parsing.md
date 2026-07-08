@@ -1,8 +1,8 @@
 # 需求字段边界
 
-当前生产 `validate_requirement` 只接收原始消息和可选上下文。需求解析由 MCP 完成，Agent 不发送 `parsed_requirement`。
+当前生产 `validate_requirement` 只接收原始消息和可选上下文。Agent 在调用**前**必须先将用户自然语言 Brief 解析成结构化 JSON，对照 `references/creator_candidate_pool_schema.csv` 的"合并结果"列进行字段映射。解析规则见 [需求入口](requirement-intake.md)。
 
-`requirement_parsed` 必须按 `customer_demands` 字段语义返回，而不是只返回当前链路少量展示字段。客户需求表是筛选、向量召回、排序和企微分发的事实源。
+`validate_requirement` 调用后，MCP 的 `requirement_parsed` 响应必须按 `customer_demands` 字段语义和 `creator_candidate_pool_schema.csv` 字段规范返回，而不是只返回当前链路少量展示字段。客户需求表是筛选、向量召回、排序和企微分发的事实源。
 
 ## Ready 阻断字段
 

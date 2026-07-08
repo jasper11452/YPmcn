@@ -33,7 +33,7 @@ npm install
 npm run pack:yp
 ```
 
-命令会先构建，再在上级目录生成 `ypmcn-media-assistant-2.0.8.tgz`。安装时选择这个 tgz 包，不要直接填写源码目录。在 OpenCode/YP Action 中安装插件后，还需在 `opencode.json` 配置 SSE MCP Server：
+命令会先构建，再在上级目录生成 `ypmcn-media-assistant-2.0.9.tgz`。安装时选择这个 tgz 包，不要直接填写源码目录。在 OpenCode/YP Action 中安装插件后，还需在 `opencode.json` 配置 SSE MCP Server：
 
 ```json
 "mcp": {

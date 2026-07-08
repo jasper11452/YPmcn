@@ -115,7 +115,7 @@ CPM、CPE、互动量、完播率等数字数据要求进入 `requirements_json.
 | 字段 | 类型 | 默认值 |
 |---|---|---|
 | `run_type` | string | `initial` |
-| `candidate_ids` | array[string] 或 null | null |
+| `kw_uids` | array[string] 或 null | null |
 | `ranking_weights` | object[number] 或 null | null |
 | `feedback_preferences` | object 或 null | null |
 | `exclude_submitted` | boolean | true |
