@@ -33,7 +33,7 @@ npm install
 npm run pack:yp
 ```
 
-命令会先构建，再在上级目录生成 `ypmcn-media-assistant-2.0.3.tgz`。安装时选择这个 tgz 包，不要直接填写源码目录。在 OpenCode/YP Action 中安装插件后，还需在 `opencode.json` 配置 SSE MCP Server：
+命令会先构建，再在上级目录生成 `ypmcn-media-assistant-2.0.4.tgz`。安装时选择这个 tgz 包，不要直接填写源码目录。在 OpenCode/YP Action 中安装插件后，还需在 `opencode.json` 配置 SSE MCP Server：
 
 ```json
 "mcp": {
@@ -59,15 +59,15 @@ npm run pack:yp
 |---|---|---|
 | `before_tool_call` | `validate_requirement` | 只允许 `raw_messages`、`project_context`、`existing_demand_id`、`existing_demand_version`，并校验基础类型 |
 | `before_tool_call` | 风险 gate | 使用 `medium_risk_confirmed` / `allow_need_confirm_with_risk`，不要求 schema 外字段 |
-| `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；完成后由用户文本确认决定是否继续 |
-| `before_tool_call` | `create_with_distributions` | 校验 `deadline/remindAt`，固定 `usageScope: "project"`，Bash/PowerShell/curl 直连阻断；用户文本确认后通过 SSE MCP 发送 |
+| `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；完成后由 `askuserquestion` 确认决定是否继续 |
+| `before_tool_call` | `create_with_distributions` | 校验 `deadline/remindAt`，固定 `usageScope: "project"`，Bash/PowerShell/curl 直连阻断；`askuserquestion` 确认后通过 SSE MCP 发送 |
 | `before_tool_call` | 可选状态扩展存在 | 校验 `allowed_actions`、平台前置条件和高风险状态 |
 | `after_tool_call` | 所有 YPmcn 结果 | 校验基础响应契约并缓存可选状态扩展 |
 | `after_tool_call` | 项目分发成功 | 记录企微询价已发送并进入等待锁；当前不创建 Cron 任务 |
 | `tool_result_persist` | 所有 YPmcn 结果 | 基础 `{success,data,error,trace_id}` 信封破损时改写为 `INVALID_RESPONSE_CONTRACT` |
 | `message_received` | 同一会话用户新消息 | 解除项目分发等待锁 |
 
-主流程为 `validate_requirement → search_creators → rank_mcns → create_with_distributions → rank_creators`。前三个业务工具补全需求后连续调用；`rank_mcns` 后必须停下来展示比例、MCN 机构和企微消息并询问是否发送；企微发送成功且用户再次确认后才允许精排。项目分发与通知在用户确认前不得执行。当前不创建 Cron 任务；发送失败不进入等待锁，发送成功后收到用户新消息前不得执行下一步。
+主流程为 `validate_requirement → search_creators → rank_mcns → create_with_distributions → rank_creators`。Brief 输入后直接调用 `validate_requirement` 解析验证；结构化 brief、发送、风险等需要媒介确认的节点统一用 `askuserquestion` 弹窗。`rank_mcns` 后必须停下来展示比例、MCN 机构和企微消息并询问是否发送；企微发送成功且用户再次确认后才允许精排。项目分发与通知在用户确认前不得执行。当前不创建 Cron 任务；发送失败不进入等待锁，发送成功后收到用户新消息前不得执行下一步。
 
 ## MCP 接入
 
@@ -91,7 +91,7 @@ get_recommendation_run_detail
 
 ## 运行边界
 
-- 任意 Brief/CSV 入口先读取运行时 schema、向用户确认拟传参数，再调用 `validate_requirement`。
+- 任意 Brief/CSV 入口先读取运行时 schema；预检通过后直接调用 `validate_requirement`，不先向媒介确认拟传参数。
 - 同一流程固定一个 provider，不跨服务混用 ID。
 - `validate_requirement` 当前请求不包含 `trace_id`、`idempotency_key` 或 `parsed_requirement`；不得发送 schema 外字段。
 - 基础响应必须返回 `{success,data,error,trace_id}`；`workflow_state` 与 `allowed_actions` 是可选扩展。

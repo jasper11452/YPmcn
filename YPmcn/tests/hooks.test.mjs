@@ -439,7 +439,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(result.blockReason, /high_risk/);
   });
 
-  it("allows rank_creators after distribution succeeds and the user confirms through text flow", async () => {
+  it("allows rank_creators after distribution succeeds and askuserquestion confirmation is recorded", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "rank_creators",
       params: { demand_id: "demand-1", demand_version: 1, platform: "xhs" },
@@ -613,7 +613,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(result.blockReason, /不要通过 Bash\/PowerShell\/curl|YP Action 工具|create_with_distributions/);
   });
 
-  it("allows create_with_distributions after text confirmations and hook gate checks pass", async () => {
+  it("allows create_with_distributions after askuserquestion confirmations and hook gate checks pass", async () => {
     const result = await registeredHandler("before_tool_call")(
       {
         toolName: "create_with_distributions",

@@ -1,6 +1,6 @@
 # 需求入口
 
-Brief 入口的第一条业务调用固定为 `validate_requirement`。调用前必须读取当前运行时 `inputSchema`，通过文本交互（`pre-validate-requirement` 模式）向用户汇总拟传参数并等待确认。
+Brief 入口的第一条业务调用固定为 `validate_requirement`。调用前必须读取当前运行时 `inputSchema` 并完成本地参数预检；收到媒介输入后直接调用 `validate_requirement`，不得在调用前先向媒介确认拟传参数。
 
 ## 当前请求边界
 
@@ -39,26 +39,22 @@ Brief 入口的第一条业务调用固定为 `validate_requirement`。调用前
 }
 ```
 
-## 首次确认
+## 首次调用
 
-> **机制标签**: 文本表格 — 所有 Agent 层用户交互的单一机制
+收到媒介输入后直接调用 `validate_requirement`：
 
-调用前按 [用户交互模式](ask-user-question-patterns.md) `pre-validate-requirement` 向用户一次性确认：
-
-- 目标工具：`validate_requirement`
-- 当前必填：`raw_messages`
-- 拟传原文和消息角色
-- 可选上下文、旧需求 ID/版本是否使用
-
-用户「确认调用」前不得调用。用户确认前不得调用任何业务工具；已明确的 Brief 业务信息只汇总，不重复追问。ID、版本、run_id、inquiry_id 只能来自此前 MCP 成功响应。
+- 保留原始 Brief 到 `raw_messages`，不改写事实、不拆成 Agent 推断。
+- 只发送运行时 schema 已声明字段；缺少 schema、工具缺失或 schema 冲突时停止并报告接入问题。
+- 不得在调用前先向媒介确认目标工具、必填字段、拟传原文或消息角色。
+- 已明确的 Brief 业务信息只随原文提交，不重复追问；ID、版本、run_id、inquiry_id 只能来自此前 MCP 成功响应。
 
 **后续保护**: 该工具调用并非仅靠 Agent 自觉；运行时 `before_tool_call` 钩子会执行 `validateProtocolEnvelope` 基础类型校验 + `raw_messages` JSON 预解析，参数非法或不可序列化会被 `block` 阻断，不进入 MCP。([OpenClaw requireApproval] 类保护在 `create_with_distributions`/`rank_creators`/pending_gate 路径上启用，本节工具不在此列。)
 
 ## 结果处理
 
 - `success=false`：展示错误摘要，停止。
-- `success=true, status=draft`：通过文本表格展示 MCP 返回的缺失字段或澄清问题（参照 `requirement-draft` 模式），不自行推断缺失项。
-- `success=true, status=ready`：展示结构化 brief 确认表（平台、数量、deadline、预算/内容要求、数据指标和表单字段影响），等待媒介确认。确认后才调用 `search_creators`。`pre-validate-requirement` 的文本交互已覆盖调用授权，但 ready 后的结构化摘要仍需媒介确认以防止解析偏差。
-- 用户实质修改 Brief：通过文本表格确认（参照 `requirement-modify` 模式），追加新的原始消息后再次调用 `validate_requirement`；旧 ID/版本只使用 MCP 已返回的真实值。
+- `success=true, status=draft`：只根据 MCP 返回的 `missing_fields`、`blocking_fields`、`clarifying_questions` 展示最多 3 个缺失必填项或语义模糊点，并按 `requirement-draft` 模式用 `askuserquestion` 弹窗让媒介补齐/暂缓/放弃；不自行推断缺失项。
+- `success=true, status=ready`：展示结构化 brief 摘要（平台、数量、deadline、预算/内容要求、数据指标和表单字段影响），按 `confirm-structured-brief` 模式用 `askuserquestion` 弹窗等待媒介确认。确认后才调用 `search_creators`。
+- 用户实质修改 Brief：无需先确认是否重新校验，追加新的原始消息后再次调用 `validate_requirement`；旧 ID/版本只使用 MCP 已返回的真实值。若修改影响后续不可逆动作，再用 `askuserquestion` 弹窗确认继续或暂停。
 
 结构化需求由 MCP 在响应中返回并落库。Agent 不在请求中自行构造 `parsed_requirement`，也不因类目、金额或返点语义不确定而绕过 MCP。

@@ -185,17 +185,19 @@ class SkillPackageTest(unittest.TestCase):
         ):
             self.assertIn(required, text)
 
-    def test_main_skill_blocks_tool_calls_until_runtime_schema_preflight_passes(self):
+    def test_main_skill_preflights_schema_without_pre_validate_confirmation(self):
         text = read(SKILL)
         for required in (
-            "首次业务工具调用前的参数闸门",
+            "业务工具调用参数闸门",
             "运行时 `inputSchema`",
-            "当前 schema 的必填字段",
-            "不得调用任何业务工具",
+            "Brief 入口例外",
+            "不得在调用 `validate_requirement` 前要求媒介确认",
+            "直接调用 `validate_requirement`",
             "不得向用户索取或自行添加 `trace_id`、`idempotency_key`",
             "schema 冲突",
         ):
             self.assertIn(required, text)
+        self.assertNotIn("pre-validate-requirement", text)
 
     def test_main_skill_uses_staged_confirmations_and_tool_cards(self):
         text = read(SKILL)
@@ -319,11 +321,38 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("`sent_at`", text)
         self.assertIn("使用 null", text)
         self.assertIn("不得用当前时间伪造", text)
-        self.assertIn("用户确认前不得调用", text)
+        self.assertIn("收到媒介输入后直接调用 `validate_requirement`", text)
+        self.assertIn("不得在调用前先向媒介确认", text)
+        self.assertNotIn("用户「确认调用」前不得调用", text)
+        self.assertNotIn("pre-validate-requirement", text)
         self.assertIn("Agent 不在请求中自行构造 `parsed_requirement`", text)
         self.assertIn("Agent 自我修正", text)
         self.assertIn("不得伪装成 `client` 或 `media`", text)
         self.assertIn("不得发送 `trace_id`、`idempotency_key`、`parsed_requirement`、`parsed_requirement_draft`", text)
+
+    def test_askuserquestion_is_the_only_confirmation_pattern(self):
+        text = read(REFERENCES / "ask-user-question-patterns.md")
+        joined = "\n".join(read(path) for path in source_files())
+        for required in (
+            "askuserquestion",
+            "弹窗",
+            "字数限制",
+            "选项互斥",
+            "最多 3 个选项",
+            "不要在 `validate_requirement` 调用前弹窗确认",
+            "`requirement-draft`",
+            "`confirm-structured-brief`",
+        ):
+            self.assertIn(required, text)
+        for forbidden in (
+            "不得使用 `question()` 工具发起结构化提问",
+            "所有 Agent 层暂停点统一使用文本表格",
+            "每次停顿 = 一次文本表格输出",
+            "选项数量不限",
+            "pre-validate-requirement",
+            "首次业务调用必须等用户确认",
+        ):
+            self.assertNotIn(forbidden, joined)
 
     def test_tool_routing_exposes_eleven_runtime_tools(self):
         text = read(REFERENCES / "mcp-tool-routing.md")
@@ -415,7 +444,7 @@ class SkillPackageTest(unittest.TestCase):
             "medium_risk_confirmed",
             "allow_need_confirm_with_risk",
             "INVALID_RESPONSE_CONTRACT",
-            "用户确认前不调用业务工具",
+            "Brief 入口不等待用户确认",
             "不强制添加 `trace_id` 或 `idempotency_key`",
         ):
             self.assertIn(required, text)

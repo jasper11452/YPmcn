@@ -39,11 +39,10 @@
 
 ## 人工确认
 
-所有 Agent 层暂停点统一使用文本表格输出，用户在聊天中打字回复选择。完整模式定义见 [用户交互模式](ask-user-question-patterns.md)。
+所有需要媒介确认、选择、授权或接受风险的暂停点统一使用 `askuserquestion` 弹窗。完整模式定义见 [用户交互模式](ask-user-question-patterns.md)。Brief 输入、补充或修改后直接调用 `validate_requirement`，不先弹窗确认。
 
 | 暂停点 | 交互模式 | 决策 | 下一动作 |
 |---|---|---|---|
-| 首次业务调用前 | `pre-validate-requirement` | 展示参数，询问补充（文本） | 用户确认后调用 `validate_requirement` |
 | status=draft | `requirement-draft` | 用户提供补充信息 | 携带补充消息重新调用 |
 | status=ready | `confirm-structured-brief` | 确认结构化 brief 和数据指标 | 用户确认后调用 `search_creators` |
 | rank_mcns 成功后 | `confirm-supply-ratio` | 确认 MCN/野生比例，是否需要手扒 | 进入 MCN 名单确认 |
@@ -57,10 +56,10 @@
 | 用户修改需求 | `requirement-modify` | 确认重新校验 | 重新调用 `validate_requirement` |
 | 供给不足 | `insufficient-supply` | 补量/放宽/继续 | 按选择调用对应工具 |
 
-- 每次文本表格输出前，Agent 先给一句简短结论（当前阶段结果 + 需要用户决策什么）。
+- 每次弹窗前，Agent 先用一句简短正文说明当前阶段结果和需要用户决策什么。
 - 用户选择「确认/继续」类选项后，Agent 立即执行对应业务动作，不二次询问。
 - 用户选择「取消/拒绝」后，Agent 停止，不得自动推进。
-- 文本表格交互处理「用户想怎么做」；hook 层校验处理「系统允不允许」。两者独立，不可互相替代。
+- `askuserquestion` 处理「用户想怎么做」；hook 层校验处理「系统允不允许」。两者独立，不可互相替代。
 
 ## 项目分发等待
 

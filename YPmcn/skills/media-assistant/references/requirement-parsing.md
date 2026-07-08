@@ -51,7 +51,7 @@ MCP 输出应覆盖客户需求表中可落库的字段，包括：
 ## Agent 负责
 
 - 保留客户/媒介原文与真实消息角色。
-- 在首次调用前以文本形式（`pre-validate-requirement` 模式）向用户核对运行时 schema 和拟传参数。
+- 收到媒介输入、补充或修改后，schema 预检通过即调用 `validate_requirement`；不得在调用前先向用户核对拟传参数。
 - 不确定的业务事实留在原文中，不自行补值。
 - 读取 MCP 返回的 `requirement_parsed`、`missing_fields`、`blocking_fields`、`clarifying_questions`。
 - 面向用户展示短摘要，不泄露完整结构化对象。
@@ -70,4 +70,4 @@ MCP 输出应覆盖客户需求表中可落库的字段，包括：
 - 用业务调用试错探测 schema。
 - 因本地旧 reference 与运行时 schema 冲突而继续调用。
 
-运行时 schema 变化时，以当前 `tools/list` 为准；先以文本形式向用户报告差异并确认，再构造新请求。
+运行时 schema 变化时，以当前 `tools/list` 为准；若 schema 缺失或冲突，停止并报告接入问题，不通过业务工具试错。

@@ -14,7 +14,7 @@
 | 工具 | 调用时机 | 最低成功证据 |
 |---|---|---|
 | `validate_requirement` | 任意 Brief 的第一条业务调用 | `demand_id`、`demand_version`、`status` |
-| `search_creators` | 需求 ready 后立即继续 | 候选池或供给评估结果 |
+| `search_creators` | 结构化 brief 经媒介确认后 | 候选池或供给评估结果 |
 | `rank_mcns` | 候选池就绪后，按平台排序 | MCN 列表与分发建议 |
 | `manual_source_creators` | 供给不足或媒介要求手工补量 | 导入/匹配结果 |
 | `ingest_mcn_submissions` | 已获得真实 `inquiry_id` 和回填 items | 接受/拒绝明细或汇总 |
@@ -31,29 +31,31 @@
 
 ```text
 validate_requirement
+→ **askuserquestion：`confirm-structured-brief`** — 确认结构化 brief
 → search_creators
+→ **askuserquestion：筛选口径确认** — 确认数据字段/筛选口径
 → rank_mcns（每个平台独立）
-→ **文本表格：`mcn-select-for-wechat`** — 选择需发送询价的 MCN（编号选择）
-→ **文本表格：`mcn-wechat-send`** — 确认企微消息内容
+→ **askuserquestion：`mcn-select-for-wechat`** — 确认需发送询价的 MCN
+→ **askuserquestion：`mcn-wechat-send`** — 确认企微消息内容
 → create_with_distributions（preview_only: false 真实发送）
-→ **文本表格：`proceed-to-ranking`** — 询问是否调用 rank_creators
+→ **askuserquestion：`proceed-to-ranking`** — 询问是否调用 rank_creators
 → rank_creators
 → create_submission_batch
 → record_client_feedback
 ```
 
-- `validate_requirement`、`search_creators`、`rank_mcns` 是连续段，补全需求后不要在中间等待确认。
-- `rank_mcns` 输出是建议，不是已发送询价。必须依次通过两次文本表格确认：选中 MCN → 确认消息内容，最后才调用 `create_with_distributions` 发送。
+- `validate_requirement` 返回 draft 时先让媒介补齐缺失项和澄清语义；返回 ready 时必须经 `confirm-structured-brief` 弹窗确认后，才调用 `search_creators`。
+- `rank_mcns` 输出是建议，不是已发送询价。必须依次通过 `askuserquestion` 弹窗确认：选中 MCN → 确认消息内容，最后才调用 `create_with_distributions` 发送。
 - 硬筛后合格 MCN 少于 5 家时，`minimum_mcn_count=5` 自动失效；不得为了凑满 5 家放宽硬筛条件或扩充不合格 MCN，先预警媒介是否启动 `manual_source_creators` 手扒。
 - 用户确认发送后调用 `create_with_distributions`（`preview_only: false`）进行企微询价；发送成功前不得调用 `rank_creators`。
-- `create_with_distributions` 成功后通过 `文本表格`（`proceed-to-ranking` 模式）再次停，等待用户确认是否精排；不要仅凭模型推断。
+- `create_with_distributions` 成功后通过 `askuserquestion`（`proceed-to-ranking` 模式）再次停，等待用户确认是否精排；不要仅凭模型推断。
 - `create_submission_batch` 只使用 `rank_creators` 返回的真实 `run_id`。
 - `record_client_feedback.data.next_action` 是反馈后的业务路由；未知枚举停止并报告接入冲突。
 
 ## 风险分支
 
-- 中风险 MCN：先通过 `文本表格`（`medium-risk-confirm` 模式）获得用户明确确认，再在 `rank_mcns` 请求中传 `medium_risk_confirmed: true`。
-- 风险账号提报：先通过 `文本表格`（`risky-submission-confirm` 模式）获得用户明确确认，再在 `create_submission_batch` 请求中传 `allow_need_confirm_with_risk: true`。
+- 中风险 MCN：先通过 `askuserquestion`（`confirm-medium-risk` 模式）获得用户明确确认，再在 `rank_mcns` 请求中传 `medium_risk_confirmed: true`。
+- 风险账号提报：先通过 `askuserquestion`（`confirm-risky-submission` 模式）获得用户明确确认，再在 `create_submission_batch` 请求中传 `allow_need_confirm_with_risk: true`。
 - 不添加结构化 gate 对象；当前 schema 没有 `gate_id` 或 `confirmation_type`。
 
 ## 调整与反馈

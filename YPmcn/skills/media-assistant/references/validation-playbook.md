@@ -37,8 +37,8 @@ npm test
 
 用 mock 验证：
 
-1. 第一条业务调用前，Agent 先读取运行时 schema 并以文本形式（`pre-validate-requirement` 模式）向用户汇总目标工具、必填字段、拟传值和歧义项。
-2. 用户「确认调用」前不调用业务工具。用户确认前不调用业务工具；所有业务工具调用都必须在确认后执行。
+1. Brief 入口不等待用户确认；Agent 先读取运行时 schema，预检通过后直接调用 `validate_requirement`。
+2. `validate_requirement` 返回 `draft` 时，只按 MCP 返回的缺失必填项和语义模糊点让媒介补充；返回 `ready` 后才用 `askuserquestion` 弹窗确认结构化 brief。
 3. 请求体只使用 schema 已声明字段，不用试错调用探测参数。
 4. ready/draft/失败分别按前端回复规范呈现，不泄露完整 JSON。
 5. 工具缺失或 schema 冲突时返回 `integration_required`。
@@ -51,7 +51,7 @@ uv run python -m unittest discover -s tests -v
 
 ## 4. 真实 MCP 集成
 
-在隔离测试数据上依次验证主链路，实际业务调用前仍须用户明确授权：
+在隔离测试数据上依次验证主链路，不可逆动作和风险接受前仍须用户通过 `askuserquestion` 明确授权：
 
 - 每个工具只发送当前 schema 字段。
 - 响应基础信封具备 `success`、`data`、`error`、`trace_id`。
