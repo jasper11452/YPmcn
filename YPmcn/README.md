@@ -60,7 +60,7 @@ npm run pack:yp
 | `before_tool_call` | `validate_requirement` | 只允许 `raw_messages`、`project_context`、`existing_demand_id`、`existing_demand_version`，并校验基础类型 |
 | `before_tool_call` | 风险 gate | 使用 `medium_risk_confirmed` / `allow_need_confirm_with_risk`，不要求 schema 外字段 |
 | `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；完成后由 `askuserquestion` 确认决定是否继续 |
-| `before_tool_call` | `create_with_distributions` | 校验 `deadline/remindAt`，固定 `usageScope: "project"`，Bash/PowerShell/curl 直连阻断；`askuserquestion` 确认后通过 SSE MCP 发送 |
+| `before_tool_call` | `create_with_distributions` | 校验 `deadline/remindAt`，优先固定 `usageScope: "project"`，`项目` 会被 hook 兼容归一，Bash/PowerShell/curl 直连阻断；`askuserquestion` 确认后通过 SSE MCP 发送 |
 | `before_tool_call` | 可选状态扩展存在 | 校验 `allowed_actions`、平台前置条件和高风险状态 |
 | `after_tool_call` | 所有 YPmcn 结果 | 校验基础响应契约并缓存可选状态扩展 |
 | `after_tool_call` | 项目分发成功 | 记录企微询价已发送并进入等待锁；当前不创建 Cron 任务 |

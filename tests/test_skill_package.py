@@ -295,6 +295,7 @@ class SkillPackageTest(unittest.TestCase):
             "`remindAt`",
             "`usageScope: \"project\"`",
             "唯一固定值",
+            "`项目` 会被 hook 兼容归一",
             "不再触发 OpenClaw `requireApproval`",
             "用户确认前不得创建分发或发送通知",
             "确认对候选池进行达人精排",

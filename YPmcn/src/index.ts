@@ -97,6 +97,7 @@ const LEGACY_PROJECT_DISTRIBUTION_TOOL_NAMES = new Set(["create-with-distributio
 const EXEC_TOOL_NAMES = new Set(["exec", "bash", "shell", "powershell", "pwsh"]);
 const WECOM_ROLES = new Set(["media", "procurement"]);
 const PROJECT_USAGE_SCOPE = "project";
+const PROJECT_USAGE_SCOPE_ALIASES = new Set([PROJECT_USAGE_SCOPE, "项目"]);
 const PROJECT_USAGE_SCOPE_KEYS = ["usageScope", "usage_scope", "usageModule", "module"] as const;
 const PROJECT_PAYLOAD_CONTAINER_KEYS = ["project", "body", "json", "payload"] as const;
 const ISO_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -225,15 +226,20 @@ function isMissingUsageScopeValue(value: unknown): boolean {
     (typeof value === "string" && value.trim().length === 0);
 }
 
-function hasCanonicalProjectUsageScope(params: Record<string, unknown>): boolean {
-  return typeof params.usageScope === "string" && params.usageScope.trim() === PROJECT_USAGE_SCOPE;
+function isProjectUsageScopeValue(value: unknown): value is string {
+  return typeof value === "string" && PROJECT_USAGE_SCOPE_ALIASES.has(value.trim());
 }
 
-function validateProjectUsageScopeValues(params: Record<string, unknown>): string | undefined {
+function hasProjectUsageScope(params: Record<string, unknown>): boolean {
+  return PROJECT_USAGE_SCOPE_KEYS.some((key) => isProjectUsageScopeValue(params[key]));
+}
+
+function normalizeProjectUsageScopeValues(params: Record<string, unknown>): ProjectDistributionParamsNormalization {
   const seen = new Set<Record<string, unknown>>();
   const queue: Array<{ params: Record<string, unknown>; path: string; depth: number }> = [
     { params, path: "params", depth: 0 },
   ];
+  const replacements: Array<{ params: Record<string, unknown>; key: typeof PROJECT_USAGE_SCOPE_KEYS[number] }> = [];
 
   for (const item of queue) {
     if (seen.has(item.params)) continue;
@@ -242,8 +248,15 @@ function validateProjectUsageScopeValues(params: Record<string, unknown>): strin
     for (const key of PROJECT_USAGE_SCOPE_KEYS) {
       const value = item.params[key];
       if (isMissingUsageScopeValue(value)) continue;
-      if (typeof value !== "string" || value.trim() !== PROJECT_USAGE_SCOPE) {
-        return `${item.path}.${key} 必须固定为 "${PROJECT_USAGE_SCOPE}"`;
+      if (!isProjectUsageScopeValue(value)) {
+        return {
+          params,
+          changed: false,
+          error: `${item.path}.${key} 必须为 "${PROJECT_USAGE_SCOPE}" 或 "项目"`,
+        };
+      }
+      if (value !== PROJECT_USAGE_SCOPE) {
+        replacements.push({ params: item.params, key });
       }
     }
 
@@ -256,17 +269,37 @@ function validateProjectUsageScopeValues(params: Record<string, unknown>): strin
     }
   }
 
-  return undefined;
+  if (replacements.length === 0) return { params, changed: false };
+
+  const cloneMap = new Map<Record<string, unknown>, Record<string, unknown>>();
+  for (const item of seen) {
+    cloneMap.set(item, { ...item });
+  }
+  for (const { params: target, key } of replacements) {
+    cloneMap.get(target)![key] = PROJECT_USAGE_SCOPE;
+  }
+  for (const item of seen) {
+    const cloned = cloneMap.get(item)!;
+    for (const key of PROJECT_PAYLOAD_CONTAINER_KEYS) {
+      const nested = item[key];
+      if (isObject(nested) && cloneMap.has(nested)) {
+        cloned[key] = cloneMap.get(nested);
+      }
+    }
+  }
+
+  return { params: cloneMap.get(params) ?? params, changed: true };
 }
 
 function normalizeProjectDistributionParams(params: Record<string, unknown>): ProjectDistributionParamsNormalization {
-  const error = validateProjectUsageScopeValues(params);
-  if (error) return { params, changed: false, error };
+  const normalizedUsageScope = normalizeProjectUsageScopeValues(params);
+  if (normalizedUsageScope.error) return normalizedUsageScope;
+  params = normalizedUsageScope.params;
 
   const project = isObject(params.project) ? params.project : null;
   if (project) {
-    if (hasCanonicalProjectUsageScope(project) || hasCanonicalProjectUsageScope(params)) {
-      return { params, changed: false };
+    if (hasProjectUsageScope(project) || hasProjectUsageScope(params)) {
+      return { params, changed: normalizedUsageScope.changed };
     }
     return {
       params: {
@@ -280,8 +313,8 @@ function normalizeProjectDistributionParams(params: Record<string, unknown>): Pr
     };
   }
 
-  if (hasCanonicalProjectUsageScope(params)) {
-    return { params, changed: false };
+  if (hasProjectUsageScope(params)) {
+    return { params, changed: normalizedUsageScope.changed };
   }
 
   return {

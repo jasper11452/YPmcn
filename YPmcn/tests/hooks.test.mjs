@@ -268,6 +268,44 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(result?.params?.usageScope, undefined);
   });
 
+  it("normalizes documented project usage scope aliases without rejecting snake_case distribution fields", async () => {
+    const before = registeredHandler("before_tool_call");
+    const result = await before(
+      {
+        toolName: "create_with_distributions",
+        toolCallId: "distribution-scope-alias-1",
+        params: {
+          project: {
+            projectName: "618达人提报",
+            deadline: "2099-07-06T18:00:00+08:00",
+            usage_scope: "项目",
+            platform: "小红书",
+          },
+          supplier_ids: ["supplier-1"],
+          send_wechat_notification: false,
+        },
+      },
+      {
+        sessionKey: "distribution-scope-alias-session",
+        operatorRole: "media",
+        sessionState: {
+          ypmcn_gate_state: {
+            structured_brief_confirmed: true,
+            supply_ratio_confirmed: true,
+            mcn_list_confirmed: true,
+            form_fields_confirmed: true,
+            send_content_confirmed: true,
+          },
+        },
+      },
+    );
+
+    assert.equal(result?.block, undefined);
+    assert.equal(result?.params?.project?.usage_scope, "project");
+    assert.equal(result?.params?.supplier_ids?.[0], "supplier-1");
+    assert.equal(result?.params?.send_wechat_notification, false);
+  });
+
   it("blocks create_with_distributions when usageScope is not project", async () => {
     const before = registeredHandler("before_tool_call");
     const result = await before(

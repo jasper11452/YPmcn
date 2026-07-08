@@ -63,7 +63,7 @@
 
 ## 项目分发等待
 
-调用 `create_with_distributions` 前必须取得单次用户确认，并提供未来的 `deadline` / `remindAt`，项目模板匹配固定使用 `usageScope: "project"`。不得通过 Bash、脚本或 `/api/projects/create-with-distributions/` curl 直连。调用成功后只记录企微询价已发送并进入等待态；当前不创建 Cron/提醒任务。收到用户新消息前不得执行下一步。
+调用 `create_with_distributions` 前必须取得单次用户确认，并提供未来的 `deadline` / `remindAt`，项目模板匹配优先使用 `usageScope: "project"`；`项目` 会被 hook 兼容归一。不得通过 Bash、脚本或 `/api/projects/create-with-distributions/` curl 直连。调用成功后只记录企微询价已发送并进入等待态；当前不创建 Cron/提醒任务。收到用户新消息前不得执行下一步。
 
 调用失败不进入等待锁，不允许自动推进。
 

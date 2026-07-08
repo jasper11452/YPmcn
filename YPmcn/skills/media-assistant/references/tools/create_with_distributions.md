@@ -38,7 +38,7 @@
 }
 ```
 
-`usageScope: "project"` 是唯一固定值，不要让模型选择其他枚举；漏传时 hook 会补，显式传错会阻断。`columns`、`templateId`、`notification_template` 等字段按运行时 schema 和用户确认结果传，不由 hook 强制。
+`usageScope: "project"` 是首选固定写法，不要让模型选择业务枚举；接口文档里的 `项目` 会被 hook 兼容归一为 `project`，漏传时 hook 会补，其他显式值会阻断。`columns`、`templateId`、`notification_template`、`prefillRows` 等字段按运行时 schema 和用户确认结果传，不由 hook 强制。
 
 ## 输出成功证据
 
@@ -50,4 +50,4 @@
 
 ## 禁止
 
-不得通过 Bash、PowerShell、curl 或旧工具名绕过。不得让模型控制 `endpointUrl`、`execute` 或发送模式。非媒介/采购角色不得调用。不得把 `usageScope` 写成 `项目`、`campaign`、`supplier` 或其他值。
+不得通过 Bash、PowerShell、curl 或旧工具名绕过。不得让模型控制 `endpointUrl`、`execute` 或发送模式。非媒介/采购角色不得调用。除后端文档兼容的 `项目` 外，不得把 `usageScope` 写成 `campaign`、`supplier` 或其他值。
