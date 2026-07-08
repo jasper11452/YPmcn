@@ -44,6 +44,7 @@ validate_requirement
 
 - `validate_requirement`、`search_creators`、`rank_mcns` 是连续段，补全需求后不要在中间等待确认。
 - `rank_mcns` 输出是建议，不是已发送询价。必须依次通过两次文本表格确认：选中 MCN → 确认消息内容，最后才调用 `create_with_distributions` 发送。
+- 硬筛后合格 MCN 少于 5 家时，`minimum_mcn_count=5` 自动失效；不得为了凑满 5 家放宽硬筛条件或扩充不合格 MCN，先预警媒介是否启动 `manual_source_creators` 手扒。
 - 用户确认发送后调用 `create_with_distributions`（`preview_only: false`）进行企微询价；发送成功前不得调用 `rank_creators`。
 - `create_with_distributions` 成功后通过 `文本表格`（`proceed-to-ranking` 模式）再次停，等待用户确认是否精排；不要仅凭模型推断。
 - `create_submission_batch` 只使用 `rank_creators` 返回的真实 `run_id`。
@@ -58,6 +59,7 @@ validate_requirement
 ## 调整与反馈
 
 - 放宽筛选只使用 `search_creators.authorized_relaxations`，具体对象结构以运行时 schema/后端约定为准。
+- 合格 MCN 覆盖不足不是自动放宽筛选理由；例如 60 位达人都属于同一家 MCN 时，不因不足 5 家而调用 `authorized_relaxations` 扩充不合格机构。
 - 手工补量通过 `manual_source_creators`，不得虚构达人或报价。
 - 人工调整通过 `audit_manual_adjustment` 留痕，不直接篡改推荐结果。
 - 客户反馈必须绑定真实 `run_id`；需求确有变化时回到 `validate_requirement`。

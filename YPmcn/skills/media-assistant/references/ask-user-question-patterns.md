@@ -225,6 +225,7 @@ Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；h
 ```markdown
 当前供给评估：
 • 刊例硬筛候选：{rate_card_count} 位
+• 硬筛后合格 MCN：{qualified_mcn_count} 家
 • 建议 MCN 来源：{mcn_ratio}%
 • 建议野生/手扒：{wild_ratio}%
 
@@ -238,6 +239,7 @@ Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；h
 
 **处理**：
 - 用户回复比例选择 → 进入 MCN 机构名单确认
+- 硬筛后合格 MCN 少于 5 家时，`minimum_mcn_count=5` 自动失效；不得为了凑满 5 家放宽硬筛条件。若需求数量充足但 MCN 覆盖不足，例如 60 位达人都属于同一家 MCN，先预警媒介是否启动 `manual_source_creators` 手扒，再按媒介选择继续或停下。
 - 比例确认前不得发送企微或进入名单确认
 
 ---

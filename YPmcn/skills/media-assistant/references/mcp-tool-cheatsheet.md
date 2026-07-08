@@ -103,6 +103,8 @@ CPM、CPE、互动量、完播率等数字数据要求进入 `requirements_json.
 | `limit` | integer | 20 |
 | `write_mcn_recommendation_items` | boolean | true |
 
+业务例外：硬筛后合格 MCN 少于 5 家时，`minimum_mcn_count=5` 自动失效。示例：需求 2 个、硬筛后有 60 位达人，但 60 位达人都属于同一家 MCN，则只向这 1 家或媒介确认后的实际合格 MCN 发送询价；不得为了凑满 5 家放宽硬筛条件，需预警媒介是否启动 `manual_source_creators` 手扒。
+
 ### 5.4 `rank_creators`
 
 必填：`demand_id: string`、`demand_version: integer`、`ranking_strategy: string`。

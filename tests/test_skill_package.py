@@ -240,6 +240,25 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("没有 `get_workflow_state`", text)
         self.assertIn("`trace_id` 是响应字段", text)
 
+    def test_rank_mcns_minimum_count_does_not_override_hard_filter_coverage(self):
+        combined = "\n".join(
+            read(path)
+            for path in (
+                REFERENCES / "tools" / "rank_mcns.md",
+                REFERENCES / "mcp-tool-cheatsheet.md",
+                REFERENCES / "mcp-tool-routing.md",
+                REFERENCES / "ask-user-question-patterns.md",
+            )
+        )
+        for required in (
+            "硬筛后合格 MCN 少于 5 家",
+            "`minimum_mcn_count=5` 自动失效",
+            "不得为了凑满 5 家放宽硬筛条件",
+            "60 位达人都属于同一家 MCN",
+            "预警媒介是否启动 `manual_source_creators` 手扒",
+        ):
+            self.assertIn(required, combined)
+
     def test_hook_behavior_reference_covers_runtime_layers(self):
         text = read(REFERENCES / "hook-behavior.md")
         for required in (
