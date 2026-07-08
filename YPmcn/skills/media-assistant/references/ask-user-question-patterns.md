@@ -78,26 +78,26 @@
 2. **不可逆操作**：涉及发送询价、创建项目、提报等不可逆操作时，在表格说明中标注「不可逆」
 3. **失败不继续**：用户选择取消/拒绝后，Agent 必须停止，不得自动选择备选方案推进
 4. **不泄露内部信息**：不展示 trace_id、JSON 结构、内部状态字段、数据库 ID。面向用户只用业务中文
-5. **requireApproval 失败处理**：如果 Agent 层确认通过但 hook 层 requireApproval 返回 "gateway unavailable"，Agent 应报告用户「插件审批网关不可用，需要修复后重试」，不得绕过或尝试替代路径
+5. **Hook 阻断处理**：如果 Agent 层确认通过但 hook 阻断调用，Agent 应报告具体阻断原因并停止，不得绕过或尝试替代路径
 
 ---
 
-## 与 OpenClaw requireApproval 的双层关系
+## 与 Hook 校验的关系
 
-这是两层独立、互补的确认机制。两者都必须通过，缺一不可。
+文本确认负责业务决策；hook 负责系统边界。当前插件不再为 `create_with_distributions` 或 `rank_creators` 触发 OpenClaw `requireApproval`。
 
 | 层级 | 机制 | 用途 | 触发者 | 执行顺序 |
 |---|---|---|---|---|
 | **Agent 层** | 文本表格 + 用户打字回复 | 业务决策：参数确认、阶段推进、风险接受、范围选择 | Agent 按 SKILL.md 主动输出 | 工具调用**前** |
-| **Hook 层** | `requireApproval` | 安全网关：不可逆操作审批、参数校验、超时阻断 | 插件 `src/index.ts` 自动触发 | 工具调用**时** |
+| **Hook 层** | `before_tool_call` / `after_tool_call` | 校验参数、角色、状态、直连绕过和等待锁 | 插件 `src/index.ts` 自动触发 | 工具调用**时/后** |
 
 **典型流程**（以企微发送为例）：
 1. Agent 输出 MCN 列表表格和企微消息预览 → 用户打字回复「1,3」选择 MCN，再回复「确认发送」
 2. Agent 收到确认后立即调用 `create_with_distributions`
-3. 插件 `before_tool_call` hook 自动弹出 `requireApproval` 二次确认
-4. 用户「allow-once」→ 工具真正执行
+3. 插件 `before_tool_call` hook 校验 `deadline/remindAt`、`usageScope: "project"`、角色、gate 和直连绕过；通过后工具执行
+4. 插件 `after_tool_call` 在成功后进入等待锁，收到用户新消息前不推进下一步
 
-Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；hook 层审批是不可跳过的安全机制。
+Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；hook 层校验是不可跳过的安全机制。
 
 ---
 
@@ -344,17 +344,17 @@ Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；h
 ```markdown
 | 选项 | 说明 |
 |------|------|
-| **确认发送** | 调用 create_with_distributions 发送（不可逆，需审批 allow-once） |
+| **确认发送** | 调用 create_with_distributions 发送（不可逆） |
 | **修改消息** | 在聊天中说明修改内容，重新生成 |
 | **取消** | 不发送，可调整后重来 |
 ```
 
 **处理**：
-- 用户回复「确认发送」→ 立即调 `create_with_distributions`（`preview_only: false`），传入 `supplierIds` 和 `notification_template`
+- 用户回复「确认发送」→ 立即调 `create_with_distributions`（`preview_only: false`），传入 `supplierIds`、`notification_template`，并固定 `usageScope: "project"`
 - 用户回复「修改消息」→ 停止。用户在聊天中说明修改内容，Agent 收到后重新展示消息确认
 - 用户回复「取消」→ 停止
 
-**注意**：Agent 层确认后，插件 hook 会自动触发 `requireApproval` 二次确认。
+**注意**：Agent 层确认后，插件 hook 只做参数、角色、状态和直连绕过校验，不再触发 OpenClaw `requireApproval`。
 
 ---
 
@@ -370,7 +370,7 @@ Agent 层确认**不等于**系统放行。Agent 只负责业务决策传达；h
 ```markdown
 | 选项 | 说明 |
 |------|------|
-| **确认精排** | 调用 rank_creators 排序（需审批 allow-once） |
+| **确认精排** | 调用 rank_creators 排序 |
 | **等待询价** | 先等 MCN 回复报价 |
 | **取消** | 不进入精排 |
 ```

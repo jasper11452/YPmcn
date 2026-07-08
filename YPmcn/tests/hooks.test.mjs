@@ -201,6 +201,107 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(result?.block, undefined);
   });
 
+  it("adds canonical usageScope project to top-level create_with_distributions params", async () => {
+    const before = registeredHandler("before_tool_call");
+    const result = await before(
+      {
+        toolName: "create_with_distributions",
+        toolCallId: "distribution-scope-top-level-1",
+        params: {
+          projectName: "618达人提报",
+          deadline: "2099-07-06T18:00:00+08:00",
+          platform: "小红书",
+          supplierIds: ["supplier-1"],
+        },
+      },
+      {
+        sessionKey: "distribution-scope-top-level-session",
+        operatorRole: "media",
+        sessionState: {
+          ypmcn_gate_state: {
+            structured_brief_confirmed: true,
+            supply_ratio_confirmed: true,
+            mcn_list_confirmed: true,
+            form_fields_confirmed: true,
+            send_content_confirmed: true,
+          },
+        },
+      },
+    );
+
+    assert.equal(result?.block, undefined);
+    assert.equal(result?.params?.usageScope, "project");
+  });
+
+  it("adds canonical usageScope project inside nested project params", async () => {
+    const before = registeredHandler("before_tool_call");
+    const result = await before(
+      {
+        toolName: "create_with_distributions",
+        toolCallId: "distribution-scope-nested-1",
+        params: {
+          project: {
+            projectName: "618达人提报",
+            deadline: "2099-07-06T18:00:00+08:00",
+            platform: "小红书",
+          },
+          supplierIds: ["supplier-1"],
+        },
+      },
+      {
+        sessionKey: "distribution-scope-nested-session",
+        operatorRole: "media",
+        sessionState: {
+          ypmcn_gate_state: {
+            structured_brief_confirmed: true,
+            supply_ratio_confirmed: true,
+            mcn_list_confirmed: true,
+            form_fields_confirmed: true,
+            send_content_confirmed: true,
+          },
+        },
+      },
+    );
+
+    assert.equal(result?.block, undefined);
+    assert.equal(result?.params?.project?.usageScope, "project");
+    assert.equal(result?.params?.usageScope, undefined);
+  });
+
+  it("blocks create_with_distributions when usageScope is not project", async () => {
+    const before = registeredHandler("before_tool_call");
+    const result = await before(
+      {
+        toolName: "create_with_distributions",
+        toolCallId: "distribution-scope-invalid-1",
+        params: {
+          projectName: "618达人提报",
+          deadline: "2099-07-06T18:00:00+08:00",
+          usageScope: "campaign",
+          platform: "小红书",
+          supplierIds: ["supplier-1"],
+        },
+      },
+      {
+        sessionKey: "distribution-scope-invalid-session",
+        operatorRole: "media",
+        sessionState: {
+          ypmcn_gate_state: {
+            structured_brief_confirmed: true,
+            supply_ratio_confirmed: true,
+            mcn_list_confirmed: true,
+            form_fields_confirmed: true,
+            send_content_confirmed: true,
+          },
+        },
+      },
+    );
+
+    assert.equal(result?.block, true);
+    assert.match(result.blockReason, /usageScope/);
+    assert.match(result.blockReason, /project/);
+  });
+
   it("blocks rank_creators when allowed_actions and platform state contradict each other", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "rank_creators",
@@ -605,7 +706,9 @@ describe("YPmcn OpenClaw hook layering", () => {
       },
     };
 
-    assert.equal(await before(event, ctx), undefined);
+    const allowed = await before(event, ctx);
+    assert.equal(allowed?.block, undefined);
+    assert.equal(allowed?.requireApproval, undefined);
     await after({ ...event, result: { exitCode: 0 } }, ctx);
     await after({ ...event, result: { exitCode: 0 } }, ctx);
 
@@ -683,7 +786,9 @@ describe("YPmcn OpenClaw hook layering", () => {
       params: { deadline: "2099-07-06T19:00:00+08:00", supplierIds: ["supplier-1"] },
     };
 
-    assert.equal(await before(failed, ctx), undefined);
+    const allowed = await before(failed, ctx);
+    assert.equal(allowed?.block, undefined);
+    assert.equal(allowed?.requireApproval, undefined);
     await after({ ...failed, result: { exitCode: 1 }, error: "exit 1" }, ctx);
 
     const next = await before(
@@ -716,7 +821,9 @@ describe("YPmcn OpenClaw hook layering", () => {
       params: { deadline: "2099-07-06T20:00:00+08:00", supplierIds: ["supplier-1"] },
     };
 
-    assert.equal(await before(event, ctx), undefined);
+    const allowed = await before(event, ctx);
+    assert.equal(allowed?.block, undefined);
+    assert.equal(allowed?.requireApproval, undefined);
     await after({ ...event, result: { exitCode: 0 } }, ctx);
 
     await messageReceived(

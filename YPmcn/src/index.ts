@@ -96,6 +96,9 @@ const PROJECT_DISTRIBUTION_TOOL_NAMES = new Set([PROJECT_DISTRIBUTION_ACTION]);
 const LEGACY_PROJECT_DISTRIBUTION_TOOL_NAMES = new Set(["create-with-distributions"]);
 const EXEC_TOOL_NAMES = new Set(["exec", "bash", "shell", "powershell", "pwsh"]);
 const WECOM_ROLES = new Set(["media", "procurement"]);
+const PROJECT_USAGE_SCOPE = "project";
+const PROJECT_USAGE_SCOPE_KEYS = ["usageScope", "usage_scope", "usageModule", "module"] as const;
+const PROJECT_PAYLOAD_CONTAINER_KEYS = ["project", "body", "json", "payload"] as const;
 const ISO_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const PROJECT_DISTRIBUTION_INVOCATION = /(?:^|(?:&&|\|\||;|\|)\s*)(?:(?:uv\s+run|npx|node|(?:[^\s"';&|]*\/)?python(?:3(?:\.\d+)?)?|powershell|pwsh)\s+)?["']?(?:[^\s"';&|]*\/)?create[-_]with[-_]distributions(?:\.(?:py|js|mjs|ts|ps1|sh))?["']?(?=\s|$)/;
 const PROJECT_DISTRIBUTION_API_INVOCATION = /\/api\/projects\/create-with-distributions\/?/;
@@ -109,6 +112,12 @@ export interface ProjectDistributionInvocation {
 
 export interface ProjectDistributionParseResult {
   invocation?: ProjectDistributionInvocation;
+  error?: string;
+}
+
+interface ProjectDistributionParamsNormalization {
+  params: Record<string, unknown>;
+  changed: boolean;
   error?: string;
 }
 
@@ -210,6 +219,80 @@ function findReminderTime(params: Record<string, unknown>): unknown {
   return undefined;
 }
 
+function isMissingUsageScopeValue(value: unknown): boolean {
+  return value === undefined ||
+    value === null ||
+    (typeof value === "string" && value.trim().length === 0);
+}
+
+function hasCanonicalProjectUsageScope(params: Record<string, unknown>): boolean {
+  return typeof params.usageScope === "string" && params.usageScope.trim() === PROJECT_USAGE_SCOPE;
+}
+
+function validateProjectUsageScopeValues(params: Record<string, unknown>): string | undefined {
+  const seen = new Set<Record<string, unknown>>();
+  const queue: Array<{ params: Record<string, unknown>; path: string; depth: number }> = [
+    { params, path: "params", depth: 0 },
+  ];
+
+  for (const item of queue) {
+    if (seen.has(item.params)) continue;
+    seen.add(item.params);
+
+    for (const key of PROJECT_USAGE_SCOPE_KEYS) {
+      const value = item.params[key];
+      if (isMissingUsageScopeValue(value)) continue;
+      if (typeof value !== "string" || value.trim() !== PROJECT_USAGE_SCOPE) {
+        return `${item.path}.${key} 必须固定为 "${PROJECT_USAGE_SCOPE}"`;
+      }
+    }
+
+    if (item.depth >= 2) continue;
+    for (const key of PROJECT_PAYLOAD_CONTAINER_KEYS) {
+      const nested = item.params[key];
+      if (isObject(nested)) {
+        queue.push({ params: nested, path: `${item.path}.${key}`, depth: item.depth + 1 });
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeProjectDistributionParams(params: Record<string, unknown>): ProjectDistributionParamsNormalization {
+  const error = validateProjectUsageScopeValues(params);
+  if (error) return { params, changed: false, error };
+
+  const project = isObject(params.project) ? params.project : null;
+  if (project) {
+    if (hasCanonicalProjectUsageScope(project) || hasCanonicalProjectUsageScope(params)) {
+      return { params, changed: false };
+    }
+    return {
+      params: {
+        ...params,
+        project: {
+          ...project,
+          usageScope: PROJECT_USAGE_SCOPE,
+        },
+      },
+      changed: true,
+    };
+  }
+
+  if (hasCanonicalProjectUsageScope(params)) {
+    return { params, changed: false };
+  }
+
+  return {
+    params: {
+      ...params,
+      usageScope: PROJECT_USAGE_SCOPE,
+    },
+    changed: true,
+  };
+}
+
 export function parseProjectDistributionInvocation(toolName: string, params: Record<string, unknown>): ProjectDistributionParseResult | null {
   const bareName = bareToolName(toolName);
 
@@ -259,14 +342,23 @@ function runBeforeProjectDistributionToolCall(
     return { block: true, blockReason: waitingBlockReason(waiting) };
   }
 
-  const params = isObject(event.params) ? event.params : {};
-  const parsed = parseProjectDistributionInvocation(String(event.toolName ?? ""), params);
+  const rawToolName = String(event.toolName ?? "");
+  let params = isObject(event.params) ? event.params : {};
+  let normalizedParams: ProjectDistributionParamsNormalization | undefined;
+  if (PROJECT_DISTRIBUTION_TOOL_NAMES.has(bareToolName(rawToolName))) {
+    normalizedParams = normalizeProjectDistributionParams(params);
+    if (normalizedParams.error) return { block: true, blockReason: normalizedParams.error };
+    params = normalizedParams.params;
+    if (normalizedParams.changed) event.params = params;
+  }
+
+  const parsed = parseProjectDistributionInvocation(rawToolName, params);
   if (!parsed) return undefined;
   if (parsed.error) return { block: true, blockReason: parsed.error };
   if (!parsed.invocation) return { block: true, blockReason: `${PROJECT_DISTRIBUTION_ACTION} 调用无法解析` };
   if (!sessionKey) {
     // MCP 工具调用可能不带 sessionKey，允许发送但跳过等待锁状态追踪
-    return undefined;
+    return normalizedParams?.changed ? { params } : undefined;
   }
 
   const toolCallId = nonEmptyString(event.toolCallId) ? event.toolCallId : null;
@@ -282,7 +374,7 @@ function runBeforeProjectDistributionToolCall(
 
   // requireApproval bypassed — gateway pairing not available in YP Action
   // Agent-level text table confirmation (mcn-wechat-send) provides user confirmation
-  return undefined;
+  return normalizedParams?.changed ? { params } : undefined;
 }
 
 function findExitCode(result: unknown): number | null {
@@ -840,7 +932,9 @@ export function registerHooks(api: { on: (name: string, handler: (...args: any[]
     "before_tool_call",
     async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
       const projectDistributionResult = runBeforeProjectDistributionToolCall(event, ctx);
-      if (projectDistributionResult) return projectDistributionResult;
+      if (projectDistributionResult?.block || projectDistributionResult?.requireApproval) {
+        return projectDistributionResult;
+      }
 
       const toolName = normalizeYpmcnToolName(String(event.toolName ?? ""));
       if (!toolName) return;
@@ -888,7 +982,9 @@ export function registerHooks(api: { on: (name: string, handler: (...args: any[]
           }, null, 2));
         }
       }
-      return runBeforeToolCallGuards(toolCtx);
+      const guardResult = await runBeforeToolCallGuards(toolCtx);
+      if (guardResult) return guardResult;
+      return projectDistributionResult?.params ? { params: projectDistributionResult.params } : undefined;
     },
     { priority: 90, timeoutMs: 5_000 },
   );

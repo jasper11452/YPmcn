@@ -60,11 +60,11 @@
 - 每次文本表格输出前，Agent 先给一句简短结论（当前阶段结果 + 需要用户决策什么）。
 - 用户选择「确认/继续」类选项后，Agent 立即执行对应业务动作，不二次询问。
 - 用户选择「取消/拒绝」后，Agent 停止，不得自动推进。
-- 文本表格交互处理「用户想怎么做」；hook 层 `requireApproval` 处理「系统允不允许」。两者独立，不可互相替代。
+- 文本表格交互处理「用户想怎么做」；hook 层校验处理「系统允不允许」。两者独立，不可互相替代。
 
 ## 项目分发等待
 
-调用 `create_with_distributions` 前必须取得单次用户确认，并提供未来的 `deadline` / `remindAt`。不得通过 Bash、脚本或 `/api/projects/create-with-distributions/` curl 直连。调用成功后只记录企微询价已发送并进入等待态；当前不创建 Cron/提醒任务。收到用户新消息前不得执行下一步。
+调用 `create_with_distributions` 前必须取得单次用户确认，并提供未来的 `deadline` / `remindAt`，项目模板匹配固定使用 `usageScope: "project"`。不得通过 Bash、脚本或 `/api/projects/create-with-distributions/` curl 直连。调用成功后只记录企微询价已发送并进入等待态；当前不创建 Cron/提醒任务。收到用户新消息前不得执行下一步。
 
 调用失败不进入等待锁，不允许自动推进。
 

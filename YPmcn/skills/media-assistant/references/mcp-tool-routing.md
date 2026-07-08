@@ -25,7 +25,7 @@
 | `get_creator_detail` | 查询单个达人 | creator 详情 |
 | `get_recommendation_run_detail` | 查询/恢复推荐运行 | run、批次及所选详情 |
 
-当前没有 `get_workflow_state`。`create_with_distributions` 取代旧 create_mcn_inquiries，是当前唯一企微分发工具名；通过插件端点发送真实企微询价。先 `preview_only: true` 获取预览，确认后 `preview_only: false` 真实发送。不得再调用旧工具或近似内部服务。
+当前没有 `get_workflow_state`。`create_with_distributions` 取代旧 create_mcn_inquiries，是当前唯一企微分发工具名；通过插件端点发送真实企微询价。先 `preview_only: true` 获取预览，确认后 `preview_only: false` 真实发送。项目模板匹配固定使用 `usageScope: "project"`，不要选择其他枚举。不得再调用旧工具或近似内部服务。
 
 ## 主链路
 

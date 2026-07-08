@@ -63,9 +63,10 @@ Hook 会阻断 `trace_id`、`idempotency_key`、`parsed_requirement`、`parsed_r
 ## 项目分发确认与等待
 
 - 只允许 YP Action 工具 `create_with_distributions` 执行分发；旧名 `create-with-distributions` 直接阻断并提示改名。
-- 工具参数校验通过后，将 `requireApproval` 设为 `allow-once` 单次确认；拒绝或超时均不执行。
 - `exec`、`bash`、`shell`、`powershell`、`pwsh` 中的 `create_with_distributions` 脚本或 `/api/projects/create-with-distributions/` 直连会被明确阻断；普通文本提及不触发。
-- 工具参数必须包含未来的带时区 ISO 8601 `deadline`、`remindAt`、`remind_at` 或嵌套 `project.deadline`；不得包含 `execute` 或 `endpointUrl`，发送模式和后端地址不能由 Agent 入参控制。
+- 工具参数必须包含未来的带时区 ISO 8601 `deadline`、`remindAt`、`remind_at` 或嵌套 `project.deadline`。
+- `usageScope: "project"` 是唯一固定值；漏传时 hook 会补到顶层或 `project` 对象内，显式传入非 `project` 的 `usageScope` / `usage_scope` / `usageModule` / `module` 会阻断。
+- 除上述时间和 `usageScope` 外，hook 不重复实现项目字段 schema；`columns`、`templateId`、`platform`、`supplierIds` 等字段以运行时 `inputSchema` 和后端校验为准。
 - 无效时间在创建分发前阻断；Cron 服务不可用不阻断发送。
 - 用户确认前不得创建分发或发送通知；用户文本确认后直接执行，不再触发 OpenClaw `requireApproval`。
 - 调用成功后，只记录该会话已完成企微询价，并立即进入等待锁；当前不创建 Cron/`agentTurn` 提醒任务。

@@ -272,7 +272,9 @@ class SkillPackageTest(unittest.TestCase):
             "`create_with_distributions`",
             "`deadline`",
             "`remindAt`",
-            "`allow-once`",
+            "`usageScope: \"project\"`",
+            "唯一固定值",
+            "不再触发 OpenClaw `requireApproval`",
             "用户确认前不得创建分发或发送通知",
             "确认对候选池进行达人精排",
         ):
