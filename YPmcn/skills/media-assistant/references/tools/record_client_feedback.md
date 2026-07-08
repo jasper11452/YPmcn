@@ -14,7 +14,17 @@
 
 ## 调用后必须停在哪里
 
-按 `next_action` 展示下一步：下一批、按反馈重排、需求变更重跑、关闭需求或转人工。需求变更时回到结构化 brief 确认。
+按 `next_action` 展示下一步。当前支持的 `next_action` 枚举值及对应业务路由：
+
+| `next_action` | 含义 | 下一步动作 |
+|---|---|---|
+| `continue_submission` | 继续下一批提报 | 复用当前 `run_id` 调用 `create_submission_batch` |
+| `rerank` | 按客户反馈重新排序 | 携带 `feedback_preferences` 重新调用 `rank_creators` |
+| `requirement_change` | 客户需求变更 | 回到 `validate_requirement`，传入 `requirement_changes` |
+| `close` | 关闭需求 | 流程结束，不做后续操作 |
+| `manual_review` | 转人工处理 | 停止自动化流程，交由人工媒介跟进 |
+
+未知枚举值停止并报告接入冲突。
 
 ## 禁止
 

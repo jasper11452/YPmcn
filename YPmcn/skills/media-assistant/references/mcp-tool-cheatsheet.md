@@ -47,7 +47,7 @@
 
 ## 4. 工具清单
 
-生产 YPmcn 工具共 11 个：9 个写工具、2 个只读查询。没有 `get_workflow_state`。
+生产 YPmcn 工具共 12 个：10 个写工具、2 个只读查询。`create_with_distributions` 已集成到 MCP 工具集中。没有 `get_workflow_state`。
 
 ## 5. 分工具参数
 
@@ -169,6 +169,42 @@ CPM、CPE、互动量、完播率等数字数据要求进入 `requirements_json.
 必填：`run_id: string`。
 
 可选布尔字段及默认值：`include_submissions=true`、`include_creator_detail=false`、`include_feedback=true`。
+
+### 5.12 `create_with_distributions`
+
+必填字段以运行时 schema 为准，必须包含未来的带时区 ISO 8601 `deadline` / `remindAt`。
+
+推荐按运行时 schema 选择以下两种形态之一：
+
+```json
+{
+  "projectName": "618达人提报",
+  "description": "请在截止时间前完成达人信息填写。",
+  "deadline": "2026-07-07T18:00:00+08:00",
+  "usageScope": "project",
+  "platform": "小红书",
+  "supplierIds": ["supplier-id"],
+  "sendWechatNotification": true
+}
+```
+
+或：
+
+```json
+{
+  "project": {
+    "projectName": "618达人提报",
+    "description": "请在截止时间前完成达人信息填写。",
+    "deadline": "2026-07-07T18:00:00+08:00",
+    "usageScope": "project",
+    "platform": "小红书"
+  },
+  "supplierIds": ["supplier-id"],
+  "sendWechatNotification": true
+}
+```
+
+`usageScope: "project"` 是首选固定写法，不要让模型选择业务枚举；接口文档里的 `项目` 会被 hook 兼容归一为 `project`。先 `preview_only: true` 预览消息，确认后 `preview_only: false` 真实发送。调成功后 Hook 进入等待锁，发送成功前不得调用 `rank_creators`。
 
 ## 6. 恢复与失败
 

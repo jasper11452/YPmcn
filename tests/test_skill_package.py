@@ -54,6 +54,7 @@ EXPECTED_TOOLS = {
     "rank_mcns",
     "manual_source_creators",
     "ingest_mcn_submissions",
+    "create_with_distributions",
     "rank_creators",
     "create_submission_batch",
     "record_client_feedback",
@@ -175,7 +176,7 @@ class SkillPackageTest(unittest.TestCase):
             "第一条业务工具调用",
             "validate_requirement",
             "integration_required",
-            "当前生产 provider 暴露 11 个 YPmcn 工具",
+            "当前生产 provider 暴露 12 个 YPmcn 工具",
             "hook-behavior.md",
             "人工 gate",
             "当前请求体只使用 `raw_messages`",
@@ -360,9 +361,9 @@ class SkillPackageTest(unittest.TestCase):
         table_tools = set(re.findall(r"^\| `([a-z_]+)` \|", text, re.M))
         self.assertEqual(EXPECTED_TOOLS, table_tools)
         for required in (
-            "当前生产 11 个 YPmcn 工具",
+            "当前生产 12 个 YPmcn 工具",
             "create_with_distributions",
-            "取代旧 create_mcn_inquiries",
+            "取代旧 `create_mcn_inquiries`",
             "运行时 schema",
             "record_client_feedback.data.next_action",
             "authorized_relaxations",
@@ -438,7 +439,7 @@ class SkillPackageTest(unittest.TestCase):
         text = read(REFERENCES / "validation-playbook.md")
         for required in (
             "tools/list",
-            "11 个",
+            "12 个",
             "mock",
             "真实 MCP",
             "integration_required",

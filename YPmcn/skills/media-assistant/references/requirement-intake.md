@@ -58,3 +58,15 @@ Brief 入口的第一条业务调用固定为 `validate_requirement`。调用前
 - 用户实质修改 Brief：无需先确认是否重新校验，追加新的原始消息后再次调用 `validate_requirement`；旧 ID/版本只使用 MCP 已返回的真实值。若修改影响后续不可逆动作，再用 `askuserquestion` 弹窗确认继续或暂停。
 
 结构化需求由 MCP 在响应中返回并落库。Agent 不在请求中自行构造 `parsed_requirement`，也不因类目、金额或返点语义不确定而绕过 MCP。
+
+## 版本冲突处理
+
+当 `validate_requirement` 返回 `VERSION_CONFLICT` 错误（`success=false, error.code=VERSION_CONFLICT`）时，表示传入的 `existing_demand_version` 与服务端当前版本不一致。标准处理流程：
+
+1. **停止当前操作**：不继续使用过时版本推进后续流程。
+2. **展示冲突摘要**：告知媒介"需求版本已更新，需重新校验"，展示服务端返回的当前版本号（`server_demand_version`）。
+3. **按 `askuserquestion`（`requirement-modify` 模式）询问**媒介下一步：重新校验 / 放弃本次修改 / 强制覆盖（需媒介明确授权）。
+4. **媒介选择重新校验**：不传 `existing_demand_id` 和 `existing_demand_version`，仅携带原始 `raw_messages` 和补充内容重新调用 `validate_requirement`，获取最新版本。
+5. **不可自动重试**：版本冲突表明服务端数据已被其他操作更新，盲目用旧版本覆盖可能导致数据丢失。
+
+`VERSION_CONFLICT` 与一般的 `success=false` 不同——前者有明确的恢复路径（重新校验），后者通常是参数错误或服务异常，按错误摘要处理即可。

@@ -372,6 +372,11 @@ function runBeforeProjectDistributionToolCall(
   const sessionKey = resolveSessionKey(ctx);
   const waiting = sessionKey ? waitingProjectDistributionSessions.get(sessionKey) : undefined;
   if (waiting) {
+    // askuserquestion is exempt from wait-lock so Agent can prompt user for next action
+    const rawToolName = String(event.toolName ?? "");
+    if (bareToolName(rawToolName) === "askuserquestion") {
+      return undefined;
+    }
     return { block: true, blockReason: waitingBlockReason(waiting) };
   }
 

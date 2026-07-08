@@ -6,7 +6,7 @@
 
 先执行远端 `tools/list`，验证：
 
-- YPmcn 业务工具共 11 个，且没有 `get_workflow_state`。
+- YPmcn 业务工具共 12 个，且没有 `get_workflow_state`。
 - `validate_requirement.required` 只有 `raw_messages`。
 - `validate_requirement.properties` 只有 `raw_messages`、`project_context`、`existing_demand_id`、`existing_demand_version`。
 - 任一请求 schema 都不强制添加 `trace_id` 或 `idempotency_key`。
