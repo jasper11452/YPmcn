@@ -19,6 +19,7 @@
       "type": "sse"
     }
   },
+  "hooks": "./dist/index.js",
   "skills": [
     "./skills"
   ]

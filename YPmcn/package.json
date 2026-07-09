@@ -44,10 +44,8 @@
     "creator"
   ],
   "license": "MIT",
-  "openclaw": {
-    "extensions": [
-      "./dist/index.js"
-    ],
-    "hooks": "./dist/index.js"
-  }
+  "openclaw.hooks": "./dist/index.js",
+  "openclaw.extensions": [
+    "./dist/index.js"
+  ]
 }
