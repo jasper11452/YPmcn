@@ -10,13 +10,13 @@ description: Use when handling YPmcn media brief parsing, creator candidate matc
 ## 回复格式
 
 金额用元，返点用百分比；只给决策信息，不暴露字段名、JSON、内部状态。
-**弹窗优先于结论**：需要用户确认时，先弹窗再输出结论，避免弹窗遮挡已输出内容导致媒介无法判断。
+**停等优先于弹窗**：MCN 排序结果和企微消息拟好后，先停等用户输入修改或确认；仅发送确认用弹窗。
 
 | 阶段 | 输出模板 |
 |---|---|
 | 需求确认 | 平台、数量、预算区间、返点、截止时间、内容方向。示例：「需求已确认：平台=小红书，10位美妆达人，预算≤3万/位，返点20%，截止7月10日18:00」 |
 | 候选搜索 | 供给总量、供给倍数、是否建议手扒。示例：「已匹配120位候选达人，12倍覆盖，供给充足」 |
-| MCN排序 | **供需比例**（需求数/候选数/MCN覆盖数/缺口）+ **MCN 建议表**：序号、机构名称、返点、评级、覆盖达人量、推荐理由。不暴露权重/打分 |
+| MCN排序 | **① 展示结果**：供需概览 + 手扒建议 + MCN 建议表，停等用户修改或确认<br>**② 拟写消息**：确认后拟写企微消息，停等用户修改或确认<br>**③ 发送确认**：消息确认后弹窗问是否发送 → `create_with_distributions`（先 preview 再正式发） |
 | 分发结果 | 已发MCN数量、截止时间、是否有唯一填报链接。发送前说"拟发送"，发送后说"已发送" |
 | 精排 | Top-N 达人表：排名、昵称、平台、报价、粉丝量、MCN、匹配原因、风险标注 |
 | 提报 | 入选数量、批次号。不给内部 batch 结构 |
@@ -72,11 +72,9 @@ description: Use when handling YPmcn media brief parsing, creator candidate matc
 validate_requirement
 → search_creators
 → rank_mcns
-→ 弹窗 confirm-supply-ratio（MCN/野生比例确认）
-→ 弹窗 mcn-select-for-wechat
-→ 弹窗 confirm-form-fields（表单字段确认） → 弹窗 confirm-wecom-permission（企微角色权限）
-→ 根据需求表非空字段拟写企微消息
-→ 弹窗 mcn-wechat-send（预览消息）
+→ 展示结果，停，等用户输入修改意见或确认
+→ 根据需求表非空字段拟写企微消息，停，等用户修改或确认
+→ 弹窗确认是否发送
 → create_with_distributions（先 preview_only=true 预览，确认后正式发）
 → 等待机构回填；需要手扒时同步启动手扒程序
 → ingest_mcn_submissions / manual_source_creators 回收到候选池
@@ -86,13 +84,13 @@ validate_requirement
 → create_submission_batch（复用 rank_creators 的 run_id，先生成首批提报表给媒介看）
 ```
 
-**每次调业务工具前跑自检脚本**，脚本说 ok 再调：
+**每次调业务工具前跑自检脚本**（从插件根目录运行），脚本说 ok 再调：
 
 | 脚本 | 什么时候跑 | 作用 |
 |---|---|---|
-| `uv run scripts/check_flow_order.py` | 每次调业务工具前 | 检查步骤顺序是否有跳 |
-| `uv run scripts/check_requirement_params.py` | 调 validate_requirement 前 | 检查 platform/金额/返点精度 |
-| `uv run scripts/check_distribution_readiness.py` | 调 create_with_distributions 前 | 检查 5 个前置确认是否完成 |
+| `python3 scripts/check_flow_order.py` | 每次调业务工具前 | 检查步骤顺序是否有跳 |
+| `python3 scripts/check_requirement_params.py` | 调 validate_requirement 前 | 检查 platform/金额/返点精度 |
+| `python3 scripts/check_distribution_readiness.py` | 调 create_with_distributions 前 | 检查 5 个前置确认是否完成 |
 
 - 写调用超时/断连（无幂等键），不重试，用 `trace_id` 让后端查
 - 合格 MCN < 5 家不凑数，预警媒介手扒
@@ -100,7 +98,7 @@ validate_requirement
 
 ## 风险确认
 
-- 中风险：弹窗 → `rank_mcns` + `medium_risk_confirmed: true`
+- 中风险：`rank_mcns` 返回结果中展示 ⚠️ 标注，停等用户输入时一并确认是否接受中风险 → 确认后重调 `rank_mcns` + `medium_risk_confirmed: true`
 - 风险提报：弹窗 → `create_submission_batch` + `allow_need_confirm_with_risk: true`
 - 只能用户确认后设 true，不得默认
 

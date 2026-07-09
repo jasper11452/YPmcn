@@ -7,13 +7,9 @@
 | 模式 | 触发时机 | 选项 |
 |---|---|---|
 | `requirement-draft` | validate_requirement 返回 status=draft | 用户补充信息、暂缓、放弃 |
-| `confirm-supply-ratio` | rank_mcns 成功后 | 确认 MCN/野生比例、手动增补 |
-| `mcn-select-for-wechat` | 比例确认后 | 选择需发送的 MCN（编号选择） |
-| `confirm-form-fields` | MCN 名单确认后 | 确认表单字段是否覆盖 brief |
-| `confirm-wecom-permission` | 表单确认后 | 仅媒介/采购可发 |
-| `mcn-wechat-send` | 权限通过后 | 预览并确认企微消息内容 |
-| `confirm-ranking-after-supply-ready` | 机构回填和手扒结果回收到候选池后 | 确认对候选池进行达人精排 |
 | `confirm-medium-risk` | 中风险需要确认时 | 接受中风险继续 |
+| `mcn-wechat-send` | 企微消息确认后 | 确认发送、取消发送 |
+| `confirm-ranking-after-supply-ready` | 机构回填和手扒结果回收到候选池后 | 确认对候选池进行达人精排 |
 | `confirm-risky-submission` | 提报含 need_confirm 账号时 | 接受风险账号继续 |
 | `status-recovery` | 恢复会话时 | 按阶段选择继续或放弃 |
 | `requirement-modify` | 用户修改需求时 | 重新校验、放弃修改、强制覆盖 |
