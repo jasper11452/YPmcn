@@ -9,10 +9,6 @@
     ".claude-plugin/",
     "dist/",
     "skills/",
-    "scripts/check_distribution_readiness.py",
-    "scripts/check_flow_order.py",
-    "scripts/check_requirement_params.py",
-    "scripts/send_wecom.py",
     "vector-mcp/dist/",
     "mcp.json",
     "openclaw.plugin.json"

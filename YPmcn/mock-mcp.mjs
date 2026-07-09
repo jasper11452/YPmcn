@@ -431,7 +431,7 @@ async function dbRankMcns(p){
       const formula=JSON.stringify({weights:{candidate_count:0.5,rebate_rate:0.5},raw:{candidate_count:r.count,rebate_rate:r.rebate},normalized:{candidate_count_score:r.candidate_count_score,rebate_score:r.rebate_score}});
       const ratingInputs=JSON.stringify({policy_rating:r.policy_rating,response_rate:r.response_rate,valid_submission_rate:r.valid_submission_rate,selected_rate:r.selected_rate});
       try{
-        await db.query("INSERT INTO mcn_recommendation_items (mcn_run_id,customer_demand_id,platform,mcn_id,estimated_creator_count,creator_count_score,rebate_score,rating_score,mcn_rank_score,formula_snapshot_json,rating_inputs_json,rank_order,recommend_reason,review_status,created_at) VALUES (?,?,?,?,?,?,?,0,?,CAST(? AS JSON),CAST(? AS JSON),?,?,'draft',NOW())",
+        await db.query("INSERT INTO mcn_recommendation_items (mcn_run_id,id,platform,mcn_id,estimated_creator_count,creator_count_score,rebate_score,rating_score,mcn_rank_score,formula_snapshot_json,rating_inputs_json,rank_order,recommend_reason,review_status,created_at) VALUES (?,?,?,?,?,?,?,0,?,CAST(? AS JSON),CAST(? AS JSON),?,?,'draft',NOW())",
           [runId,demandId,p.platform||candidates[0]?.platform||"xhs",r.mcn_id,r.count,r.candidate_count_score,r.rebate_score,r.mcn_rank_score,formula,ratingInputs,i+1,r.cooperation_status==='active'||r.cooperation_status==='unknown'?null:`filtered: ${r.cooperation_status}`]);
       }catch(e){console.error("mcn_recommendation_items insert failed:",e.message);}
     }
@@ -484,13 +484,13 @@ async function dbCreateWithDistributions(p){
   // 未传 columns 时，从需求文本推断
   if (!columns && mcnPlanId) {
     const [mcnItems] = await db.query(
-      "SELECT customer_demand_id FROM mcn_recommendation_items WHERE mcn_run_id = ? LIMIT 1",
+      "SELECT id FROM mcn_recommendation_items WHERE mcn_run_id = ? LIMIT 1",
       [mcnPlanId]
     );
-    if (mcnItems[0]?.customer_demand_id) {
+    if (mcnItems[0]?.id) {
       const [demands] = await db.query(
         "SELECT raw_messages_json, platform FROM customer_demands WHERE id = ?",
-        [mcnItems[0].customer_demand_id]
+        [mcnItems[0].id]
       );
       if (demands[0]) {
         // JSON 列被 mysql2 自动解析，需提取实际文本
@@ -547,43 +547,49 @@ async function dbCreateWithDistributions(p){
     const recommendedMcnIds = new Set(mcnItems.map(m => m.mcn_id).filter(Boolean));
 
     if (recommendedMcnIds.size > 0) {
-      // 2. 对每个供应商，找匹配的 MCN → 查候选池达人 → 查详情 → 构建预填行
       prefillRowsBySupplier = {};
 
+      // Collect all supplier-mcn pairs first
+      const supplierPlans = [];
       for (const [supplierName, supplier] of supplierMap) {
-        // 找到该供应商对应的 mcn_id（候选池里的 organization）
         const matchingMcnId = [...recommendedMcnIds].find(mid =>
           mid === supplier.id || mid === supplier.name || mid === supplierName
         );
+        if (matchingMcnId) supplierPlans.push({supplier, supplierName, matchingMcnId});
+      }
 
-        if (matchingMcnId) {
-          const [candidates] = await db.query(
-            "SELECT platform, kw_uid FROM creator_candidate_pool WHERE mcn_id = ? LIMIT 30",
-            [matchingMcnId]
+      // Parallel: fetch candidates for all suppliers
+      const candidateResults = await Promise.all(supplierPlans.map(async ({supplier, supplierName, matchingMcnId}) => {
+        const [candidates] = await db.query(
+          "SELECT platform, kw_uid FROM creator_candidate_pool WHERE mcn_id = ? LIMIT 30",
+          [matchingMcnId]
+        );
+        return {supplier, supplierName, candidates};
+      }));
+
+      // Parallel: fetch creator details for ALL candidates at once
+      const allCreators = await Promise.all(candidateResults.flatMap(({supplier, supplierName, candidates}) =>
+        candidates.map(async (c) => {
+          const table = c.platform === "dy" ? "dy_creator_accounts" : "xhs_creator_accounts";
+          const [creators] = await db.query(
+            `SELECT nickname, followercount, kol_official_price_l1, kw_user_url FROM \`${table}\` WHERE id = ? LIMIT 1`,
+            [c.kw_uid]
           );
+          return {supplier, supplierName, candidate: c, creator: creators[0]};
+        })
+      ));
 
-          const rows = [];
-          for (const c of candidates) {
-            const table = c.platform === "dy" ? "dy_creator_accounts" : "xhs_creator_accounts";
-            const [creators] = await db.query(
-              `SELECT nickname, followercount, kol_official_price_l1, kw_user_url FROM \`${table}\` WHERE id = ? LIMIT 1`,
-              [c.kw_uid]
-            );
-            if (creators[0]) {
-              rows.push({
-                talentName: creators[0].nickname || "未知达人",
-                platform: c.platform === "dy" ? "抖音" : "小红书",
-                homepage: creators[0].kw_user_url || "",
-                price: Number(creators[0].kol_official_price_l1) || 0,
-              });
-            }
-          }
-          if (rows.length > 0) {
-            // 后端需要带连字符的 UUID 作为 key
-            const uuidKey = supplier.id.includes("-") ? supplier.id : supplier.id.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, "$1-$2-$3-$4-$5");
-            prefillRowsBySupplier[uuidKey] = rows;
-          }
-        }
+      // Build prefill rows grouped by supplier
+      for (const {supplier, candidate, creator} of allCreators) {
+        if (!creator) continue;
+        const uuidKey = supplier.id.includes("-") ? supplier.id : supplier.id.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, "$1-$2-$3-$4-$5");
+        if (!prefillRowsBySupplier[uuidKey]) prefillRowsBySupplier[uuidKey] = [];
+        prefillRowsBySupplier[uuidKey].push({
+          talentName: creator.nickname || "未知达人",
+          platform: candidate.platform === "dy" ? "抖音" : "小红书",
+          homepage: creator.kw_user_url || "",
+          price: Number(creator.kol_official_price_l1) || 0,
+        });
       }
     }
   }
