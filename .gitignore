@@ -10,3 +10,4 @@ __pycache__/
 vector-mcp/.qdrant-*.json
 YPmcn/vector-mcp/
 
+.playwright-cli/
