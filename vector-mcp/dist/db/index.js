@@ -1,2 +1,2 @@
 // @ts-nocheck
-export { fetchCreatorRows, mysqlConfigFromEnv } from "./mysql-source.js";
+export { fetchCreatorRows } from "./mysql-source.js";

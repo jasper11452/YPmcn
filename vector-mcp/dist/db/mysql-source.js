@@ -30,19 +30,6 @@ function getGeo(row) {
         .filter((v) => typeof v === "string" && v.length > 0);
     return parts.join(" ");
 }
-export function mysqlConfigFromEnv() {
-    return {
-        host: process.env["MYSQL_HOST"] ?? "localhost",
-        port: Number(process.env["MYSQL_PORT"]) || 3306,
-        user: process.env["MYSQL_USER"] ?? "root",
-        password: process.env["MYSQL_PASSWORD"] ?? "",
-        database: process.env["MYSQL_DATABASE"] ?? "test",
-        ssl: process.env["MYSQL_SSL"] === "true",
-        connectionLimit: process.env["MYSQL_CONNECTION_LIMIT"]
-            ? Number(process.env["MYSQL_CONNECTION_LIMIT"])
-            : undefined,
-    };
-}
 export async function fetchCreatorRows(config, _sourceMapping, maxRows) {
     let mysql2;
     try {

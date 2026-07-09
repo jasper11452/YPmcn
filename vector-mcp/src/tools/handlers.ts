@@ -14,8 +14,20 @@ import { buildVectorPoints } from "../vector/sync.js";
 import { createFakeEmbeddingProvider, createFakeRerankProvider, } from "../config/providers.js";
 import { buildCollectionSchema } from "../vector/qdrant.js";
 import { createSiliconFlowEmbeddingProvider, createSiliconFlowRerankerProvider, } from "../providers/index.js";
-import { fetchCreatorRows, mysqlConfigFromEnv } from "../db/index.js";
+import { fetchCreatorRows } from "../db/index.js";
 import { loadSourceMapping } from "../source/contract.js";
+import {
+  MODE,
+  FAKE_PERSIST_PATH,
+  REAL_PERSIST_PATH,
+  requireSiliconFlowApiKey,
+  FORCE_RESYNC,
+  SOURCE_MAPPING_PATH,
+  MYSQL_FETCH_LIMIT,
+  mysqlConfigFromEnv,
+  HAS_SILICONFLOW_API_KEY,
+  HAS_MYSQL_CONFIG,
+} from "../config/runtime-config.js";
 // ── Fake dataset ────────────────────────────────────────────────────────────
 const FAKE_VECTOR_VERSION = "v1";
 const FAKE_DIM = 128;
@@ -502,10 +514,6 @@ const FAKE_ROWS = [
         display_name: "深圳厨房测评官",
     },
 ];
-// ── Mode detection ──────────────────────────────────────────────────────────
-function getMode() {
-    return process.env.VECTOR_MCP_MODE === "real" ? "real" : "fake";
-}
 // ── Singleton fake infrastructure ───────────────────────────────────────────
 let _fakeQdrant = null;
 let _seeded = false;
@@ -515,7 +523,6 @@ const FAKE_QDRANT_CONFIG = {
     vectorSize: FAKE_DIM,
     distance: "Cosine",
 };
-const FAKE_PERSIST_PATH = process.env.VECTOR_PERSIST_PATH ?? new URL("../../.qdrant-fake.json", import.meta.url).pathname;
 
 async function getSeededQdrant() {
     if (_fakeQdrant && _seeded)
@@ -549,31 +556,23 @@ const REAL_QDRANT_CONFIG = {
     vectorSize: REAL_DIM,
     distance: "Cosine",
 };
-const REAL_PERSIST_PATH = process.env.VECTOR_PERSIST_PATH ?? new URL("../../.qdrant-real.json", import.meta.url).pathname;
-
 function getRealEmbeddingProvider() {
     if (!_realEmbeddingProvider) {
-        const apiKey = process.env.SILICONFLOW_API_KEY;
-        if (!apiKey || apiKey.trim() === "") {
-            throw new Error("SILICONFLOW_API_KEY env var is required for real mode. Set it to your SiliconFlow API key.");
-        }
+        const apiKey = requireSiliconFlowApiKey();
         _realEmbeddingProvider = createSiliconFlowEmbeddingProvider({ apiKey });
     }
     return _realEmbeddingProvider;
 }
 function getRealRerankProvider() {
     if (!_realRerankProvider) {
-        const apiKey = process.env.SILICONFLOW_API_KEY;
-        if (!apiKey || apiKey.trim() === "") {
-            throw new Error("SILICONFLOW_API_KEY env var is required for real mode. Set it to your SiliconFlow API key.");
-        }
+        const apiKey = requireSiliconFlowApiKey();
         _realRerankProvider = createSiliconFlowRerankerProvider({ apiKey });
     }
     return _realRerankProvider;
 }
 
 function forceResync(): boolean {
-    return process.env.VECTOR_FORCE_RESYNC === "true";
+    return FORCE_RESYNC;
 }
 
 async function getRealSeededQdrant() {
@@ -593,8 +592,7 @@ async function getRealSeededQdrant() {
     const mysqlConfig = mysqlConfigFromEnv();
     let sourceMapping;
     try {
-        sourceMapping = loadSourceMapping(process.env.SOURCE_MAPPING_PATH ??
-            new URL("../../source/mapping.example.json", import.meta.url).pathname);
+        sourceMapping = loadSourceMapping(SOURCE_MAPPING_PATH);
     }
     catch {
         sourceMapping = {
@@ -620,8 +618,7 @@ async function getRealSeededQdrant() {
             },
         };
     }
-    const envLimit = process.env["MYSQL_FETCH_LIMIT"];
-    const maxRows = envLimit && envLimit.trim() !== "" ? Number(envLimit) : undefined;
+    const maxRows = MYSQL_FETCH_LIMIT;
     const rows = await fetchCreatorRows(mysqlConfig, sourceMapping, maxRows);
     const schema = buildCollectionSchema(REAL_QDRANT_CONFIG);
     const points = await buildVectorPoints(rows, embeddingProvider, REAL_VECTOR_VERSION);
@@ -759,7 +756,7 @@ async function handleSearch(params, traceId) {
     const positiveQuery = geoTerm
         ? `${basePositiveQuery} ${geoTerm}`
         : basePositiveQuery;
-    const isRealMode = getMode() === "real";
+    const isRealMode = MODE === "real";
     const qdrant = isRealMode
         ? await getRealSeededQdrant()
         : await getSeededQdrant();
@@ -928,8 +925,7 @@ export async function handleToolCall(name, params) {
     const traceId = randomUUID();
     switch (name) {
         case "sync_creator_tag_vectors": {
-            const mode = getMode();
-            if (mode === "real") {
+            if (MODE === "real") {
                 try {
                     const qdrant = await getRealSeededQdrant();
                     return {
@@ -967,10 +963,9 @@ export async function handleToolCall(name, params) {
         case "search_creator_tag_vectors":
             return handleSearch(params, traceId);
         case "health_check_vector_store": {
-            const mode = getMode();
-            if (mode === "real") {
-                const hasApiKey = !!process.env.SILICONFLOW_API_KEY;
-                const hasMysql = !!process.env.MYSQL_HOST && !!process.env.MYSQL_USER;
+            if (MODE === "real") {
+                const hasApiKey = HAS_SILICONFLOW_API_KEY;
+                const hasMysql = HAS_MYSQL_CONFIG;
                 return {
                     success: true,
                     data: {
