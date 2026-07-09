@@ -187,9 +187,19 @@ const STEP_LABELS: Record<string, string> = {
 };
 
 const PHASE_LABELS: Record<string, string> = {
+  // MVP 新阶段名（来自 20260709 文档）
+  requirement_draft: "需求待补",
+  requirement_ready: "需求就绪",
+  candidate_pool_ready: "候选池就绪",
+  mcn_planning: "MCN 规划",
+  waiting_mcn_return: "等待机构回填",
+  candidate_pool_enriched: "候选池汇总完成",
+  recommendation_ready: "精排完成",
+  submission_batch_ready: "提报批次生成",
+  feedback_routing: "客户反馈",
+  // 兼容旧阶段名
   requirement: "需求录入",
   candidate_pool: "候选池",
-  mcn_planning: "MCN 规划",
   distribution: "项目分发",
   ranking: "达人精排",
   submission: "提报",

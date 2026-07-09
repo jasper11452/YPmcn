@@ -62,5 +62,5 @@
 - `get_recommendation_run_detail`: `run_id`
 - `ingest_mcn_submissions`: `inquiry_id`, `items`
 - `manual_source_creators`: `id`, `creator_ids`（`id` 取当前需求/候选上下文，按运行时 schema）
-- `record_client_feedback`: `submission_batch_id`, `feedback_type`, `feedback_content`
-- `audit_manual_adjustment`: `adjustment_id`, `action`
+- `record_client_feedback`: `run_id`, `feedback_items`，可选 `requirement_changes`
+- `audit_manual_adjustment`: `run_id`, `adjustments`, `operator_id`

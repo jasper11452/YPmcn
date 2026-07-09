@@ -8,6 +8,7 @@ Agent 在调用 validate_requirement 前运行此脚本。
 """
 
 import json
+import re
 import sys
 
 
@@ -42,6 +43,12 @@ def check(params: dict, raw_text: str = "") -> list[str]:
             elif pl not in ("xhs", "dy"):
                 errors.append(f'platform="{platform}" 不在允许范围: xhs, dy')
 
+    # 1.5 submission_deadline_at 必须是 ISO 8601 格式
+    ISO_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$')
+    deadline = params.get("submission_deadline_at")
+    if deadline is not None and isinstance(deadline, str) and not ISO_PATTERN.match(deadline):
+        errors.append(f'submission_deadline_at="{deadline}" 不是有效 ISO 8601 带时区格式（如 2026-07-10T18:00:00+08:00）')
+
     # 2. 金额单位：分
     for field in ("budget_min_cents", "budget_max_cents"):
         val = params.get(field)
@@ -50,6 +57,10 @@ def check(params: dict, raw_text: str = "") -> list[str]:
                 errors.append(f"{field} 应为数字，当前 {type(val).__name__}")
             elif isinstance(val, float) and val == int(val):
                 pass  # 允许 3000000.0
+            elif val <= 0:
+                # 0 或负数：0 作为区间下界是合法的（如"3万以内"→ budget_min_cents=0），负数才是错误
+                if val < 0:
+                    errors.append(f"{field}={val} 不能小于 0")
             elif val < 100:  # 很可能是元而不是分
                 errors.append(f"{field}={val} 看起来是元（太小），单位应为分。3万→3000000")
             elif val > 100_000_000:

@@ -2,7 +2,7 @@
 
 最小会话索引（只记已确认的，数据库事实优先于本地状态）：
 ```json
-{"phase": "requirement|candidate_pool|mcn_planning|distribution|ranking|submission|feedback", "requirement_id": null, "candidate_pool_id": null, "mcn_plan_id": null, "run_id": null, "inquiry_ids": [], "last_tool": null, "last_trace_id": null, "last_error": null, "project_distribution_completed": false, "wait_gate": null}
+{"phase": "requirement_draft|requirement_ready|candidate_pool_ready|mcn_planning|waiting_mcn_return|candidate_pool_enriched|recommendation_ready|submission_batch_ready|feedback_routing", "requirement_id": null, "candidate_pool_id": null, "mcn_recommendation_id": null, "run_id": null, "inquiry_ids": [], "last_tool": null, "last_trace_id": null, "last_error": null, "project_distribution_completed": false, "wait_gate": null}
 ```
 
 `workflow_state` / `allowed_actions` 是 MCP 可选增强；当前没有 `get_workflow_state` 工具时，不伪造状态。
@@ -11,22 +11,34 @@
 
 | 阶段 | 下一动作 |
 |---|---|
-| requirement（validate_requirement 完成） | draft → 澄清；ready → 停等 brief 确认 |
-| candidate_pool（search_creators 完成） | 用 `search_creators.data.id` 调 `rank_mcns` |
-| mcn_planning（rank_mcns 完成） | 展示供需关系、建议手扒比例、建议询价 MCN 列表；依次确认：比例→名单→表单→角色→内容 → `create_with_distributions` |
-| distribution（分发成功） | 停，等机构回填和手扒结果回收到候选池；确认对候选池进行达人精排 → `rank_creators` |
-| ranking（`rank_creators` 返回 run_id） | `create_submission_batch` |
-| submission（批次成功） | 等客户反馈 |
+| requirement_draft（validate_requirement 缺字段） | 停，问缺失项 |
+| requirement_ready（validate_requirement 完成且必填项齐全） | extra-field 已确认 → `confirm-structured-brief`；extra-field 未确认 → `confirm-extra-field-mapping` |
+| candidate_pool_ready（search_creators 完成） | 用 `search_creators.data.id` 调 `rank_mcns` |
+| mcn_planning（rank_mcns 完成） | 展示供需关系、建议手扒比例、建议询价 MCN 列表；用户同意/修改 MCN 列表；Agent 根据需求表非空字段拟写企微消息；依次确认：`confirm-supply-ratio` → `mcn-select-for-wechat` → `confirm-form-fields` → `confirm-wecom-permission` → `mcn-wechat-send` → `create_with_distributions`（先 preview 再正式发） |
+| waiting_mcn_return（分发成功） | 停，等机构回填和手扒结果回收到候选池；需要手扒时同步启动 |
+| candidate_pool_enriched（回填/手扒回收到候选池） | 确认对候选池进行达人精排 → `rank_creators` |
+| recommendation_ready（`rank_creators` 返回 run_id） | 风险确认（有风险时）→ `create_submission_batch` |
+| submission_batch_ready（批次成功） | 媒介查看首批提报表 → 等客户反馈 |
+| feedback_routing（record_client_feedback 完成） | 补批/重排/需求变更 |
 
 ## 弹窗顺序（不可跳过合并）
 
 ```
+confirm-extra-field-mapping（如有额外需求字段，先映射到 CSV 字段再弹窗确认）
+confirm-structured-brief（结构化 brief 确认，必填项齐全且额外字段已确认后）
 confirm-supply-ratio → mcn-select-for-wechat → confirm-form-fields
 → confirm-wecom-permission → mcn-wechat-send
-→ confirm-ranking-after-supply-ready（仅在回填/手扒回收到候选池后）
+→ confirm-ranking-after-supply-ready（仅在回填/手扒回收到候选池后，确认对候选池精排）
+→ confirm-risky-submission（有风险账号时）
 ```
 
 弹窗写短，选项互斥且 ≤3 个。
+
+## 风险确认
+
+- 中风险（`pending_gate.gate = confirm_medium_risk`）：`rank_mcns` + `medium_risk_confirmed: true`
+- 风险提报（`pending_gate.gate = confirm_risky_submission`）：`create_submission_batch` + `allow_need_confirm_with_risk: true`
+- 只能用户确认后设 true，不得默认
 
 ## 恢复
 

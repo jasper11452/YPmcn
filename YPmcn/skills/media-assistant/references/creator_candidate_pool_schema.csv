@@ -131,8 +131,8 @@
 130,pgy_blogger_type_label,否,是,仅小红书,,蒲公英-博主类目（26.02.04新增）,抖音字段列未出现
 131,grow_blogger_type_label,否,是,仅小红书,,Grow-博主类目（26.02.04新增）,抖音字段列未出现
 ,id(32位uuid),,,,,主键ID,调用工具时不可空
-,demand_id,,,,,需求ID,调用工具时不可空
-,demand_version,,,,,需求版本,调用工具时不可空
+,demand_id,,,,,需求ID,需求内部版本字段，不作为候选池字段或下游工具主入参
+,demand_version,,,,,需求版本,需求内部版本字段，不作为候选池字段或下游工具主入参
 ,submission_deadline_at,,,,,提交时间,调用工具时不可空
 ,submission_deadline_raw,,,,,提交时间原文,调用工具时不可空
 ,raw_messages_json,,,,,原始输入的需求内容json,调用工具时不可空

@@ -10,13 +10,29 @@ import json
 import sys
 
 REQUIRED_GATES = [
-    "structured_brief_confirmed",
-    "supply_ratio_confirmed",
-    "mcn_list_confirmed",
-    "form_fields_confirmed",
-    "wecom_permission_confirmed",
-    "send_content_confirmed",
+    "confirm-structured-brief",
+    "confirm-supply-ratio",
+    "mcn-select-for-wechat",
+    "confirm-form-fields",
+    "confirm-wecom-permission",
+    "mcn-wechat-send",
 ]
+
+GATE_ALIASES = {
+    "confirm-extra-field-mapping": ["extra_field_mapping_confirmed"],
+    "confirm-structured-brief": ["structured_brief_confirmed"],
+    "confirm-supply-ratio": ["supply_ratio_confirmed"],
+    "mcn-select-for-wechat": ["mcn_list_confirmed"],
+    "confirm-form-fields": ["form_fields_confirmed"],
+    "confirm-wecom-permission": ["wecom_permission_confirmed"],
+    "mcn-wechat-send": ["send_content_confirmed"],
+}
+
+
+def gate_confirmed(gate_state: dict, gate: str) -> bool:
+    if gate_state.get(gate):
+        return True
+    return any(gate_state.get(alias) for alias in GATE_ALIASES.get(gate, []))
 
 
 def check(gate_state: dict, params: dict) -> list[str]:
@@ -24,8 +40,11 @@ def check(gate_state: dict, params: dict) -> list[str]:
 
     # 检查 gate 状态
     for gate in REQUIRED_GATES:
-        if not gate_state.get(gate):
+        if not gate_confirmed(gate_state, gate):
             errors.append(f"前置确认未完成: {gate}")
+
+    if gate_state.get("extra_field_mapping_required") and not gate_confirmed(gate_state, "confirm-extra-field-mapping"):
+        errors.append("前置确认未完成: confirm-extra-field-mapping")
 
     # 检查必要参数
     if not params.get("id"):

@@ -250,6 +250,17 @@ class SkillPackageTest(unittest.TestCase):
         ):
             self.assertIn(required, text)
 
+    def test_mock_mcp_uses_chained_id_as_downstream_tool_input(self):
+        text = read(ROOT / "mock-mcp.mjs")
+        for tool_name in ("search_creators", "rank_mcns", "rank_creators", "manual_source_creators"):
+            pattern = rf'\{{ name: "{tool_name}".*?inputSchema: .*?properties: \{{(.*?)\}} \}} \}}'
+            match = re.search(pattern, text)
+            self.assertIsNotNone(match, tool_name)
+            properties = match.group(1)
+            self.assertIn("id", properties)
+            self.assertNotIn("demand_id", properties)
+            self.assertNotIn("demand_version", properties)
+
     def test_rank_mcns_minimum_count_does_not_override_hard_filter_coverage(self):
         combined = "\n".join(
             read(path)

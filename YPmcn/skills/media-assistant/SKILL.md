@@ -15,6 +15,8 @@ description: Use when handling YPmcn media brief parsing, creator candidate matc
 - 当前生产 provider 暴露 12 个 YPmcn 工具
 - 需求主表固定为 `customer_demands`；`validate_requirement` 写入 `customer_demands`，字段以 `references/creator_candidate_pool_schema.csv` 的 `字段` 列为准
 - 达人资源库物理表固定为 `xhs_creator_accounts`、`dy_creator_accounts`；字段从需求主表继承，候选中间层仍是 `creator_candidate_pool`
+- `demand_id`/`demand_version` 保留为需求内部版本事实，不作下游工具主入参；下游统一使用上一步 `data.id`（映射 `customer_demands` 主键）
+- `rank_mcns` 成功返回后必须展示：达人供需关系（需求数量/候选数量/缺口）、建议手扒比例及原因、建议询价 MCN 列表
 
 ## 业务工具调用参数闸门
 
@@ -29,10 +31,12 @@ description: Use when handling YPmcn media brief parsing, creator candidate matc
    - 返点 **小数**：20% → `0.2`
    - 预算/单价和返点都按区间字段传；单值写成闭区间，只给上限时下限按业务可接受下界归一
    - 原文未提 → `null`，不编造
-5. ID、`run_id` 只来自 MCP 成功响应。下游只传上一步 `data.id`；`demand_id`/`demand_version` 不作为下游参数
+5. ID、`run_id` 只来自 MCP 成功响应。下游只传上一步 `data.id`（映射 `customer_demands` 主键）；`demand_id`/`demand_version` 只作版本字段保留，不作为下游工具参数
 6. 不得向用户索取或自行添加 `trace_id`、`idempotency_key`；Schema 缺失或 schema 冲突 → 停，报 `integration_required`
 
 `validate_requirement` 继续前必须具备：`platform`、`submission_deadline_at`、`raw_messages_json`、`budget_min_cents`、`budget_max_cents`、`budget_raw`、`rebate_min_rate`、`rebate_max_rate`、`rebate_raw`、`quantity_total`。缺任一必填项不可进入候选搜索。必填项满足后，额外需求按 `references/creator_candidate_pool_schema.csv` 匹配字段并让用户确认。
+
+`customer_demands` 字段口径以 CSV `字段` 列为准；达人资源库 `xhs_creator_accounts`/`dy_creator_accounts` 从同一 CSV 继承字段：共同字段保持同名，平台专属字段仅存在于对应平台表。
 
 ## 阶段路由
 
