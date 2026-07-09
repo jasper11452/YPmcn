@@ -67,7 +67,7 @@ npm run pack:yp
 | `tool_result_persist` | 所有 YPmcn 结果 | 不改写工具结果，仅保留状态缓存能力 |
 | `message_received` | 同一会话用户新消息 | 解除项目分发等待锁 |
 
-主流程为 `validate_requirement → search_creators → rank_mcns → create_with_distributions → ingest_mcn_submissions/manual_source_creators → rank_creators`。Brief 输入后直接调用 `validate_requirement` 解析验证；必填项为 `platform/submission_deadline_at/raw_messages_json/budget_min_cents/budget_max_cents/budget_raw/rebate_min_rate/rebate_max_rate/rebate_raw/quantity_total`，预算/单价和返点必须区间化。`rank_mcns` 后必须停下来展示供需关系、建议手扒比例、建议询价 MCN 列表和企微消息并询问是否发送；企微发送接口字段固定，每个 MCN 有唯一填报链接，并按 MCN 预填候选池中属于该机构的达人。项目分发与通知在用户确认前不得执行。当前不创建 Cron 任务；发送失败不进入等待锁，发送成功后等待机构回填和手扒结果回收到候选池，不能直接精排。
+主流程为 `validate_requirement → search_creators → rank_mcns → create_with_distributions → ingest_mcn_submissions/manual_source_creators → rank_creators`。Brief 输入后直接调用 `validate_requirement` 解析验证；必填项为 `platform/submission_deadline_at/raw_messages_json/budget_min_cents/budget_max_cents/budget_raw/rebate_min_rate/rebate_raw/quantity_total`，预算/单价必须区间化，返点仅下限必填（上限可选，未填时视为无上限）。`rank_mcns` 后必须停下来展示供需关系、建议手扒比例、建议询价 MCN 列表和企微消息并询问是否发送；企微发送接口字段固定，每个 MCN 有唯一填报链接，并按 MCN 预填候选池中属于该机构的达人。项目分发与通知在用户确认前不得执行。当前不创建 Cron 任务；发送失败不进入等待锁，发送成功后等待机构回填和手扒结果回收到候选池，不能直接精排。
 
 下游 ID 传递统一使用上一步 MCP 成功响应的 `data.id`：`validate_requirement.data.id → search_creators({id}) → search_creators.data.id → rank_mcns({id}) → rank_mcns.data.id → create_with_distributions({id, ...})`。`demand_id`、`demand_version` 只作内部版本字段，不作为下游工具参数。
 

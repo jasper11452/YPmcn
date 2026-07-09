@@ -13,7 +13,6 @@ import sys
 # 正确顺序（每步完成才能走到下一步）
 FLOW = [
     "validate_requirement",
-    "confirm-extra-field-mapping",  # 弹窗：额外需求字段映射（如有）
     "search_creators",
     "rank_mcns",                    # MCN 排序（MCP 工具）
     "confirm-supply-ratio",         # 弹窗：MCN/野生比例
@@ -33,7 +32,6 @@ FLOW = [
 ]
 
 LEGACY_STEP_ALIASES = {
-    "confirm_extra_field_mapping": "confirm-extra-field-mapping",
     "confirm_supply_ratio": "confirm-supply-ratio",
     "confirm_mcn_list": "mcn-select-for-wechat",
     "confirm_form_fields": "confirm-form-fields",
@@ -45,8 +43,7 @@ LEGACY_STEP_ALIASES = {
 
 # 每个步骤允许的下一个动作
 NEXT_ALLOWED = {
-    "validate_requirement": ["confirm-extra-field-mapping", "search_creators", "validate_requirement"],
-    "confirm-extra-field-mapping": ["search_creators", "validate_requirement"],
+    "validate_requirement": ["search_creators", "validate_requirement"],
     "search_creators": ["rank_mcns"],
     "rank_mcns": ["confirm-supply-ratio"],
     "confirm-supply-ratio": ["mcn-select-for-wechat"],
@@ -67,7 +64,6 @@ NEXT_ALLOWED = {
 
 # 弹窗工具映射：弹窗名 → 对应的 MCP 工具
 POPUP_TO_TOOL = {
-    "confirm-extra-field-mapping": None,
     "confirm-supply-ratio": None,
     "mcn-select-for-wechat": None,
     "confirm-form-fields": None,

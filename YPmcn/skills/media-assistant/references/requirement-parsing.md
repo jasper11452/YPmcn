@@ -14,17 +14,12 @@
 - `budget_max_cents`
 - `budget_raw`
 - `rebate_min_rate`
-- `rebate_max_rate`
 - `rebate_raw`
 - `quantity_total`
 
-预算/单价和返点都必须区间化。单值写成闭区间；只给上限时，下限按业务可接受下界归一并保留 `budget_raw` / `rebate_raw`。
+预算/单价必须区间化，返点仅下限必填。单值写成闭区间；只给上限时，下限按业务可接受下界归一并保留 `budget_raw` / `rebate_raw`。`rebate_max_rate` 可选，未填时视为无上限。
 
-必填项满足后，客户 Brief 中仍有额外需求时，Agent 参考 `creator_candidate_pool_schema.csv` 做字段匹配：
-
-- 明确可执行字段写入已确认筛选条件。
-- 不确定字段写入模糊项，并向用户确认。
-- 用户未确认额外字段映射前，不进入 `search_creators`。
+必填项满足后，客户 Brief 中仍有额外需求时，Agent 参考 `creator_candidate_pool_schema.csv` 做字段匹配并直接复核落库，不需弹窗确认。不确定字段写入模糊项由后端处理，不阻断 `search_creators`。
 
 ## 字段精度
 
@@ -32,15 +27,16 @@
 |---|---|
 | `platform` | `"xhs"` / `"dy"`，不是 `xiaohongshu` / `小红书` |
 | `budget_*_cents` | 单位 **分**，不是元 |
-| `rebate_*_rate` | 单位 **小数**（0.2 = 20%），不是整数 20 |
-| 单值预算/返点 | 写成闭区间 |
+| `rebate_*_rate` | 单位 **小数**（0.2 = 20%），不是整数 20。`rebate_min_rate` 必填，`rebate_max_rate` 可选 |
+| 单值预算 | 写成闭区间 |
 | 只有上限 | 下限按业务可接受下界归一 |
+| 返点无上限 | 不传 `rebate_max_rate` |
 | 无独立字段的筛选条件 | 放入已确认额外需求/`requirements_json` 等价字段 |
 
 ## 禁止
 
 - 把 Agent 推断写成 `raw_messages` 并标 `client`/`media`
 - 为满足 ready 编造平台/预算/返点/数量/截止日期/ID/版本
-- 额外需求字段未匹配和确认就继续筛选
+- 额外需求字段未匹配就直接筛选
 - 用业务调用试错探测 schema
 - schema 冲突时继续调

@@ -18,7 +18,7 @@
 | 达人数量 | `customer_demands.quantity_total` | 供给倍数、提报数量 | 可提报数量 | 必填，缺失阻断 |
 | deadline/截止提交 | `customer_demands.submission_deadline_at` | 流程时限、企微发送 | 提交截止时间 | 必填，缺失阻断 |
 | 单账号预算/报价上限 | `customer_demands.budget_max_cents` | 硬筛 | 报价 | 需展示单位元 |
-| 返点 | `customer_demands.rebate_min_rate` / `customer_demands.rebate_max_rate` | 硬筛/排序 | 返点 | 必填区间，未提需补充 |
+| 返点 | `customer_demands.rebate_min_rate` / `customer_demands.rebate_max_rate` | 硬筛/排序 | 返点 | `rebate_min_rate` 必填，`rebate_max_rate` 可选 |
 | CPM | `requirements_json.performance_thresholds.*.cpm_max_cents` | 数据阈值 | CPM | 若库无字段，要求补库 |
 | CPC | `requirements_json.performance_thresholds.*.cpc_max_cents` | 数据阈值 | CPC | 若库无字段，要求补库 |
 | CPE | `requirements_json.performance_thresholds.*.cpe_max_cents` | 数据阈值 | CPE | 若库无字段，要求补库 |

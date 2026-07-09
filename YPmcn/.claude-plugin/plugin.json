@@ -1,6 +1,6 @@
 {
   "name": "ypmcn-media-assistant",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "YPmcn 媒介助手：按业务阶段调用 MCP，以人工 gate、短回复和可恢复状态管理达人提报流程。",
   "author": {
     "name": "Jasper"

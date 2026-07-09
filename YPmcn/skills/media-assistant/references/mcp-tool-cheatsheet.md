@@ -18,7 +18,7 @@
 | `raw_messages_json` | string | 必填，客户原始需求 JSON |
 | `budget_min_cents` / `budget_max_cents` | number | 必填区间，单位：分 |
 | `budget_raw` | string | 必填，预算/单价原文 |
-| `rebate_min_rate` / `rebate_max_rate` | number | 必填区间，单位：小数 |
+| `rebate_min_rate` / `rebate_max_rate` | number | `rebate_min_rate` 必填，`rebate_max_rate` 可选，单位：小数 |
 | `rebate_raw` | string | 必填，返点原文 |
 | `raw_messages` | array | 可选，用户原文 |
 | `project_context` | object | 可选 |

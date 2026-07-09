@@ -140,7 +140,7 @@
 ,budget_max_cents,,,,,预算上限,调用工具时不可空
 ,budget_raw,,,,,预算原文,调用工具时不可空
 ,rebate_min_rate,,,,,返点下限,调用工具时不可空
-,rebate_max_rate,,,,,返点上限,调用工具时不可空
+,rebate_max_rate,,,,,返点上限,可选（未填时无上限）
 ,rebate_raw,,,,,返点原文,调用工具时不可空
 ,quantity_total,,,,,需要数量,调用工具时不可空
 ,status,,,,,状态,调用工具时不可空

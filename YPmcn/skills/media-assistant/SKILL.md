@@ -43,12 +43,12 @@ description: Use when handling YPmcn media brief parsing, creator candidate matc
    - `platform` = `"xhs"`（小红书）/ `"dy"`（抖音）
    - 金额 **分**：3万 → `3000000`
    - 返点 **小数**：20% → `0.2`
-   - 预算/单价和返点都按区间字段传；单值写成闭区间，只给上限时下限按业务可接受下界归一
+    - 预算/单价和返点都按区间字段传；单值写成闭区间，只给上限时下限按业务可接受下界归一；返点仅下限必填，`rebate_max_rate` 可选
    - 原文未提 → `null`，不编造
 5. ID、`run_id` 只来自 MCP 成功响应。下游只传上一步 `data.id`（映射 `customer_demands` 主键）；`demand_id`/`demand_version` 只作版本字段保留，不作为下游工具参数
 6. 不得向用户索取或自行添加 `trace_id`、`idempotency_key`；Schema 缺失或 schema 冲突 → 停，报 `integration_required`
 
-`validate_requirement` 继续前必须具备：`platform`、`submission_deadline_at`、`raw_messages_json`、`budget_min_cents`、`budget_max_cents`、`budget_raw`、`rebate_min_rate`、`rebate_max_rate`、`rebate_raw`、`quantity_total`。缺任一必填项不可进入候选搜索。必填项满足后，额外需求按 `references/creator_candidate_pool_schema.csv` 匹配字段并让用户确认。
+`validate_requirement` 继续前必须具备：`platform`、`submission_deadline_at`、`raw_messages_json`、`budget_min_cents`、`budget_max_cents`、`budget_raw`、`rebate_min_rate`、`rebate_raw`、`quantity_total`。缺任一必填项不可进入候选搜索。返点仅下限必填，`rebate_max_rate` 可选（未填时视为无上限）。必填项满足后，额外需求按 `references/creator_candidate_pool_schema.csv` 匹配字段并直接复核落库，不需弹窗确认。
 
 `customer_demands` 字段口径以 CSV `字段` 列为准；达人资源库 `xhs_creator_accounts`/`dy_creator_accounts` 从同一 CSV 继承字段：共同字段保持同名，平台专属字段仅存在于对应平台表。
 
@@ -70,7 +70,6 @@ description: Use when handling YPmcn media brief parsing, creator candidate matc
 
 ```text
 validate_requirement
-→ 弹窗 confirm-extra-field-mapping（如有额外需求字段）
 → search_creators
 → rank_mcns
 → 弹窗 confirm-supply-ratio（MCN/野生比例确认）

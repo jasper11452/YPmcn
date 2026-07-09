@@ -12,7 +12,7 @@
 | 阶段 | 下一动作 |
 |---|---|
 | requirement_draft（validate_requirement 缺字段） | 停，问缺失项 |
-| requirement_ready（validate_requirement 完成且必填项齐全） | extra-field 未确认 → `confirm-extra-field-mapping`；已确认 → `search_creators` |
+| requirement_ready（validate_requirement 完成且必填项齐全） | `search_creators` |
 | candidate_pool_ready（search_creators 完成） | 用 `search_creators.data.id` 调 `rank_mcns` |
 | mcn_planning（rank_mcns 完成） | 展示供需关系、建议手扒比例、建议询价 MCN 列表；用户同意/修改 MCN 列表；Agent 根据需求表非空字段拟写企微消息；依次确认：`confirm-supply-ratio` → `mcn-select-for-wechat` → `confirm-form-fields` → `confirm-wecom-permission` → `mcn-wechat-send` → `create_with_distributions`（先 preview 再正式发） |
 | waiting_mcn_return（分发成功） | 停，等机构回填和手扒结果回收到候选池；需要手扒时同步启动 |
@@ -24,7 +24,6 @@
 ## 弹窗顺序（不可跳过合并）
 
 ```
-confirm-extra-field-mapping（如有额外需求字段，先映射到 CSV 字段再弹窗确认）
 confirm-supply-ratio → mcn-select-for-wechat → confirm-form-fields
 → confirm-wecom-permission → mcn-wechat-send
 → confirm-ranking-after-supply-ready（仅在回填/手扒回收到候选池后，确认对候选池精排）

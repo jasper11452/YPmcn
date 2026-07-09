@@ -23,7 +23,6 @@ def check(params: dict, raw_text: str = "") -> list[str]:
         "budget_max_cents",
         "budget_raw",
         "rebate_min_rate",
-        "rebate_max_rate",
         "rebate_raw",
         "quantity_total",
     )
@@ -82,8 +81,9 @@ def check(params: dict, raw_text: str = "") -> list[str]:
                 errors.append(f"{field}={val} 不能小于 0")
     min_rebate = params.get("rebate_min_rate")
     max_rebate = params.get("rebate_max_rate")
-    if isinstance(min_rebate, (int, float)) and isinstance(max_rebate, (int, float)) and min_rebate > max_rebate:
-        errors.append("rebate_min_rate 不能大于 rebate_max_rate")
+    if isinstance(min_rebate, (int, float)) and isinstance(max_rebate, (int, float)):
+        if min_rebate > max_rebate:
+            errors.append("rebate_min_rate 不能大于 rebate_max_rate")
 
     # 4. 原文未提下限不应编造
     if raw_text and "预算" in raw_text and "以下" not in raw_text and "内" not in raw_text:

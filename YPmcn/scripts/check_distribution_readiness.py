@@ -18,7 +18,6 @@ REQUIRED_GATES = [
 ]
 
 GATE_ALIASES = {
-    "confirm-extra-field-mapping": ["extra_field_mapping_confirmed"],
     "confirm-supply-ratio": ["supply_ratio_confirmed"],
     "mcn-select-for-wechat": ["mcn_list_confirmed"],
     "confirm-form-fields": ["form_fields_confirmed"],
@@ -41,8 +40,8 @@ def check(gate_state: dict, params: dict) -> list[str]:
         if not gate_confirmed(gate_state, gate):
             errors.append(f"前置确认未完成: {gate}")
 
-    if gate_state.get("extra_field_mapping_required") and not gate_confirmed(gate_state, "confirm-extra-field-mapping"):
-        errors.append("前置确认未完成: confirm-extra-field-mapping")
+    if gate_state.get("extra_field_mapping_required"):
+        pass  # 额外字段映射由 Agent 直接复核，不阻塞分发
 
     # 检查必要参数
     if not params.get("id"):

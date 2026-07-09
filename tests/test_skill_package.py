@@ -71,7 +71,6 @@ BLOCKING_FIELDS = {
     "budget_max_cents",
     "budget_raw",
     "rebate_min_rate",
-    "rebate_max_rate",
     "rebate_raw",
     "quantity_total",
     "submission_deadline_at",
@@ -211,7 +210,6 @@ class SkillPackageTest(unittest.TestCase):
         text = read(SKILL)
         joined = "\n".join(read(path) for path in source_files())
         for required in (
-            "结构化 brief 确认",
             "MCN/野生比例确认",
             "表单字段确认",
             "企微角色权限",
@@ -336,7 +334,6 @@ class SkillPackageTest(unittest.TestCase):
             "budget_max_cents",
             "budget_raw",
             "rebate_min_rate",
-            "rebate_max_rate",
             "rebate_raw",
             "quantity_total",
         ):
@@ -344,7 +341,6 @@ class SkillPackageTest(unittest.TestCase):
         self.assertIn("creator_candidate_pool_schema.csv", text)
         self.assertIn("缺任一项不可继续", text)
         self.assertIn("额外需求必须参考", text)
-        self.assertIn("字段不确定时先问", text)
         self.assertNotIn("用户「确认调用」前不得调用", text)
         self.assertNotIn("pre-validate-requirement", text)
         self.assertIn("构造 JSON 调 `validate_requirement`", text)
@@ -360,7 +356,7 @@ class SkillPackageTest(unittest.TestCase):
             "≤3 个互斥选项",
             "不要在 `validate_requirement` 调用前弹窗确认",
             "`requirement-draft`",
-            "`confirm-structured-brief`",
+            "`confirm-supply-ratio`",
             "`confirm-ranking-after-supply-ready`",
         ):
             self.assertIn(required, text)
@@ -403,10 +399,8 @@ class SkillPackageTest(unittest.TestCase):
             "`budget_min_cents`",
             "`budget_max_cents`",
             "`rebate_min_rate`",
-            "`rebate_max_rate`",
-            "预算/单价和返点都必须区间化",
+            "预算/单价必须区间化",
             "creator_candidate_pool_schema.csv",
-            "用户未确认额外字段映射前，不进入 `search_creators`",
         ):
             self.assertIn(required, text)
 
@@ -451,7 +445,7 @@ class SkillPackageTest(unittest.TestCase):
             "phase",
             "requirement_id",
             "candidate_pool_id",
-            "mcn_plan_id",
+            "mcn_recommendation_id",
             "run_id",
             "inquiry_ids",
             "last_tool",
