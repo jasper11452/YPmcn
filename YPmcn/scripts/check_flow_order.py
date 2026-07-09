@@ -13,16 +13,18 @@ import sys
 # 正确顺序（每步完成才能走到下一步）
 FLOW = [
     "validate_requirement",
+    "confirm_extra_field_mapping",  # 弹窗：额外需求字段映射
     "confirm_structured_brief",     # 弹窗确认
     "search_creators",
-    "confirm_supply_ratio",         # 弹窗：MCN/野生比例
     "rank_mcns",                    # MCN 排序（MCP 工具）
+    "confirm_supply_ratio",         # 弹窗：MCN/野生比例
     "confirm_mcn_list",             # 弹窗：MCN 名单选择
     "confirm_form_fields",          # 弹窗：表单字段
     "confirm_wecom_permission",     # 弹窗：角色权限
     "confirm_send_content",         # 弹窗：发送内容
     "create_with_distributions",
-    "confirm_proceed_ranking",      # 弹窗：是否精排
+    "wait_mcn_return_and_manual_source",  # 等待机构回填/手扒回收到候选池
+    "confirm_ranking_after_supply_ready", # 弹窗：确认对候选池精排
     "rank_creators",
     "confirm_risky_submission",     # 弹窗：风险账号（有条件）
     "create_submission_batch",
@@ -30,17 +32,19 @@ FLOW = [
 
 # 每个步骤允许的下一个动作
 NEXT_ALLOWED = {
-    "validate_requirement": ["confirm_structured_brief", "validate_requirement"],
+    "validate_requirement": ["confirm_extra_field_mapping", "confirm_structured_brief", "validate_requirement"],
+    "confirm_extra_field_mapping": ["confirm_structured_brief", "validate_requirement"],
     "confirm_structured_brief": ["search_creators", "validate_requirement"],
-    "search_creators": ["confirm_supply_ratio"],
-    "confirm_supply_ratio": ["rank_mcns"],
-    "rank_mcns": ["confirm_mcn_list"],
+    "search_creators": ["rank_mcns"],
+    "rank_mcns": ["confirm_supply_ratio"],
+    "confirm_supply_ratio": ["confirm_mcn_list"],
     "confirm_mcn_list": ["confirm_form_fields"],
     "confirm_form_fields": ["confirm_wecom_permission"],
     "confirm_wecom_permission": ["confirm_send_content"],
     "confirm_send_content": ["create_with_distributions"],
-    "create_with_distributions": ["confirm_proceed_ranking"],
-    "confirm_proceed_ranking": ["rank_creators"],
+    "create_with_distributions": ["wait_mcn_return_and_manual_source"],
+    "wait_mcn_return_and_manual_source": ["confirm_ranking_after_supply_ready"],
+    "confirm_ranking_after_supply_ready": ["rank_creators"],
     "rank_creators": ["confirm_risky_submission", "create_submission_batch"],
     "confirm_risky_submission": ["create_submission_batch"],
     "create_submission_batch": ["record_client_feedback"],
@@ -48,13 +52,14 @@ NEXT_ALLOWED = {
 
 # 弹窗工具映射：弹窗名 → 对应的 MCP 工具
 POPUP_TO_TOOL = {
+    "confirm_extra_field_mapping": None,
     "confirm_structured_brief": None,    # askuserquestion
     "confirm_supply_ratio": None,
     "confirm_mcn_list": None,
     "confirm_form_fields": None,
     "confirm_wecom_permission": None,
     "confirm_send_content": None,
-    "confirm_proceed_ranking": None,
+    "confirm_ranking_after_supply_ready": None,
     "confirm_risky_submission": None,
 }
 
@@ -70,7 +75,7 @@ def check(current_phase: str, intent_tool: str, visited: list[str]) -> list[str]
     if intent_tool.startswith("confirm_"):
         if intent_tool not in FLOW:
             return [f"未知弹窗模式: {intent_tool}"]
-        return errors  # 弹窗可以随便发
+        # 弹窗也是流程节点，必须按 NEXT_ALLOWED 顺序推进。
 
     # 检查意图是否在流程中
     if intent_tool not in FLOW:

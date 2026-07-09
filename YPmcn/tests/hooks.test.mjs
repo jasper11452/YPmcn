@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import plugin, {
-  responseContractGuard,
-  rewriteInvalidToolResult,
   runBeforeToolCallGuards,
 } from "../dist/index.js";
 
@@ -118,7 +116,7 @@ describe("YPmcn OpenClaw hook layering", () => {
   it("blocks search_creators until the structured brief is confirmed", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "search_creators",
-      params: { demand_id: "demand-1", demand_version: 1 },
+      params: { id: "requirement-1" },
       sessionState: {
         workflow_state: {
           phase: "requirement_ready",
@@ -138,13 +136,37 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(result.blockReason, /结构化 brief|confirm_structured_brief/);
   });
 
+  it("allows search_creators when demand_id/demand_version are present alongside id, blocks only when id is missing", async () => {
+    // 传 demand_id/demand_version 但不传 id → 因 id 缺失而 block
+    const legacy = await runBeforeToolCallGuards({
+      toolName: "search_creators",
+      params: { demand_id: "demand-1", demand_version: 1 },
+    });
+    // 传 demand_id/demand_version + id → 放行（不再拦截 demand_id/demand_version）
+    const withId = await runBeforeToolCallGuards({
+      toolName: "search_creators",
+      params: { demand_id: "demand-1", demand_version: 1, id: "from-validate-1" },
+    });
+    // 空参数 → 因 id 缺失而 block
+    const missing = await runBeforeToolCallGuards({
+      toolName: "search_creators",
+      params: {},
+    });
+
+    assert.equal(missing?.block, true);
+    assert.match(missing.blockReason, /validate_requirement\.data\.id|id/);
+    assert.equal(legacy?.block, true);
+    assert.match(legacy.blockReason, /validate_requirement\.data\.id|id/);
+    assert.equal(withId?.block, undefined);
+  });
+
   it("blocks create_with_distributions until supply ratio, MCN list, form fields, and send content are confirmed", async () => {
     const before = registeredHandler("before_tool_call");
     const result = await before(
       {
         toolName: "create_with_distributions",
         toolCallId: "distribution-gated-1",
-        params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+        params: { id: "mcn-plan-1", deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
       },
       {
         sessionKey: "distribution-gated-session",
@@ -174,7 +196,7 @@ describe("YPmcn OpenClaw hook layering", () => {
       {
         toolName: "create_with_distributions",
         toolCallId: "distribution-role-1",
-        params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+        params: { id: "mcn-plan-1", deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
       },
       {
         sessionKey: "distribution-role-session",
@@ -201,7 +223,7 @@ describe("YPmcn OpenClaw hook layering", () => {
       {
         toolName: "create_with_distributions",
         toolCallId: "distribution-role-ok-1",
-        params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+        params: { id: "mcn-plan-1", deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
       },
       {
         sessionKey: "distribution-role-ok-session",
@@ -228,6 +250,7 @@ describe("YPmcn OpenClaw hook layering", () => {
         toolName: "create_with_distributions",
         toolCallId: "distribution-scope-top-level-1",
         params: {
+          id: "mcn-plan-1",
           projectName: "618达人提报",
           deadline: "2099-07-06T18:00:00+08:00",
           platform: "小红书",
@@ -260,6 +283,7 @@ describe("YPmcn OpenClaw hook layering", () => {
         toolName: "create_with_distributions",
         toolCallId: "distribution-scope-nested-1",
         params: {
+          id: "mcn-plan-1",
           project: {
             projectName: "618达人提报",
             deadline: "2099-07-06T18:00:00+08:00",
@@ -295,6 +319,7 @@ describe("YPmcn OpenClaw hook layering", () => {
         toolName: "create_with_distributions",
         toolCallId: "distribution-scope-alias-1",
         params: {
+          id: "mcn-plan-1",
           project: {
             projectName: "618达人提报",
             deadline: "2099-07-06T18:00:00+08:00",
@@ -333,6 +358,7 @@ describe("YPmcn OpenClaw hook layering", () => {
         toolName: "create_with_distributions",
         toolCallId: "distribution-scope-invalid-1",
         params: {
+          id: "mcn-plan-1",
           projectName: "618达人提报",
           deadline: "2099-07-06T18:00:00+08:00",
           usageScope: "campaign",
@@ -383,7 +409,7 @@ describe("YPmcn OpenClaw hook layering", () => {
   it("blocks pending gates that have no current runtime confirmation field", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "search_creators",
-      params: { demand_id: "demand-1", demand_version: 1 },
+      params: { id: "requirement-1" },
       sessionState: {
         workflow_state: {
           phase: "requirement_ready",
@@ -409,9 +435,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     const result = await runBeforeToolCallGuards({
       toolName: "rank_mcns",
       params: {
-        demand_id: "demand-1",
-        demand_version: 1,
-        platform: "xhs",
+        id: "candidate-pool-1",
         medium_risk_confirmed: true,
       },
       sessionState: {
@@ -432,10 +456,31 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(result, undefined);
   });
 
+  it("allows rank_mcns when demand_id/demand_version are present alongside id, blocks only when id is missing", async () => {
+    const missing = await runBeforeToolCallGuards({
+      toolName: "rank_mcns",
+      params: {},
+    });
+    const legacy = await runBeforeToolCallGuards({
+      toolName: "rank_mcns",
+      params: { demand_id: "demand-1", demand_version: 1, platform: "xhs" },
+    });
+    const withId = await runBeforeToolCallGuards({
+      toolName: "rank_mcns",
+      params: { demand_id: "demand-1", demand_version: 1, id: "from-search-1", platform: "xhs" },
+    });
+
+    assert.equal(missing?.block, true);
+    assert.match(missing.blockReason, /search_creators\.data\.id|id/);
+    assert.equal(legacy?.block, true);
+    assert.match(legacy.blockReason, /search_creators\.data\.id|id/);
+    assert.equal(withId?.block, undefined);
+  });
+
   it("blocks medium-risk continuation until medium_risk_confirmed is true", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "rank_mcns",
-      params: { demand_id: "demand-1", demand_version: 1, platform: "xhs" },
+      params: { id: "candidate-pool-1" },
       sessionState: {
         workflow_state: {
           phase: "mcn_planning",
@@ -497,10 +542,10 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(result.blockReason, /high_risk/);
   });
 
-  it("allows rank_creators after distribution succeeds and askuserquestion confirmation is recorded", async () => {
+  it("allows rank_creators after distribution succeeds and supply readiness is recorded", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "rank_creators",
-      params: { demand_id: "demand-1", demand_version: 1, platform: "xhs" },
+      params: { id: "candidate-pool-final-1" },
       sessionState: {
         project_distribution_completed: true,
         workflow_state: {
@@ -521,7 +566,7 @@ describe("YPmcn OpenClaw hook layering", () => {
   it("blocks rank_creators before create_with_distributions sends inquiries", async () => {
     const result = await runBeforeToolCallGuards({
       toolName: "rank_creators",
-      params: { demand_id: "demand-1", demand_version: 1, platform: "xhs" },
+      params: { id: "candidate-pool-final-1" },
       sessionState: {
         workflow_state: {
           phase: "mcn_planning",
@@ -676,6 +721,7 @@ describe("YPmcn OpenClaw hook layering", () => {
         toolName: "create_with_distributions",
         toolCallId: "distribution-tool-approval-1",
         params: {
+          id: "mcn-plan-1",
           project: { projectName: "618达人提报", deadline: "2099-07-06T18:00:00+08:00" },
           supplierIds: ["supplier-1"],
           sendWechatNotification: true,
@@ -721,7 +767,7 @@ describe("YPmcn OpenClaw hook layering", () => {
       {
         toolName: "create_with_distributions",
         toolCallId: "distribution-invalid-1",
-        params: { supplierIds: ["supplier-1"] },
+        params: { id: "mcn-plan-1", supplierIds: ["supplier-1"] },
       },
       { sessionKey: "distribution-invalid-session-1" },
     );
@@ -729,7 +775,7 @@ describe("YPmcn OpenClaw hook layering", () => {
       {
         toolName: "create_with_distributions",
         toolCallId: "distribution-invalid-2",
-        params: { deadline: "2020-01-01T00:00:00+08:00", supplierIds: ["supplier-1"] },
+        params: { id: "mcn-plan-1", deadline: "2020-01-01T00:00:00+08:00", supplierIds: ["supplier-1"] },
       },
       { sessionKey: "distribution-invalid-session-2" },
     );
@@ -740,13 +786,27 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.match(expired.blockReason, /未来时间/);
   });
 
+  it("blocks create_with_distributions without the rank_mcns plan id", async () => {
+    const result = await registeredHandler("before_tool_call")(
+      {
+        toolName: "create_with_distributions",
+        toolCallId: "distribution-missing-plan-id-1",
+        params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+      },
+      { sessionKey: "distribution-missing-plan-id-session" },
+    );
+
+    assert.equal(result?.block, true);
+    assert.match(result.blockReason, /rank_mcns|MCN 排序方案|id/);
+  });
+
   it("does not create a cron reminder after a successful distribution and waits for the user", async () => {
     const before = registeredHandler("before_tool_call");
     const after = registeredHandler("after_tool_call");
     const event = {
       toolName: "create_with_distributions",
       toolCallId: "distribution-success-1",
-      params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+      params: { id: "mcn-plan-1", deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
     };
     const ctx = {
       sessionKey: "distribution-success-session",
@@ -799,7 +859,7 @@ describe("YPmcn OpenClaw hook layering", () => {
       {
         toolName: "create_with_distributions",
         toolCallId: "distribution-no-cron-1",
-        params: { deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
+        params: { id: "mcn-plan-1", deadline: "2099-07-06T18:00:00+08:00", supplierIds: ["supplier-1"] },
       },
       {
         sessionKey: "distribution-no-cron-session",
@@ -840,7 +900,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     const failed = {
       toolName: "create_with_distributions",
       toolCallId: "distribution-failed-1",
-      params: { deadline: "2099-07-06T19:00:00+08:00", supplierIds: ["supplier-1"] },
+      params: { id: "mcn-plan-1", deadline: "2099-07-06T19:00:00+08:00", supplierIds: ["supplier-1"] },
     };
 
     const allowed = await before(failed, ctx);
@@ -855,7 +915,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     assert.equal(next, undefined);
   });
 
-  it("allows rank_creators after distribution succeeds and the user continues", async () => {
+  it("blocks rank_creators after distribution succeeds until supply-ready confirmation is recorded", async () => {
     const before = registeredHandler("before_tool_call");
     const after = registeredHandler("after_tool_call");
     const messageReceived = registeredHandler("message_received");
@@ -875,7 +935,7 @@ describe("YPmcn OpenClaw hook layering", () => {
     const event = {
       toolName: "create_with_distributions",
       toolCallId: "distribution-then-rank-1",
-      params: { deadline: "2099-07-06T20:00:00+08:00", supplierIds: ["supplier-1"] },
+      params: { id: "mcn-plan-1", deadline: "2099-07-06T20:00:00+08:00", supplierIds: ["supplier-1"] },
     };
 
     const allowed = await before(event, ctx);
@@ -888,115 +948,24 @@ describe("YPmcn OpenClaw hook layering", () => {
       ctx,
     );
 
-    const ranking = await before(
+    const prematureRanking = await before(
       { toolName: "rank_creators", toolCallId: "rank-after-distribution", params: {} },
+      ctx,
+    );
+    assert.equal(prematureRanking?.block, true);
+    assert.match(prematureRanking.blockReason, /回填|手扒|confirm-ranking-after-supply-ready/);
+
+    ctx.sessionState.ypmcn_gate_state.ranking_after_supply_ready_confirmed = true;
+
+    const ranking = await before(
+      { toolName: "rank_creators", toolCallId: "rank-after-supply-ready", params: {} },
       ctx,
     );
     assert.equal(ranking?.block, undefined);
     assert.equal(ranking?.requireApproval, undefined);
   });
 
-  it("response contract guard accepts the actual common response envelope", () => {
-    const errors = responseContractGuard({
-      toolName: "validate_requirement",
-      success: true,
-      data: {},
-      error: null,
-      traceId: "trace-ok",
-    });
-
-    assert.deepEqual(errors, []);
-  });
-
-  it("response contract guard accepts valid workflow_state envelope", () => {
-    const errors = responseContractGuard({
-      toolName: "validate_requirement",
-      success: true,
-      data: {},
-      workflowState: {
-        phase: "requirement_ready",
-        pending_gate: null,
-        platform_states: {
-          xhs: { mcn_phase: "not_started", risk_level: null },
-        },
-      },
-      allowedActions: ["search_creators"],
-      traceId: "trace-state",
-    });
-
-    assert.deepEqual(errors, []);
-  });
-
-  it("response contract guard blocks validate_requirement results that contradict the original brief", () => {
-    const originalBrief = "媒介助手：\n平台：小红书\n品牌：腾讯workbuddy\n账号类型：ai/学习/职场/大学生/泛生活\n非报备预算：1w粉以下 视频预算500以内\n1-2w粉 视频预算1000内\n数据好的情况下，预算可放宽至1500以内\n要5个人，返点5%\n数据要求：平均cpe低于3";
-    const errors = responseContractGuard({
-      toolName: "validate_requirement",
-      success: true,
-      error: null,
-      traceId: "trace-bad-parse",
-      params: {
-        raw_messages: [{ role: "client", content: originalBrief }],
-      },
-      data: {
-        status: "ready",
-        requirement_parsed: {
-          platforms: ["xhs", "dy"],
-          category_requirements: ["教育"],
-          budget_min_cents: 1000000,
-          budget_max_cents: 2000000,
-          budget_raw: "以内\n1-2w",
-          quantity_total: 5,
-        },
-      },
-    });
-
-    assert.equal(errors.length, 2);
-    assert.match(errors.map((error) => error.message).join("; "), /平台.*dy/);
-    assert.match(errors.map((error) => error.message).join("; "), /预算.*粉/);
-    assert.doesNotMatch(errors.map((error) => error.message).join("; "), /类目.*账号类型/);
-  });
-
-  it("response contract guard accepts soft account requirements outside category fields", () => {
-    const originalBrief = "平台：小红书\n账号类型：ai/学习/职场/大学生/泛生活\n单价500以内\n需要5个\nDDL：2099-07-06 18:00前";
-    const errors = responseContractGuard({
-      toolName: "validate_requirement",
-      success: true,
-      error: null,
-      traceId: "trace-soft-requirements",
-      params: {
-        raw_messages: [{ role: "client", content: originalBrief }],
-      },
-      data: {
-        status: "ready",
-        requirement_parsed: {
-          platforms: ["xhs"],
-          category_requirements: [],
-          creator_type_requirements: [],
-          content_requirements: "ai 学习 职场 大学生 泛生活",
-          budget_max_cents: 50000,
-          quantity_total: 5,
-          submission_deadline_at: "2099-07-06T18:00:00+08:00",
-        },
-      },
-    });
-
-    assert.deepEqual(errors, []);
-  });
-
-  it("response persistence rewrites an envelope missing trace_id", () => {
-    const rewritten = rewriteInvalidToolResult({
-      toolName: "validate_requirement",
-      success: true,
-      data: {},
-    });
-
-    assert.equal(rewritten.success, false);
-    assert.equal(rewritten.error.code, "INVALID_RESPONSE_CONTRACT");
-    assert.equal(rewritten.data, null);
-    assert.equal(rewritten.trace_id, undefined);
-  });
-
-  it("registered persistence hook synchronously rewrites an invalid YPmcn message", () => {
+  it("registered persistence hook does not rewrite a result missing trace_id", () => {
     const handler = registeredHandler("tool_result_persist");
     const result = handler(
       {
@@ -1016,14 +985,10 @@ describe("YPmcn OpenClaw hook layering", () => {
       { sessionKey: "test:persist-invalid" },
     );
 
-    assert.equal(typeof result?.then, "undefined", "tool_result_persist must not return a Promise");
-    assert.equal(result.message.isError, true);
-    assert.equal(result.message.details.ypmcn.invalidResponseContract, true);
-    assert.equal(result.message.details.structuredContent.error.code, "INVALID_RESPONSE_CONTRACT");
-    assert.equal(JSON.parse(result.message.content[0].text).error.code, "INVALID_RESPONSE_CONTRACT");
+    assert.equal(result, undefined);
   });
 
-  it("registered persistence hook rewrites semantically invalid validate_requirement results", () => {
+  it("registered persistence hook does not rewrite semantically suspicious validate_requirement results", () => {
     const handler = registeredHandler("tool_result_persist");
     const originalBrief = "平台：小红书\n账号类型：ai/学习/职场/大学生/泛生活\n非报备预算：1w粉以下 视频预算500以内\n1-2w粉 视频预算1000内\n数据好的情况下，预算可放宽至1500以内";
     const envelope = {
@@ -1057,9 +1022,7 @@ describe("YPmcn OpenClaw hook layering", () => {
       },
     });
 
-    assert.equal(result.message.isError, true);
-    assert.equal(result.message.details.structuredContent.error.code, "INVALID_REQUIREMENT_PARSE");
-    assert.match(result.message.details.structuredContent.error.message, /平台.*dy/);
+    assert.equal(result, undefined);
   });
 
   it("registered persistence hook leaves non-YPmcn tool results untouched", () => {

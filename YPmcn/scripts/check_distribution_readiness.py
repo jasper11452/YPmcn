@@ -28,6 +28,9 @@ def check(gate_state: dict, params: dict) -> list[str]:
             errors.append(f"前置确认未完成: {gate}")
 
     # 检查必要参数
+    if not params.get("id"):
+        errors.append("缺少 id（来自 rank_mcns.data.id 的 MCN 排序方案 ID）")
+
     if not params.get("deadline") and not params.get("remindAt"):
         errors.append("缺少 deadline 或 remindAt")
 
@@ -42,6 +45,8 @@ def check(gate_state: dict, params: dict) -> list[str]:
     sids = params.get("supplierIds") or params.get("supplier_ids")
     if not sids:
         errors.append("缺少 supplierIds")
+    elif not isinstance(sids, list) or not all(isinstance(s, str) and s.strip() for s in sids):
+        errors.append("supplierIds 必须是非空字符串数组")
 
     # usageScope
     scope = None
@@ -51,6 +56,21 @@ def check(gate_state: dict, params: dict) -> list[str]:
         scope = params["project"].get("usageScope") or params["project"].get("usage_scope")
     if scope and scope not in ("project", "项目"):
         errors.append(f"usageScope 应为 project 或 项目，当前为 {scope}")
+
+    # prefill rows by supplier
+    prefill_by_supplier = (
+        params.get("prefillRowsBySupplier")
+        or params.get("prefill_rows_by_supplier")
+        or params.get("talentRowsBySupplier")
+        or params.get("talent_rows_by_supplier")
+    )
+    if prefill_by_supplier is not None:
+        if not isinstance(prefill_by_supplier, dict):
+            errors.append("prefillRowsBySupplier 必须是按 supplierId 分组的对象")
+        elif isinstance(sids, list):
+            extra = [sid for sid in prefill_by_supplier.keys() if sid not in sids]
+            if extra:
+                errors.append(f"prefillRowsBySupplier 包含不在 supplierIds 中的供应商: {extra}")
 
     # preview_only 检查
     if params.get("preview_only") is True:

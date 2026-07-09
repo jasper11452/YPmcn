@@ -8,16 +8,17 @@
 2. 数据库没有的字段不能用虚拟值硬测；应提示媒介/采购补充真实资源库。
 3. 表单字段生成后必须停下让媒介确认，媒介可增减字段后再发送企微。
 4. 字段是否参与筛选由 MCP 和数据库事实决定，Skill 只负责提示和流程控制。
+5. 需求主表固定为 `customer_demands`，字段以 `references/creator_candidate_pool_schema.csv` 的 `字段` 列为准；达人资源库物理表固定为 `xhs_creator_accounts`、`dy_creator_accounts`，字段从需求主表继承后再决定是否能进表单。
 
 ## 常用字段映射
 
 | Brief 表达 | 数据库/结构化落点 | 筛选用途 | 表单字段 | 确认规则 |
 |---|---|---|---|---|
-| 平台 | `customer_demands.platforms` | 硬筛 | 平台 | 必填，缺失阻断 |
+| 平台 | `customer_demands.platform` | 硬筛 | 平台 | 必填，缺失阻断 |
 | 达人数量 | `customer_demands.quantity_total` | 供给倍数、提报数量 | 可提报数量 | 必填，缺失阻断 |
 | deadline/截止提交 | `customer_demands.submission_deadline_at` | 流程时限、企微发送 | 提交截止时间 | 必填，缺失阻断 |
 | 单账号预算/报价上限 | `customer_demands.budget_max_cents` | 硬筛 | 报价 | 需展示单位元 |
-| 返点 | `customer_demands.rebate_min_rate` | 硬筛/排序 | 返点 | 未提不编造 |
+| 返点 | `customer_demands.rebate_min_rate` / `customer_demands.rebate_max_rate` | 硬筛/排序 | 返点 | 必填区间，未提需补充 |
 | CPM | `requirements_json.performance_thresholds.*.cpm_max_cents` | 数据阈值 | CPM | 若库无字段，要求补库 |
 | CPC | `requirements_json.performance_thresholds.*.cpc_max_cents` | 数据阈值 | CPC | 若库无字段，要求补库 |
 | CPE | `requirements_json.performance_thresholds.*.cpe_max_cents` | 数据阈值 | CPE | 若库无字段，要求补库 |
@@ -35,7 +36,7 @@
 
 1. 读取 `validate_requirement` 返回的结构化 brief 和 `requirements_json`。
 2. 抽取所有数据指标、商业条款、执行要求和回填所需字段。
-3. 对照资源库字段能力：已有字段进入表单；缺字段列为“需媒介/采购补充”。
+3. 对照 `xhs_creator_accounts` / `dy_creator_accounts` 字段能力：已有字段进入表单；缺字段列为“需媒介/采购补充”。
 4. 输出表单字段表，停下询问媒介是否增减字段。
 5. 媒介确认后，才允许进入企微发送确认。
 

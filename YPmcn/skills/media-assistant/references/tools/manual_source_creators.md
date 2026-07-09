@@ -10,11 +10,11 @@
 3. 媒介在 `confirm-supply-ratio` 弹窗中选择「全手扒」或「补充手扒」。
 4. 媒介在 `insufficient-supply` 弹窗中选择「手工补量」。
 
-**调用前必须**：已获得 `demand_id` 和 `demand_version`（来自 `validate_requirement` 成功响应）。
+**调用前必须**：已获得当前需求/候选上下文的上游 `id`，并已向媒介说明供给缺口或手扒原因。
 
 ## 输入
 
-必填 `demand_id`、`demand_version`。可选 `search_context` 和 `manual_results` 按运行时 schema 传入。
+必填 `id`（按运行时 schema 取当前需求或候选上下文 ID）。可选 `search_context` 和 `manual_results` 按运行时 schema 传入。
 
 ## 输出成功证据
 
@@ -24,12 +24,13 @@
 
 导入手扒结果后：
 1. 展示补量结果（新增数量、重复项、仍缺字段）。
-2. **必须重新调用 `search_creators`** 将手扒结果纳入候选池，确保后续 `rank_mcns` 和 `rank_creators` 覆盖完整候选。
-3. 重新 `search_creators` 后，按正常流程继续：筛选口径确认 → `rank_mcns` → 比例/名单/表单确认。
+2. 手扒结果必须回收到当前候选池，`candidate_source=manual_search`。
+3. 如果 MCN 询价已同步发出，手扒与机构回填并行推进；等两类结果回收到候选池后，再统一去重、筛选、精排。
+4. 如果手扒发生在首次候选搜索前或需求字段变化后，再按当前 schema 决定是否重新 `search_creators`。
 
 ## 调用后必须停在哪里
 
-导入后展示补量结果和仍缺字段，必要时回到供给确认或数据字段确认，不得自动跳过 MCN/表单/发送 gate。
+导入后展示补量结果和仍缺字段，必要时回到供给确认或数据字段确认。不得自动跳过 MCN/表单/发送 gate，也不得在机构回填和手扒结果未回收到候选池时直接精排。
 
 ## 禁止
 

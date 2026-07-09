@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "YPmcn"
 SKILL = PACKAGE / "skills" / "media-assistant" / "SKILL.md"
 REFERENCES = SKILL.parent / "references"
+SCHEMA = REFERENCES / "creator_candidate_pool_schema.csv"
 CSV_PATH = ROOT / "doc" / "客户原始需求列表.csv"
 GOLDENS_PATH = ROOT / "tests" / "goldens" / "requirement_cases.json"
 REGRESSIONS_PATH = ROOT / "tests" / "goldens" / "requirement_regressions.json"
@@ -64,8 +65,14 @@ EXPECTED_TOOLS = {
 }
 
 BLOCKING_FIELDS = {
-    "platforms",
-    "content_or_unit_price",
+    "platform",
+    "raw_messages_json",
+    "budget_min_cents",
+    "budget_max_cents",
+    "budget_raw",
+    "rebate_min_rate",
+    "rebate_max_rate",
+    "rebate_raw",
     "quantity_total",
     "submission_deadline_at",
 }
@@ -159,7 +166,7 @@ class SkillPackageTest(unittest.TestCase):
             "validateProtocolEnvelope",
             "validateStateGuard",
             "validateHighRiskGuard",
-            "INVALID_RESPONSE_CONTRACT",
+            "validateProjectDistributionBeforeRanking",
         ):
             self.assertIn(required, text)
 
@@ -173,7 +180,6 @@ class SkillPackageTest(unittest.TestCase):
         for reference in ROUTED_REFERENCES:
             self.assertIn(f"references/{reference}", text)
         for required in (
-            "第一条业务工具调用",
             "validate_requirement",
             "integration_required",
             "当前生产 provider 暴露 12 个 YPmcn 工具",
@@ -181,8 +187,9 @@ class SkillPackageTest(unittest.TestCase):
             "人工 gate",
             "`medium_risk_confirmed: true`",
             "`allow_need_confirm_with_risk: true`",
-            "CSV 合并表必填字段",
-            "CSV 合并表必填字段",
+            "缺任一必填项不可进入候选搜索",
+            "creator_candidate_pool_schema.csv",
+            "confirm-ranking-after-supply-ready",
         ):
             self.assertIn(required, text)
 
@@ -209,7 +216,7 @@ class SkillPackageTest(unittest.TestCase):
             "表单字段确认",
             "企微角色权限",
             "核心算法在 MCP",
-            "references/tools/validate_requirement.md",
+            "references/tools/<工具名>.md",
             "references/form-field-mapping.md",
         ):
             self.assertIn(required, text)
@@ -232,16 +239,16 @@ class SkillPackageTest(unittest.TestCase):
 
     def test_tool_cheatsheet_matches_live_required_limits(self):
         text = read(REFERENCES / "mcp-tool-cheatsheet.md")
-        search_section = text.split("### 5.2 `search_creators`", 1)[1].split(
-            "### 5.3 `rank_mcns`", 1
-        )[0]
-        rank_section = text.split("### 5.4 `rank_creators`", 1)[1].split(
-            "### 5.5 `create_submission_batch`", 1
-        )[0]
-        self.assertRegex(search_section, r"\| `limit` \| integer \| 500 \|")
-        self.assertRegex(rank_section, r"\| `limit` \| integer \| 100 \|")
-        self.assertIn("没有 `get_workflow_state`", text)
-        self.assertIn("`trace_id` 是响应字段", text)
+        for required in (
+            "缺少 `trace_id` 或信封细项不由 hook 阻断",
+            "`raw_messages_json`",
+            "`budget_min_cents` / `budget_max_cents`",
+            "`rebate_min_rate` / `rebate_max_rate`",
+            "`id` | string（来自 `validate_requirement.data.id`）",
+            "`id` | string（来自 `search_creators.data.id`）",
+            "`prefillRowsBySupplier` / `prefill_rows_by_supplier`",
+        ):
+            self.assertIn(required, text)
 
     def test_rank_mcns_minimum_count_does_not_override_hard_filter_coverage(self):
         combined = "\n".join(
@@ -257,8 +264,9 @@ class SkillPackageTest(unittest.TestCase):
             "硬筛后合格 MCN 少于 5 家",
             "`minimum_mcn_count=5` 自动失效",
             "不得为了凑满 5 家放宽硬筛条件",
-            "60 位达人都属于同一家 MCN",
             "预警媒介是否启动 `manual_source_creators` 手扒",
+            "当前达人供需关系",
+            "建议手扒比例",
         ):
             self.assertIn(required, combined)
 
@@ -280,6 +288,7 @@ class SkillPackageTest(unittest.TestCase):
             "INVALID_RESPONSE_CONTRACT",
             "原始 envelope",
             "缺少 `workflow_state` 或 `allowed_actions` 本身不是错误",
+            "ranking_after_supply_ready_confirmed",
         ):
             self.assertIn(required, text)
 
@@ -304,29 +313,31 @@ class SkillPackageTest(unittest.TestCase):
 
         self.assertIn("当前不创建 Cron", hook_behavior + workflow + readme)
         self.assertIn("调用失败不进入等待锁", hook_behavior + workflow)
-        self.assertIn("收到用户新消息前不得执行下一步", workflow)
+        self.assertIn("等机构回填和手扒结果回收到候选池", workflow)
 
     def test_requirement_intake_has_exact_input_boundary(self):
         text = read(REFERENCES / "requirement-intake.md")
         for key in (
-            "raw_messages",
-            "trace_id",
-            "idempotency_key",
-            "project_context",
-            "existing_demand_id",
-            "existing_demand_version",
-            "parsed_requirement",
+            "platform",
+            "submission_deadline_at",
+            "raw_messages_json",
+            "budget_min_cents",
+            "budget_max_cents",
+            "budget_raw",
+            "rebate_min_rate",
+            "rebate_max_rate",
+            "rebate_raw",
+            "quantity_total",
         ):
             self.assertIn(f"`{key}`", text)
-        self.assertIn("每个元素使用对象", text)
-        self.assertIn("`sent_at`", text)
-        self.assertIn("不得用当前时间伪造", text)
-        self.assertIn("收到媒介输入后，Agent 必须先对照", text)
-        self.assertIn("不得在调用前先向媒介确认", text)
+        self.assertIn("creator_candidate_pool_schema.csv", text)
+        self.assertIn("缺任一项不可继续", text)
+        self.assertIn("额外需求必须参考", text)
+        self.assertIn("字段不确定时先问", text)
         self.assertNotIn("用户「确认调用」前不得调用", text)
         self.assertNotIn("pre-validate-requirement", text)
-        self.assertIn("解析字段直接作为 `validate_requirement` 顶层入参传入", text)
-        self.assertIn("CSV 合并表必填字段", text)
+        self.assertIn("构造 JSON 调 `validate_requirement`", text)
+        self.assertIn("字段名与 CSV", text)
 
     def test_askuserquestion_is_the_only_confirmation_pattern(self):
         text = read(REFERENCES / "ask-user-question-patterns.md")
@@ -334,12 +345,12 @@ class SkillPackageTest(unittest.TestCase):
         for required in (
             "askuserquestion",
             "弹窗",
-            "字数限制",
-            "选项互斥",
-            "最多 3 个选项",
+            "选项中文，短，互斥",
+            "≤3 个互斥选项",
             "不要在 `validate_requirement` 调用前弹窗确认",
             "`requirement-draft`",
             "`confirm-structured-brief`",
+            "`confirm-ranking-after-supply-ready`",
         ):
             self.assertIn(required, text)
         for forbidden in (
@@ -374,26 +385,62 @@ class SkillPackageTest(unittest.TestCase):
     def test_requirement_parsing_matches_customer_demands_boundary(self):
         text = read(REFERENCES / "requirement-parsing.md")
         for required in (
-            "`requirement_parsed` 必须按 `customer_demands` 字段语义返回",
-            "`content_requirements` 或 `budget_max_cents`/单价条件至少一个",
-            "`platforms`",
+            "`platform`",
             "`quantity_total`",
             "`submission_deadline_at`",
-            "CPE",
-            "performance_thresholds",
-            "数字或数据阈值进入硬筛",
-            "类型、内容、调性、参考账号进入向量召回和排序",
-            "不因类目不匹配淘汰候选",
+            "`raw_messages_json`",
+            "`budget_min_cents`",
+            "`budget_max_cents`",
+            "`rebate_min_rate`",
+            "`rebate_max_rate`",
+            "预算/单价和返点都必须区间化",
+            "creator_candidate_pool_schema.csv",
+            "用户未确认额外字段映射前，不进入 `search_creators`",
         ):
             self.assertIn(required, text)
+
+    def test_database_table_contract_uses_legacy_names_and_split_creator_sources(self):
+        joined = "\n".join(read(path) for path in source_files())
+        with SCHEMA.open("r", encoding="utf-8-sig", newline="") as handle:
+            schema_fields = {row["字段"] for row in csv.DictReader(handle) if row["字段"]}
+
+        for field in (
+            "platform",
+            "raw_messages_json",
+            "budget_min_cents",
+            "budget_max_cents",
+            "rebate_min_rate",
+            "rebate_max_rate",
+            "quantity_total",
+            "status",
+        ):
+            self.assertIn(field, schema_fields)
+
+        for required in (
+            "需求主表固定为 `customer_demands`",
+            "`validate_requirement` 写入 `customer_demands`",
+            "字段以 `references/creator_candidate_pool_schema.csv` 的 `字段` 列为准",
+            "达人资源库物理表固定为 `xhs_creator_accounts`、`dy_creator_accounts`",
+            "字段从需求主表继承",
+            "`creator_candidate_pool`",
+        ):
+            self.assertIn(required, joined)
+
+        for forbidden_table in (
+            "`requirements`",
+            "`creators`",
+            "`candidate_pools`",
+            "`creator_accounts`",
+        ):
+            self.assertNotIn(forbidden_table, joined)
 
     def test_state_machine_preserves_recovery_and_write_safety(self):
         text = read(REFERENCES / "workflow-state-machine.md")
         for field in (
-            "provider_binding",
             "phase",
-            "demand_id",
-            "demand_version",
+            "requirement_id",
+            "candidate_pool_id",
+            "mcn_plan_id",
             "run_id",
             "inquiry_ids",
             "last_tool",
@@ -411,23 +458,23 @@ class SkillPackageTest(unittest.TestCase):
             "allow_need_confirm_with_risk=true",
             "get_recommendation_run_detail",
             "不重复写、不模拟成功",
+            "confirm-ranking-after-supply-ready",
         ):
             self.assertIn(required, text)
 
     def test_frontend_response_is_short_and_private(self):
         text = read(REFERENCES / "frontend-response.md")
-        self.assertIn("需求已校验，可进入筛选", text)
-        self.assertIn("需求已记录，还需确认", text)
-        self.assertIn("最多 3", text)
+        self.assertIn("结论先行", text)
+        self.assertIn("选项 ≤3", text)
         self.assertIn("元/万元", text)
         self.assertIn("百分比", text)
-        self.assertIn("已停止自动操作", text)
-        self.assertIn("当前流程已暂停", text)
+        self.assertIn("只转述 MCP 已确认字段", text)
+        self.assertIn("失败只说当前步骤未完成", text)
         for private in (
             "requirement_parsed",
-            "confidence_map",
-            "envelope",
-            "state_snapshot",
+            "raw_messages",
+            "排序向量",
+            "数据库 ID",
         ):
             self.assertIn(private, text)
 
@@ -441,9 +488,9 @@ class SkillPackageTest(unittest.TestCase):
             "integration_required",
             "medium_risk_confirmed",
             "allow_need_confirm_with_risk",
-            "INVALID_RESPONSE_CONTRACT",
+            "缺少 `trace_id`",
             "Brief 入口不等待用户确认",
-            "不强制添加 `trace_id` 或 `idempotency_key`",
+            "不强制添加 `trace_id`、`idempotency_key`",
         ):
             self.assertIn(required, text)
 
@@ -500,7 +547,7 @@ class SkillPackageTest(unittest.TestCase):
         self.assertTrue(any(case.get("unsupported_platforms") for case in cases))
         self.assertTrue(any(case.get("relative_time_without_sent_at") for case in cases))
         self.assertTrue(any(case.get("expected_platforms") == ["xhs", "dy"] for case in cases))
-        self.assertTrue(any("content_or_unit_price" in case["blocking_fields"] for case in cases))
+        self.assertTrue(any("platform" in case["blocking_fields"] for case in cases))
         self.assertTrue(any("submission_deadline_at" in case["blocking_fields"] for case in cases))
 
         with CSV_PATH.open("r", encoding="utf-8-sig", newline="") as handle:

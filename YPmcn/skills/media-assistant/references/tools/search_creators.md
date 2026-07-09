@@ -2,19 +2,21 @@
 
 ## 何时调用
 
-结构化 brief 已由媒介确认，且 MCP 返回的 `demand_id`、`demand_version` 可用时调用。
+结构化 brief 已由媒介确认，且 `validate_requirement` 成功返回的 `data.id` 可用时调用。
 
 ## 输入
 
-必填 `demand_id`、`demand_version`。可选 `authorized_relaxations`、`write_candidate_pool`、`limit` 只按运行时 schema 传入。
+必填 `id`（来自 `validate_requirement.data.id`）。其余参数按运行时 schema 传入。
 
 ## 输出成功证据
 
-候选池或供给评估结果，包括候选数量、供给风险、实际放宽字段和是否写入候选池。
+候选池或供给评估结果，必须能定位 `data.id`（`creator_candidate_pool`/搜索结果 ID），并包含候选数量、供给风险、实际放宽字段和是否写入候选池。
+
+MCP 根据 `customer_demands` 主键读取所有非空且已确认字段，与 `xhs_creator_accounts` / `dy_creator_accounts` 同字段匹配筛选；字段从需求主表继承，Agent 不重复传筛选条件。
 
 ## 调用后必须停在哪里
 
-如果供给不足或字段缺失，停在补资源库/手扒/放宽确认。供给可继续时，先确认数据指标和筛选口径，再进入 `rank_mcns`。
+如果供给不足或字段缺失，停在补资源库/手扒/放宽确认。供给可继续时，用 `search_creators.data.id` 进入 `rank_mcns`；比例确认在 `rank_mcns` 成功后进行。
 
 ## 禁止
 

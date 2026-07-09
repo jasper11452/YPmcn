@@ -14,6 +14,22 @@ import sys
 def check(params: dict, raw_text: str = "") -> list[str]:
     errors = []
 
+    required_fields = (
+        "platform",
+        "submission_deadline_at",
+        "raw_messages_json",
+        "budget_min_cents",
+        "budget_max_cents",
+        "budget_raw",
+        "rebate_min_rate",
+        "rebate_max_rate",
+        "rebate_raw",
+        "quantity_total",
+    )
+    for field in required_fields:
+        if params.get(field) is None or params.get(field) == "":
+            errors.append(f"缺少必填字段: {field}")
+
     # 1. platform 枚举
     platform = params.get("platform")
     if platform is not None:
@@ -38,6 +54,10 @@ def check(params: dict, raw_text: str = "") -> list[str]:
                 errors.append(f"{field}={val} 看起来是元（太小），单位应为分。3万→3000000")
             elif val > 100_000_000:
                 errors.append(f"{field}={val} 数值过大，检查是否单位错误")
+    min_budget = params.get("budget_min_cents")
+    max_budget = params.get("budget_max_cents")
+    if isinstance(min_budget, (int, float)) and isinstance(max_budget, (int, float)) and min_budget > max_budget:
+        errors.append("budget_min_cents 不能大于 budget_max_cents")
 
     # 3. 返点单位：小数
     for field in ("rebate_min_rate", "rebate_max_rate"):
@@ -47,6 +67,12 @@ def check(params: dict, raw_text: str = "") -> list[str]:
                 errors.append(f"{field} 应为数字，当前 {type(val).__name__}")
             elif val > 1:
                 errors.append(f'{field}={val} 看起来是百分比数值（>1），应为小数。20%→0.2，不是20')
+            elif val < 0:
+                errors.append(f"{field}={val} 不能小于 0")
+    min_rebate = params.get("rebate_min_rate")
+    max_rebate = params.get("rebate_max_rate")
+    if isinstance(min_rebate, (int, float)) and isinstance(max_rebate, (int, float)) and min_rebate > max_rebate:
+        errors.append("rebate_min_rate 不能大于 rebate_max_rate")
 
     # 4. 原文未提下限不应编造
     if raw_text and "预算" in raw_text and "以下" not in raw_text and "内" not in raw_text:

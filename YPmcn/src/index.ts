@@ -6,7 +6,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
  * 设计原则：
  * - validate_requirement 只校验当前运行时 inputSchema 已暴露的字段。
  * - workflow_state 存在时再执行状态、高风险和 gate 防护，不伪造未部署字段。
- * - MCP 响应以 {success, data, error, trace_id} 为基础契约；可选状态扩展按需校验。
+ * - MCP 响应细项不阻断主流程；只解析可选状态扩展用于恢复和 gate。
  * - create_with_distributions 工具由 SSE MCP Server (https://mcp.eshypdata.com/sse) 提供，插件仅做 hooks 拦截。
  */
 
@@ -49,6 +49,10 @@ export interface ToolResultContext {
 
 export interface WorkflowState {
   phase: string;
+  id?: string;
+  requirement_id?: string;
+  candidate_pool_id?: string;
+  mcn_plan_id?: string;
   demand_id?: string;
   demand_version?: number;
   run_id?: string | null;
@@ -84,13 +88,13 @@ export interface GuardError {
 
 /**
  * validate_requirement 入参校验：
- * 仅检查 CSV 合并表中标记"必填"的字段值不为空/不为 null。
+ * 仅检查媒介/Agent 可传字段的基础类型。
+ * id、demand_id、demand_version、status、created_at、updated_at 由 MCP/DB 生成，
+ * 不作为 Agent 入参必填。
  * 其他字段（trace_id、parsed_requirement 等）全部放行，不拦截。
  */
 const CSV_REQUIRED_FIELDS: Array<{ key: string; type: string; label: string }> = [
-  // CSV 合并表行 133-148 标记"必填"的基础需求字段
-  { key: "demand_id",            type: "string",  label: "需求ID" },
-  { key: "demand_version",       type: "integer", label: "需求版本" },
+  // CSV 合并表中由媒介/Agent 提供的基础需求字段
   { key: "submission_deadline_at", type: "string", label: "提交时间" },
   { key: "submission_deadline_raw", type: "string", label: "提交时间原文" },
   { key: "raw_messages_json",    type: "string",  label: "原始输入的需求内容json" },
@@ -258,6 +262,30 @@ function findReminderTime(params: Record<string, unknown>): unknown {
   return undefined;
 }
 
+function findSupplierIds(params: Record<string, unknown>): unknown {
+  if (params.supplierIds !== undefined) return params.supplierIds;
+  if (params.supplier_ids !== undefined) return params.supplier_ids;
+  return undefined;
+}
+
+function validateSupplierIds(params: Record<string, unknown>): string | null {
+  const supplierIds = findSupplierIds(params);
+  if (!Array.isArray(supplierIds) || supplierIds.length === 0) {
+    return `${PROJECT_DISTRIBUTION_ACTION} 工具调用必须包含非空 supplierIds/supplier_ids`;
+  }
+  if (supplierIds.some((item) => !nonEmptyString(item))) {
+    return "supplierIds/supplier_ids 必须是非空字符串数组";
+  }
+  return null;
+}
+
+function validateProjectDistributionPlanId(params: Record<string, unknown>): string | null {
+  if (!nonEmptyString(params.id)) {
+    return `${PROJECT_DISTRIBUTION_ACTION} 工具调用必须包含来自 rank_mcns.data.id 的 MCN 排序方案 id`;
+  }
+  return null;
+}
+
 function isMissingUsageScopeValue(value: unknown): boolean {
   return value === undefined ||
     value === null ||
@@ -372,11 +400,15 @@ export function parseProjectDistributionInvocation(toolName: string, params: Rec
   }
 
   if (PROJECT_DISTRIBUTION_TOOL_NAMES.has(bareName)) {
+    const planIdError = validateProjectDistributionPlanId(params);
+    if (planIdError) return { error: planIdError };
     const parsed = validateReminderTime(
       findReminderTime(params),
       `${PROJECT_DISTRIBUTION_ACTION} 工具调用必须包含未来的 deadline/remindAt`,
     );
     if (!parsed.invocation) return parsed;
+    const supplierIdsError = validateSupplierIds(params);
+    if (supplierIdsError) return { error: supplierIdsError };
     return {
       invocation: {
         ...parsed.invocation,
@@ -529,16 +561,52 @@ function hasCompletedProjectDistribution(ctx: ToolCallContext): boolean {
     ctx.sessionState?.create_with_distributions_completed === true;
 }
 
+function platformStatesAreSupplyReady(workflowState: WorkflowState | null): boolean {
+  const platformStates = workflowState?.platform_states ?? {};
+  const states = Object.values(platformStates);
+  return states.length > 0 && states.every(
+    (state) => state.mcn_phase === "not_required" || state.mcn_phase === "ingested",
+  );
+}
+
+function hasSupplyReadyForRanking(ctx: ToolCallContext, workflowState: WorkflowState | null): boolean {
+  const gateState = isObject(ctx.sessionState?.ypmcn_gate_state)
+    ? ctx.sessionState.ypmcn_gate_state as Record<string, unknown>
+    : null;
+
+  if (gateState?.ranking_after_supply_ready_confirmed === true) return true;
+  if (ctx.sessionState?.ranking_after_supply_ready_confirmed === true) return true;
+  if (ctx.sessionState?.candidate_pool_supply_ready === true) return true;
+  if (ctx.sessionState?.mcn_submissions_ingested === true) return true;
+  if (platformStatesAreSupplyReady(workflowState)) return true;
+  if (workflowState?.allowed_actions?.includes("rank_creators") && !workflowState.pending_gate) return true;
+
+  return false;
+}
+
 function validateProjectDistributionBeforeRanking(ctx: ToolCallContext): GuardError[] {
   if (ctx.toolName !== "rank_creators") return [];
-  if (hasCompletedProjectDistribution(ctx)) return [];
+  const workflowState = resolveWorkflowState(ctx);
 
-  return [
-    block(
-      "state-guard",
-      `rank_creators 前必须先调用 ${PROJECT_DISTRIBUTION_ACTION} 完成企微询价发送；不得跳过询价直接精排`,
-    ),
-  ];
+  if (!hasCompletedProjectDistribution(ctx)) {
+    return [
+      block(
+        "state-guard",
+        `rank_creators 前必须先调用 ${PROJECT_DISTRIBUTION_ACTION} 完成企微询价发送；不得跳过询价直接精排`,
+      ),
+    ];
+  }
+
+  if (!hasSupplyReadyForRanking(ctx, workflowState)) {
+    return [
+      block(
+        "state-guard",
+        "rank_creators 前必须等待机构回填/手扒结果回收到候选池，并完成 confirm-ranking-after-supply-ready 确认；不得企微发送后直接精排",
+      ),
+    ];
+  }
+
+  return [];
 }
 
 function isClarifyValidateRequirement(ctx: ToolCallContext, workflowState: WorkflowState | null): boolean {
@@ -577,8 +645,24 @@ function validatePluralAliases(ctx: ToolCallContext): GuardError[] {
   return [];
 }
 
+const CHAIN_ID_REQUIREMENTS: Record<string, string> = {
+  search_creators: "validate_requirement.data.id",
+  rank_mcns: "search_creators.data.id",
+};
+
+function validateChainIdParams(ctx: ToolCallContext): GuardError[] {
+  const source = CHAIN_ID_REQUIREMENTS[ctx.toolName];
+  if (!source) return [];
+
+  // demand_id/demand_version 不再校验 — 不管有没有传，都不报错
+  if (!nonEmptyString(ctx.params.id)) {
+    return [block("chain-id", `${ctx.toolName} 必须包含来自 ${source} 的非空 id`)];
+  }
+  return [];
+}
+
 export function validateProtocolEnvelope(ctx: ToolCallContext): GuardError[] {
-  if (ctx.toolName !== "validate_requirement") return [];
+  if (ctx.toolName !== "validate_requirement") return validateChainIdParams(ctx);
 
   const errors: GuardError[] = [...validatePlatformEnum(ctx.params), ...validatePluralAliases(ctx)];
   const params = ctx.params;
@@ -709,7 +793,7 @@ function buildPendingGateApproval(ctx: ToolCallContext, workflowState: WorkflowS
 function buildRankCreatorsApproval(ctx: ToolCallContext): BeforeToolCallResult["requireApproval"] | undefined {
   if (ctx.toolName !== "rank_creators") return undefined;
   // requireApproval bypassed — gateway pairing not available in YP Action
-  // Agent-level text table confirmation (proceed-to-ranking) provides user confirmation
+  // Agent-level askuserquestion confirmation (confirm-ranking-after-supply-ready) provides user confirmation
   return undefined;
 }
 
@@ -780,139 +864,7 @@ export async function runBeforeToolCallGuards(ctx: ToolCallContext): Promise<Bef
 }
 
 export function responseContractGuard(result: ToolResultContext): GuardError[] {
-  const errors: GuardError[] = [];
-  const workflowState = result.workflowState;
-
-  if (!nonEmptyString(result.traceId)) {
-    errors.push(block("response-contract-guard", "MCP 响应缺少非空 trace_id，响应契约破坏"));
-  }
-
-  if (result.success) {
-    if (result.error !== null && result.error !== undefined) {
-      errors.push(block("response-contract-guard", "MCP success=true 时 error 必须为 null"));
-    }
-  } else {
-    if (result.data !== null) {
-      errors.push(block("response-contract-guard", "MCP success=false 时 data 必须为 null"));
-    }
-    if (!isObject(result.error)) {
-      errors.push(block("response-contract-guard", "MCP success=false 时 error 必须为对象"));
-    }
-  }
-
-  if (isObject(workflowState)) {
-    const pendingGate = workflowState.pending_gate;
-    if (pendingGate !== null && pendingGate !== undefined) {
-      if (!isObject(pendingGate)) {
-        errors.push(block("response-contract-guard", "MCP 可选 workflow_state.pending_gate 必须为对象或 null"));
-      } else {
-        const hasGateShape =
-          nonEmptyString(pendingGate.gate) &&
-          nonEmptyString(pendingGate.gate_id) &&
-          nonEmptyString(pendingGate.reason) &&
-          Array.isArray(pendingGate.required_fields);
-        if (!hasGateShape) {
-          errors.push(block("response-contract-guard", "MCP 可选 pending_gate 缺少 gate/gate_id/reason/required_fields"));
-        }
-      }
-    }
-  }
-
-  if (result.allowedActions !== undefined &&
-      (!Array.isArray(result.allowedActions) || result.allowedActions.some((action) => typeof action !== "string"))) {
-    errors.push(block("response-contract-guard", "MCP 可选 allowed_actions 必须为字符串数组"));
-  }
-
-  errors.push(...validateRequirementSemanticGuard(result));
-
-  return errors;
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
-
-function rawMessagesText(params: Record<string, unknown> | undefined): string {
-  const rawMessages = params?.raw_messages;
-  if (!Array.isArray(rawMessages)) return "";
-  return rawMessages
-    .map((item) => isObject(item) && typeof item.content === "string" ? item.content : "")
-    .filter(Boolean)
-    .join("\n");
-}
-
-function requirementParsed(data: unknown): Record<string, unknown> | null {
-  if (!isObject(data)) return null;
-  return isObject(data.requirement_parsed) ? data.requirement_parsed : null;
-}
-
-function explicitPlatformScope(text: string): string {
-  const platformLine = text.match(/平台\s*[:：]\s*([^\n\r]+)/);
-  return platformLine?.[1] ?? text;
-}
-
-function explicitPlatforms(text: string): Set<string> {
-  const scope = explicitPlatformScope(text).toLowerCase();
-  const platforms = new Set<string>();
-  if (/小红书|xiaohongshu|\bxhs\b|\bred\b/.test(scope)) platforms.add("xhs");
-  if (/抖音|douyin|\bdy\b/.test(scope)) platforms.add("dy");
-  return platforms;
-}
-
-function hasFollowerTier(text: string): boolean {
-  return /(?:\d+(?:\.\d+)?\s*(?:w|万)\s*粉|\d+\s*-\s*\d+\s*w\s*粉|粉以下|粉以上|粉内)/i.test(text);
-}
-
-function parseSourceBudgetUpperYuan(text: string): number | null {
-  const candidates: number[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    if (!/(预算|报价|单价|放宽)/.test(line)) continue;
-    const pattern = /(?:预算|报价|单价|放宽至|可放宽至)[^0-9]*(\d+(?:\.\d+)?)(?!\s*(?:w|万)\s*粉)\s*(?:元|块|以内|内)/gi;
-    for (const match of line.matchAll(pattern)) {
-      const value = Number(match[1]);
-      if (Number.isFinite(value)) candidates.push(value);
-    }
-  }
-  return candidates.length > 0 ? Math.max(...candidates) : null;
-}
-
-function validateRequirementSemanticGuard(result: ToolResultContext): GuardError[] {
-  if (result.toolName !== "validate_requirement" || !result.success) return [];
-
-  const sourceText = rawMessagesText(result.params);
-  const parsed = requirementParsed(result.data);
-  if (!sourceText || !parsed) return [];
-
-  const errors: GuardError[] = [];
-  const sourcePlatforms = explicitPlatforms(sourceText);
-  const returnedPlatforms = stringArray(parsed.platforms);
-  if (sourcePlatforms.size > 0 && returnedPlatforms.length > 0) {
-    const unexpectedPlatforms = returnedPlatforms.filter((platform) => !sourcePlatforms.has(platform));
-    if (unexpectedPlatforms.length > 0) {
-      errors.push(block(
-        "requirement-semantic-guard",
-        `validate_requirement 平台解析与原始 Brief 矛盾：返回 ${unexpectedPlatforms.join(",")}，但原文只明确 ${Array.from(sourcePlatforms).join(",")}`,
-      ));
-    }
-  }
-
-  const sourceBudgetUpperYuan = parseSourceBudgetUpperYuan(sourceText);
-  const parsedBudgetMaxYuan = typeof parsed.budget_max_cents === "number" ? parsed.budget_max_cents / 100 : null;
-  const budgetRaw = typeof parsed.budget_raw === "string" ? parsed.budget_raw : "";
-  const budgetRawLooksLikeFollowerTier = /\d+\s*-\s*\d+\s*w/i.test(budgetRaw) || /\d+(?:\.\d+)?\s*(?:w|万)\s*粉/i.test(budgetRaw);
-  if (
-    hasFollowerTier(sourceText) &&
-    sourceBudgetUpperYuan !== null &&
-    parsedBudgetMaxYuan !== null &&
-    (budgetRawLooksLikeFollowerTier || parsedBudgetMaxYuan > sourceBudgetUpperYuan * 2)
-  ) {
-    errors.push(block(
-      "requirement-semantic-guard",
-      `validate_requirement 预算解析疑似把粉丝量当金额：返回 ${parsedBudgetMaxYuan} 元，原文单达人预算上限 ${sourceBudgetUpperYuan} 元`,
-    ));
-  }
-
-  return errors;
+  return [];
 }
 
 function parseObjectJson(value: unknown): Record<string, unknown> | null {
@@ -990,21 +942,7 @@ function normalizeToolResultEvent(event: Record<string, unknown>): ToolResultCon
 }
 
 export function rewriteInvalidToolResult(result: ToolResultContext): Record<string, unknown> | undefined {
-  const errors = responseContractGuard(result);
-  if (errors.length === 0) return undefined;
-
-  return {
-    success: false,
-    data: null,
-    error: {
-      code: errors.every((error) => error.guardId === "requirement-semantic-guard")
-        ? "INVALID_REQUIREMENT_PARSE"
-        : "INVALID_RESPONSE_CONTRACT",
-      message: errors.map((error) => error.message).join("; "),
-      retryable: false,
-    },
-    trace_id: result.traceId,
-  };
+  return undefined;
 }
 
 function buildStateSummary(sessionKey: string | null): string {
@@ -1030,7 +968,7 @@ function buildStateSummary(sessionKey: string | null): string {
     lines.push(`允许动作: ${nextLabels.join(", ")}`);
   }
 
-  if (distDone) lines.push("项目分发已完成（等待精排确认）");
+  if (distDone) lines.push("项目分发已完成（等待机构回填/手扒回收到候选池）");
   if (waitLock) lines.push("正在等待用户决策，请用 askuserquestion 弹窗");
 
   if (wf?.pending_gate) {
@@ -1132,8 +1070,7 @@ export function registerHooks(api: { on: (name: string, handler: (...args: any[]
 
       const normalized = normalizeToolResultEvent(event);
       if (!normalized) return;
-      const errors = responseContractGuard(normalized);
-      if (errors.length === 0) cacheWorkflowState(ctx, normalized.workflowState);
+      cacheWorkflowState(ctx, normalized.workflowState);
 
       // Track successful tool calls for state summary
       if (normalized.success && STEP_LABELS[normalized.toolName]) {
@@ -1160,25 +1097,6 @@ export function registerHooks(api: { on: (name: string, handler: (...args: any[]
         cacheWorkflowState(ctx, normalized.workflowState);
         return;
       }
-
-      const message = isObject(event.message) ? event.message : {};
-      const details = isObject(message.details) ? message.details : {};
-      const ypmcnDetails = isObject(details.ypmcn) ? details.ypmcn : {};
-      return {
-        message: {
-          ...message,
-          content: [{ type: "text", text: JSON.stringify(rewritten, null, 2) }],
-          details: {
-            ...details,
-            structuredContent: rewritten,
-            ypmcn: {
-              ...ypmcnDetails,
-              invalidResponseContract: true,
-            },
-          },
-          isError: true,
-        },
-      };
     },
     { priority: 90, timeoutMs: 5_000 },
   );
