@@ -10,7 +10,6 @@ import json
 import sys
 
 REQUIRED_GATES = [
-    "confirm-structured-brief",
     "confirm-supply-ratio",
     "mcn-select-for-wechat",
     "confirm-form-fields",
@@ -20,7 +19,6 @@ REQUIRED_GATES = [
 
 GATE_ALIASES = {
     "confirm-extra-field-mapping": ["extra_field_mapping_confirmed"],
-    "confirm-structured-brief": ["structured_brief_confirmed"],
     "confirm-supply-ratio": ["supply_ratio_confirmed"],
     "mcn-select-for-wechat": ["mcn_list_confirmed"],
     "confirm-form-fields": ["form_fields_confirmed"],

@@ -7,7 +7,6 @@
 | 模式 | 触发时机 | 选项 |
 |---|---|---|
 | `requirement-draft` | validate_requirement 返回 status=draft | 用户补充信息、暂缓、放弃 |
-| `confirm-structured-brief` | validate_requirement 返回 status=ready | 确认结构化和数据指标、修改需求 |
 | `confirm-supply-ratio` | rank_mcns 成功后 | 确认 MCN/野生比例、手动增补 |
 | `mcn-select-for-wechat` | 比例确认后 | 选择需发送的 MCN（编号选择） |
 | `confirm-form-fields` | MCN 名单确认后 | 确认表单字段是否覆盖 brief |

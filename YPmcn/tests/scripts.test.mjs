@@ -42,7 +42,6 @@ describe("workflow helper scripts", () => {
   it("accepts canonical distribution gate state", () => {
     const result = runScript("scripts/check_distribution_readiness.py", {
       gate_state: {
-        "confirm-structured-brief": true,
         "confirm-supply-ratio": true,
         "mcn-select-for-wechat": true,
         "confirm-form-fields": true,
