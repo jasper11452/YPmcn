@@ -619,7 +619,7 @@ function validateProjectDistributionBeforeRanking(ctx: ToolCallContext): GuardEr
     return [
       block(
         "state-guard",
-        "rank_creators 前必须等待机构回填/手扒结果回收到候选池，并完成 confirm-ranking-after-supply-ready 确认；不得企微发送后直接精排",
+        "rank_creators 前必须等待机构回填/达人拓展结果回收到候选池，并完成 confirm-ranking-after-supply-ready 确认；不得企微发送后直接精排",
       ),
     ];
   }
@@ -986,7 +986,7 @@ function buildStateSummary(sessionKey: string | null): string {
     lines.push(`允许动作: ${nextLabels.join(", ")}`);
   }
 
-  if (distDone) lines.push("项目分发已完成（等待机构回填/手扒回收到候选池）");
+  if (distDone) lines.push("项目分发已完成（等待机构回填/达人拓展回收到候选池）");
   if (waitLock) lines.push("正在等待用户决策，请用 askuserquestion 弹窗");
 
   if (wf?.pending_gate) {

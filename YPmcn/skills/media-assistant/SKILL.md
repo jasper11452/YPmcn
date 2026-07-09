@@ -15,8 +15,8 @@ description: Use when handling YPmcn media brief parsing, creator candidate matc
 | 阶段 | 输出模板 |
 |---|---|
 | 需求确认 | 平台、数量、预算区间、返点、截止时间、内容方向。示例：「需求已确认：平台=小红书，10位美妆达人，预算≤3万/位，返点20%，截止7月10日18:00」 |
-| 候选搜索 | 供给总量、供给倍数、是否建议手扒。示例：「已匹配120位候选达人，12倍覆盖，供给充足」 |
-| MCN排序 | **① 展示结果**：供需概览 + 手扒建议 + MCN 建议表，停等用户修改或确认<br>**② 拟写消息**：确认后拟写企微消息，停等用户修改或确认<br>**③ 发送确认**：消息确认后弹窗问是否发送 → `create_with_distributions`（先 preview 再正式发） |
+| 候选搜索 | 供给总量、供给倍数、是否建议达人拓展。示例：「已匹配120位候选达人，12倍覆盖，供给充足」 |
+| MCN排序 | **① 展示结果**：供需概览 + 达人拓展建议 + MCN 建议表，停等用户修改或确认<br>**② 拟写消息**：确认后拟写企微消息，停等用户修改或确认<br>**③ 发送确认**：消息确认后弹窗问是否发送 → `create_with_distributions`（先 preview 再正式发） |
 | 分发结果 | 已发MCN数量、截止时间、是否有唯一填报链接。发送前说"拟发送"，发送后说"已发送" |
 | 精排 | Top-N 达人表：排名、昵称、平台、报价、粉丝量、MCN、匹配原因、风险标注 |
 | 提报 | 入选数量、批次号。不给内部 batch 结构 |
@@ -30,7 +30,7 @@ description: Use when handling YPmcn media brief parsing, creator candidate matc
 - 需求主表固定为 `customer_demands`；`validate_requirement` 写入 `customer_demands`，字段以 `references/creator_candidate_pool_schema.csv` 的 `字段` 列为准
 - 达人资源库物理表固定为 `xhs_creator_accounts`、`dy_creator_accounts`；字段从需求主表继承，候选中间层仍是 `creator_candidate_pool`
 - `demand_id`/`demand_version` 保留为需求内部版本事实，不作下游工具主入参；下游统一使用上一步 `data.id`（映射 `customer_demands` 主键）
-- `rank_mcns` 成功返回后必须展示：达人供需关系（需求数量/候选数量/缺口）、建议手扒比例及原因、建议询价 MCN 列表
+- `rank_mcns` 成功返回后必须展示：达人供需关系（需求数量/候选数量/缺口）、建议达人拓展比例及原因、建议询价 MCN 列表
 
 ## 业务工具调用参数闸门
 
@@ -76,7 +76,7 @@ validate_requirement
 → 根据需求表非空字段拟写企微消息，停，等用户修改或确认
 → 弹窗确认是否发送
 → create_with_distributions（先 preview_only=true 预览，确认后正式发）
-→ 等待机构回填；需要手扒时同步启动手扒程序
+→ 等待机构回填；需要达人拓展时同步启动达人拓展程序
 → ingest_mcn_submissions / manual_source_creators 回收到候选池
 → 弹窗 confirm-ranking-after-supply-ready（确认对候选池进行达人精排）
 → rank_creators
@@ -85,7 +85,7 @@ validate_requirement
 ```
 
 - 写调用超时/断连（无幂等键），不重试，用 `trace_id` 让后端查
-- 合格 MCN < 5 家不凑数，预警媒介手扒
+- 合格 MCN < 5 家不凑数，预警媒介达人拓展
 - 核心算法在 MCP；Skill 只做阶段路由、人工 gate 和短回复
 
 ## 风险确认
@@ -99,7 +99,7 @@ validate_requirement
 - `preview_only: true` 预览 → 用户确认 → `preview_only: false` 正式发
 - 企微发送接口字段固定，不自造字段。传 `id`（来自 `rank_mcns.data.id`）、ISO 8601 `deadline`、`supplierIds`、`usageScope: "project"`，以及运行时 schema 支持的 `prefillRowsBySupplier` / `prefill_rows_by_supplier`
 - 每个 MCN 必须有唯一填报链接；预填行只放候选池中属于当前 MCN/供应商的达人
-- 发送后停，等机构回填和手扒结果回收到候选池，再确认对候选池进行达人精排
+- 发送后停，等机构回填和达人拓展结果回收到候选池，再确认对候选池进行达人精排
 
 ## 响应校验
 

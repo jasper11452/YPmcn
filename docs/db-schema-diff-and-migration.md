@@ -342,7 +342,7 @@ ALTER TABLE creator_candidate_pool
 
 ALTER TABLE mcn_recommendation_items
   ADD COLUMN supply_ratio DECIMAL(10,4) DEFAULT NULL COMMENT '当前供需倍数' AFTER estimated_creator_count,
-  ADD COLUMN manual_sourcing_ratio DECIMAL(10,4) DEFAULT NULL COMMENT '建议手扒比例' AFTER supply_ratio;
+  ADD COLUMN manual_sourcing_ratio DECIMAL(10,4) DEFAULT NULL COMMENT '建议达人拓展比例' AFTER supply_ratio;
 
 -- 字段重命名（保留兼容）
 ALTER TABLE mcn_recommendation_items
@@ -385,7 +385,7 @@ ALTER TABLE mcn_submission_items
 
 ALTER TABLE recommendation_runs
   ADD COLUMN candidate_count INT DEFAULT NULL COMMENT '进入精排候选数' AFTER status,
-  ADD COLUMN dedupe_summary_json JSON DEFAULT NULL COMMENT 'MCN回填/手扒/库内统一去重摘要' AFTER candidate_count,
+  ADD COLUMN dedupe_summary_json JSON DEFAULT NULL COMMENT 'MCN回填/达人拓展/库内统一去重摘要' AFTER candidate_count,
   ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间' AFTER finished_at;
 
 -- 字段映射：ranking_weights_json 作为 weight_snapshot_json 的实现

@@ -9,7 +9,7 @@
 | `requirement-draft` | validate_requirement 返回 status=draft | 用户补充信息、暂缓、放弃 |
 | `confirm-medium-risk` | 中风险需要确认时 | 接受中风险继续 |
 | `mcn-wechat-send` | 企微消息确认后 | 确认发送、取消发送 |
-| `confirm-ranking-after-supply-ready` | 机构回填和手扒结果回收到候选池后 | 确认对候选池进行达人精排 |
+| `confirm-ranking-after-supply-ready` | 机构回填和达人拓展结果回收到候选池后 | 确认对候选池进行达人精排 |
 | `confirm-risky-submission` | 提报含 need_confirm 账号时 | 接受风险账号继续 |
 | `status-recovery` | 恢复会话时 | 按阶段选择继续或放弃 |
 | `requirement-modify` | 用户修改需求时 | 重新校验、放弃修改、强制覆盖 |

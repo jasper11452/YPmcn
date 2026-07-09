@@ -33,7 +33,7 @@ npm install
 npm run pack:yp
 ```
 
-命令会先构建，再在上级目录生成 `ypmcn-media-assistant-2.1.6.tgz`。安装时选择这个 tgz 包，不要直接填写源码目录。在 OpenCode/YP Action 中安装插件后，还需在 `opencode.json` 配置 SSE MCP Server：
+命令会先构建，再在上级目录生成 `ypmcn-media-assistant-2.1.7.tgz`。安装时选择这个 tgz 包，不要直接填写源码目录。在 OpenCode/YP Action 中安装插件后，还需在 `opencode.json` 配置 SSE MCP Server：
 
 ```json
 "mcp": {
@@ -59,7 +59,7 @@ npm run pack:yp
 |---|---|---|
 | `before_tool_call` | `validate_requirement` | 校验媒介/Agent 可传解析字段的基础类型；`id`、`demand_id`、`demand_version`、状态和时间字段由 MCP/DB 生成，不作入参必填 |
 | `before_tool_call` | 风险 gate | 使用 `medium_risk_confirmed` / `allow_need_confirm_with_risk`，不要求 schema 外字段 |
-| `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；完成后仍需确认机构回填和手扒结果已回收到候选池，再由 `askuserquestion` 确认是否精排 |
+| `before_tool_call` | `rank_creators` | 未完成 `create_with_distributions` 先阻断；完成后仍需确认机构回填和达人拓展结果已回收到候选池，再由 `askuserquestion` 确认是否精排 |
 | `before_tool_call` | `create_with_distributions` | 校验 `id`（来自 `rank_mcns.data.id`）、`deadline/remindAt`、`supplierIds`，优先固定 `usageScope: "project"`，`项目` 会被 hook 兼容归一，Bash/PowerShell/curl 直连阻断；`askuserquestion` 确认后通过 SSE MCP 发送 |
 | `before_tool_call` | 可选状态扩展存在 | 校验 `allowed_actions`、平台前置条件和高风险状态 |
 | `after_tool_call` | 所有 YPmcn 结果 | 缓存可选状态扩展；不因响应信封细节阻断流程 |
@@ -67,7 +67,7 @@ npm run pack:yp
 | `tool_result_persist` | 所有 YPmcn 结果 | 不改写工具结果，仅保留状态缓存能力 |
 | `message_received` | 同一会话用户新消息 | 解除项目分发等待锁 |
 
-主流程为 `validate_requirement → search_creators → rank_mcns → create_with_distributions → ingest_mcn_submissions/manual_source_creators → rank_creators`。Brief 输入后直接调用 `validate_requirement` 解析验证；必填项为 `platform/submission_deadline_at/raw_messages_json/budget_min_cents/budget_max_cents/budget_raw/rebate_min_rate/rebate_raw/quantity_total`，预算/单价必须区间化，返点仅下限必填（上限可选，未填时视为无上限）。`rank_mcns` 后必须停下来展示供需关系、建议手扒比例、建议询价 MCN 列表和企微消息并询问是否发送；企微发送接口字段固定，每个 MCN 有唯一填报链接，并按 MCN 预填候选池中属于该机构的达人。项目分发与通知在用户确认前不得执行。当前不创建 Cron 任务；发送失败不进入等待锁，发送成功后等待机构回填和手扒结果回收到候选池，不能直接精排。
+主流程为 `validate_requirement → search_creators → rank_mcns → create_with_distributions → ingest_mcn_submissions/manual_source_creators → rank_creators`。Brief 输入后直接调用 `validate_requirement` 解析验证；必填项为 `platform/submission_deadline_at/raw_messages_json/budget_min_cents/budget_max_cents/budget_raw/rebate_min_rate/rebate_raw/quantity_total`，预算/单价必须区间化，返点仅下限必填（上限可选，未填时视为无上限）。`rank_mcns` 后必须停下来展示供需关系、建议达人拓展比例、建议询价 MCN 列表和企微消息并询问是否发送；企微发送接口字段固定，每个 MCN 有唯一填报链接，并按 MCN 预填候选池中属于该机构的达人。项目分发与通知在用户确认前不得执行。当前不创建 Cron 任务；发送失败不进入等待锁，发送成功后等待机构回填和达人拓展结果回收到候选池，不能直接精排。
 
 下游 ID 传递统一使用上一步 MCP 成功响应的 `data.id`：`validate_requirement.data.id → search_creators({id}) → search_creators.data.id → rank_mcns({id}) → rank_mcns.data.id → create_with_distributions({id, ...})`。`demand_id`、`demand_version` 只作内部版本字段，不作为下游工具参数。
 

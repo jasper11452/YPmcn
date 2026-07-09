@@ -2,6 +2,25 @@
 
 用户输入 Brief → Agent 对照 `creator_candidate_pool_schema.csv` 解析字段 → 构造 JSON 调 `validate_requirement`
 
+## 解析输出格式
+
+Agent 解析完需求后，**必须**以三列表格输出，不得以其他格式呈现：
+
+| 字段名 | 内容 | 置信度 |
+|---|---|---|
+| `platform` | 小红书 | 确定 |
+| `category_requirements` | 生活方式类、美食探店类 | 确定 |
+| `budget_raw` | 图文5k-3w/视频1w-5w | 确定 |
+| `quantity_total` | — | 缺失 |
+
+**置信度取值**：`确定`（原文明确）、`推断`（从上下文推理，需标注推理依据）、`缺失`（原文未提及）。禁止使用「可能」「大概」等模糊词。
+
+**强制规则**：
+- **禁止 Agent 无中生有**：原文未提及的字段一律标 `缺失`，不得编造、猜测、或用「行业惯例」填充
+- **禁止 Agent 私自填充**：`缺失` 字段的 `内容` 列写 `—`，不得填入任何推断值。后端自行处理缺失字段
+- **禁止推断值混入调用参数**：`validate_requirement` 只传原文中可确定提取的字段。即使必填项缺失导致 `draft`，也不允许 Agent 自行补值
+- 弹窗只允许展示缺失项/模糊项，Agent 不得替用户做决定
+
 ## 表与字段口径
 
 需求主表固定为 `customer_demands`；`validate_requirement` 写入 `customer_demands`，字段以 `references/creator_candidate_pool_schema.csv` 的 `字段` 列为准。达人资源库物理表固定为 `xhs_creator_accounts`、`dy_creator_accounts`；字段从需求主表继承，按平台可用列匹配，候选中间层仍是 `creator_candidate_pool`。

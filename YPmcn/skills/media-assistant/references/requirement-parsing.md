@@ -4,6 +4,25 @@
 
 需求主表固定为 `customer_demands`；`validate_requirement` 写入 `customer_demands`，字段以 `references/creator_candidate_pool_schema.csv` 的 `字段` 列为准。达人资源库物理表固定为 `xhs_creator_accounts`、`dy_creator_accounts`；字段从需求主表继承，进入候选层后统一落到 `creator_candidate_pool`。
 
+## 解析输出格式
+
+Agent 解析 Brief 后 **必须** 以三列表格呈现，不得用自然语言段落替代：
+
+| 字段名 | 内容 | 置信度 |
+
+置信度仅允许：`确定`（原文明确）、`推断`（附推理依据）、`缺失`（未提及，内容列写 `—`）。
+
+## Agent 行为边界
+
+**以下是绝对禁止的行为，违反即为错误输出：**
+
+- **编造字段值**：`quantity_total` 原文未提及 → Agent 填入 `10`，即使标注「推断」也不允许
+- **私自填充缺失字段**：用行业经验补 deadline、预算区间、数量等任何业务值
+- **推断值混入 validate_requirement 入参**：只传原文可确定提取的字段；缺失导致 `draft` 是预期行为
+- **将 Agent 推断写入 `raw_messages` 并标记 `client`/`media` 角色**：污染原始语料
+
+**Agent 职责边界**：识别 Brief 中「说了什么」和「没说什么」。「没说的」交给后端 `draft` 流程或弹窗向用户确认，Agent 不补位。
+
 ## Ready 阻断
 
 缺少以下任一项 → `status=draft`，不得 `search_creators`：

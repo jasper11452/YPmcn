@@ -955,7 +955,7 @@ describe("YPmcn OpenClaw hook layering", () => {
       ctx,
     );
     assert.equal(prematureRanking?.block, true);
-    assert.match(prematureRanking.blockReason, /回填|手扒|confirm-ranking-after-supply-ready/);
+    assert.match(prematureRanking.blockReason, /回填|达人拓展|confirm-ranking-after-supply-ready/);
 
     ctx.sessionState.ypmcn_gate_state.ranking_after_supply_ready_confirmed = true;
 

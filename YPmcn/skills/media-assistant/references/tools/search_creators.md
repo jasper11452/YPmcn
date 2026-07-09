@@ -16,7 +16,7 @@ MCP 根据 `customer_demands` 主键读取所有非空且已确认字段，与 `
 
 ## 调用后必须停在哪里
 
-如果供给不足或字段缺失，停在补资源库/手扒/放宽确认。供给可继续时，用 `search_creators.data.id` 进入 `rank_mcns`；比例确认在 `rank_mcns` 成功后进行。
+如果供给不足或字段缺失，停在补资源库/达人拓展/放宽确认。供给可继续时，用 `search_creators.data.id` 进入 `rank_mcns`；比例确认在 `rank_mcns` 成功后进行。
 
 ## 禁止
 

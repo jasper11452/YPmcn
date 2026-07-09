@@ -14,9 +14,9 @@
 | requirement_draft（validate_requirement 缺字段） | 停，问缺失项 |
 | requirement_ready（validate_requirement 完成且必填项齐全） | `search_creators` |
 | candidate_pool_ready（search_creators 完成） | 用 `search_creators.data.id` 调 `rank_mcns` |
-| mcn_planning（rank_mcns 完成） | 展示供需关系、建议手扒比例、建议询价 MCN 列表，停等用户修改或确认 → 拟写企微消息，停等用户修改或确认 → 弹窗确认是否发送 → `create_with_distributions`（先 preview 再正式发） |
-| waiting_mcn_return（分发成功） | 停，等机构回填和手扒结果回收到候选池；需要手扒时同步启动 |
-| candidate_pool_enriched（回填/手扒回收到候选池） | 确认对候选池进行达人精排 → `rank_creators` |
+| mcn_planning（rank_mcns 完成） | 展示供需关系、建议达人拓展比例、建议询价 MCN 列表，停等用户修改或确认 → 拟写企微消息，停等用户修改或确认 → 弹窗确认是否发送 → `create_with_distributions`（先 preview 再正式发） |
+| waiting_mcn_return（分发成功） | 停，等机构回填和达人拓展结果回收到候选池；需要达人拓展时同步启动 |
+| candidate_pool_enriched（回填/达人拓展回收到候选池） | 确认对候选池进行达人精排 → `rank_creators` |
 | recommendation_ready（`rank_creators` 返回 run_id） | 风险确认（有风险时）→ `create_submission_batch` |
 | submission_batch_ready（批次成功） | 媒介查看首批提报表 → 等客户反馈 |
 | feedback_routing（record_client_feedback 完成） | 补批/重排/需求变更 |
@@ -26,7 +26,7 @@
 ```
 mcn-wechat-send（拟好消息后弹窗确认是否发送）
 → confirm-medium-risk（中风险时，在 rank_mcns 停等阶段确认）
-→ confirm-ranking-after-supply-ready（仅在回填/手扒回收到候选池后，确认对候选池精排）
+→ confirm-ranking-after-supply-ready（仅在回填/达人拓展回收到候选池后，确认对候选池精排）
 → confirm-risky-submission（有风险账号时）
 ```
 

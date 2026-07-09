@@ -273,9 +273,9 @@ class SkillPackageTest(unittest.TestCase):
             "硬筛后合格 MCN 少于 5 家",
             "`minimum_mcn_count=5` 自动失效",
             "不得为了凑满 5 家放宽硬筛条件",
-            "预警媒介是否启动 `manual_source_creators` 手扒",
+            "预警媒介是否启动 `manual_source_creators` 达人拓展",
             "当前达人供需关系",
-            "建议手扒比例",
+            "建议达人拓展比例",
         ):
             self.assertIn(required, combined)
 
@@ -322,7 +322,7 @@ class SkillPackageTest(unittest.TestCase):
 
         self.assertIn("当前不创建 Cron", hook_behavior + workflow + readme)
         self.assertIn("调用失败不进入等待锁", hook_behavior + workflow)
-        self.assertIn("等机构回填和手扒结果回收到候选池", workflow)
+        self.assertIn("等机构回填和达人拓展结果回收到候选池", workflow)
 
     def test_requirement_intake_has_exact_input_boundary(self):
         text = read(REFERENCES / "requirement-intake.md")

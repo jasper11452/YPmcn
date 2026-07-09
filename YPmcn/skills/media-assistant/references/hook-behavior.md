@@ -12,7 +12,7 @@ Runtime hooks 在 `dist/index.js`，包含 `before_tool_call`、`after_tool_call
 - **分发门控**：`deadline` / `remindAt` 必须是带时区未来时间；`supplierIds` 必须非空字符串数组；`usageScope` 缺失补 `project`，传错阻断；有角色上下文时仅允许 `media/procurement`
 - **禁止直连**：Bash/PowerShell/curl 访问 `/api/projects/create-with-distributions/` 会被阻断；只能用 MCP 工具 `create_with_distributions`
 - **前置校验**：`rank_creators` 前必须有 `create_with_distributions` 成功（project_distribution_completed）
-- **供给回收校验**：企微发送后，`rank_creators` 仍需看到机构回填/手扒已回收到候选池，或 `ranking_after_supply_ready_confirmed` 等会话确认
+- **供给回收校验**：企微发送后，`rank_creators` 仍需看到机构回填/达人拓展已回收到候选池，或 `ranking_after_supply_ready_confirmed` 等会话确认
 - **结果持久化**：不因缺少 `trace_id`、响应信封细节或启发式语义疑似问题改写结果；MVP 阶段优先跑通流程
 
 ## Hook 分层
@@ -29,14 +29,14 @@ MVP 阶段不强制 `gate_id`、`confirmation_type`、`operator_id`、`trace_id`
 
 `create_with_distributions` 正式发送成功（`preview_only !== true`）后，hook 设置等待锁。等待锁期间：
 - 除 `askuserquestion` 外的工具调用都被阻断。
-- Agent 必须停在等待机构回填/手扒结果阶段。
-- `message_received` 事件清除等待锁；清锁不等于可以直接精排，仍要有回填/手扒结果已回收到候选池的业务证据。
+- Agent 必须停在等待机构回填/达人拓展结果阶段。
+- `message_received` 事件清除等待锁；清锁不等于可以直接精排，仍要有回填/达人拓展结果已回收到候选池的业务证据。
 - 调用失败不进入等待锁；当前不创建 Cron 任务。
 
 ## Agent 需配合的点
 
-- `create_with_distributions` 成功发送后 hook 会设置等待锁。Agent 需停在等待机构回填/手扒结果；只有回填和手扒结果回收到候选池后，才用 `askuserquestion` 弹窗 `confirm-ranking-after-supply-ready` 让用户确认对候选池进行达人精排
-- 需要手扒时，在 MCN 列表确认后同步启动手扒程序（`manual_source_creators`），不等 MCN 回填结束
+- `create_with_distributions` 成功发送后 hook 会设置等待锁。Agent 需停在等待机构回填/达人拓展结果；只有回填和达人拓展结果回收到候选池后，才用 `askuserquestion` 弹窗 `confirm-ranking-after-supply-ready` 让用户确认对候选池进行达人精排
+- 需要达人拓展时，在 MCN 列表确认后同步启动达人拓展程序（`manual_source_creators`），不等 MCN 回填结束
 - 调用失败不进入等待锁。
 - 等待锁用于提醒 Agent 停在供给回收阶段；精排工具会被前置条件阻断
-- `message_received` 事件会清除等待锁；清锁不等于可以直接精排，仍要有回填/手扒结果已回收到候选池的业务证据
+- `message_received` 事件会清除等待锁；清锁不等于可以直接精排，仍要有回填/达人拓展结果已回收到候选池的业务证据
