@@ -89,25 +89,10 @@ function buildSuggestedColumns(rawText, platform){
   return cols;
 }
 
-// --- Vector Search Module (real creator index) ---
+// --- Vector Search Module (real BAAI/bge-large-zh-v1.5, 1024-dim) ---
 
-const VECTOR_INDEX_PATH = "/tmp/ypmcn-vectors.json";
-const VEC_DIM = 128;
+const VECTOR_INDEX_PATH = "/tmp/ypmcn-vectors-real.json";
 
-function hashToFloat(text,seed){
-  let h=0x811c9dc5^seed;
-  for(let i=0;i<text.length;i++){h^=text.charCodeAt(i);h=Math.imul(h,0x01000193);}
-  return((h>>>0)%100000)/100000;
-}
-function fakeEmbed(texts){
-  return texts.map(text=>{
-    const vec=new Float32Array(VEC_DIM);let norm=0;
-    for(let d=0;d<VEC_DIM;d++){const v=hashToFloat(text,d)*2-1;vec[d]=v;norm+=v*v;}
-    const mag=Math.sqrt(norm)||1;
-    for(let d=0;d<VEC_DIM;d++)vec[d]/=mag;
-    return Array.from(vec);
-  });
-}
 function cosineSim(a,b){
   let dot=0,nA=0,nB=0;
   for(let i=0;i<Math.min(a.length,b.length);i++){dot+=a[i]*b[i];nA+=a[i]*a[i];nB+=b[i]*b[i];}
@@ -127,27 +112,43 @@ function loadVectorIndex(){
   if(!existsSync(VECTOR_INDEX_PATH)){console.error("[vector] index not found at",VECTOR_INDEX_PATH);return null;}
   const data=JSON.parse(readFileSync(VECTOR_INDEX_PATH,"utf-8"));
   _vectorIndex=data.points;
-  console.error(`[vector] loaded ${_vectorIndex.length} creator vectors`);
+  console.error(`[vector] loaded ${_vectorIndex.length} vectors (${_vectorIndex[0]?.vector?.length||'?'}-dim, ${data.model||'unknown'})`);
   return _vectorIndex;
 }
 
-function vectorSearch(queryText,limit=200){
+async function realEmbed(texts){
+  const apiKey=process.env.SILICONFLOW_API_KEY;
+  if(!apiKey){console.error("[vector] SILICONFLOW_API_KEY not set");return null;}
+  const resp=await fetch("https://api.siliconflow.cn/v1/embeddings",{
+    method:"POST",
+    headers:{"Authorization":`Bearer ${apiKey}`,"Content-Type":"application/json"},
+    body:JSON.stringify({model:"BAAI/bge-large-zh-v1.5",input:texts,encoding_format:"float"}),
+    signal:AbortSignal.timeout(15000),
+  });
+  if(!resp.ok)throw new Error(`embedding HTTP ${resp.status}`);
+  return (await resp.json()).data.sort((a,b)=>a.index-b.index).map(d=>d.embedding);
+}
+
+async function vectorSearch(queryText,limit=200){
   const points=loadVectorIndex();
   if(!points||points.length===0)return new Map();
 
-  const qVec=fakeEmbed([queryText])[0];
+  // Real embedding for query
+  let qVec;
+  try{
+    const vecs=await realEmbed([queryText]);
+    if(!vecs||!vecs[0])return new Map();
+    qVec=vecs[0];
+  }catch(e){console.error("[vector] embed failed:",e.message);return new Map();}
+
   // Cosine similarity search
-  const denseResults=points.map(p=>({kw_uid:p.payload.kw_uid,score:cosineSim(qVec,p.vector),payload:p.payload}));
+  const denseResults=points.map(p=>({kw_uid:p.payload.kw_uid,score:cosineSim(qVec,p.vector)}));
   denseResults.sort((a,b)=>b.score-a.score);
 
-  // BM25 search  
+  // BM25 search (unchanged)
   const k1=1.2,b=0.75;
   const queryTokens=tokenizeVec(queryText);
-  const dm=[];
-  for(const p of points){
-    const docText=[...p.payload.raw_tags,p.payload.normalized_text].join(" ");
-    dm.push({kw_uid:p.payload.kw_uid,tokens:tokenizeVec(docText),payload:p.payload});
-  }
+  const dm=points.map(p=>({kw_uid:p.payload.kw_uid,tokens:tokenizeVec([...p.payload.raw_tags,p.payload.normalized_text].join(" "))}));
   const N=dm.length,totalLen=dm.reduce((s,d)=>s+d.tokens.length,0),avgDocLen=totalLen/N;
   const dfMap=new Map();
   for(const doc of dm){const seen=new Set();for(const t of doc.tokens){if(!seen.has(t)){seen.add(t);dfMap.set(t,(dfMap.get(t)??0)+1);}}}
@@ -157,7 +158,7 @@ function vectorSearch(queryText,limit=200){
     const tfMap=new Map();for(const t of doc.tokens)tfMap.set(t,(tfMap.get(t)??0)+1);
     let score=0;
     for(const qt of queryTokens){const idf=idfMap.get(qt)??0;if(idf===0)continue;const tf=tfMap.get(qt)??0;score+=idf*(tf*(k1+1))/(tf+k1*(1-b+b*(doc.tokens.length/avgDocLen)));}
-    return{kw_uid:doc.kw_uid,score,payload:doc.payload};
+    return{kw_uid:doc.kw_uid,score};
   });
   bm25Results.sort((a,b)=>b.score-a.score);
 
@@ -168,7 +169,6 @@ function vectorSearch(queryText,limit=200){
   const fused=[...rrfMap.entries()].map(([kw_uid,score])=>({kw_uid,score}));
   fused.sort((a,b)=>b.score-a.score);
 
-  // Return as Map for O(1) lookup
   const m=new Map();
   for(const r of fused.slice(0,limit))m.set(r.kw_uid,r.score);
   return m;
@@ -324,7 +324,7 @@ async function dbSearchCreators(p){
 
     // Phase 2: Vector recall — build semantic query from demand + keywords
     const vecQuery=profile.demandText+" "+profile.keywords.join(" ");
-    const vScores=vectorSearch(vecQuery,200);
+    const vScores=await vectorSearch(vecQuery,200);
 
     // Phase 3: Fuse keyword + vector scores (normalize vec scores to [0,1])
     const KW_WEIGHT=0.4,VEC_WEIGHT=0.6;
