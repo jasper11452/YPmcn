@@ -515,14 +515,21 @@ const FAKE_QDRANT_CONFIG = {
     vectorSize: FAKE_DIM,
     distance: "Cosine",
 };
+const FAKE_PERSIST_PATH = process.env.VECTOR_PERSIST_PATH ?? new URL("../../.qdrant-fake.json", import.meta.url).pathname;
 async function getSeededQdrant() {
     if (_fakeQdrant && _seeded)
         return _fakeQdrant;
-    const embeddingProvider = createFakeEmbeddingProvider(FAKE_DIM);
     const qdrant = new FakeQdrantClient();
+    if (qdrant.loadFromFile(FAKE_PERSIST_PATH)) {
+        _fakeQdrant = qdrant;
+        _seeded = true;
+        return qdrant;
+    }
+    const embeddingProvider = createFakeEmbeddingProvider(FAKE_DIM);
     const schema = buildCollectionSchema(FAKE_QDRANT_CONFIG);
     const points = await buildVectorPoints(FAKE_ROWS, embeddingProvider, FAKE_VECTOR_VERSION);
     await qdrant.ensureCollection(schema);
+    qdrant.setPersistencePath(FAKE_PERSIST_PATH);
     await qdrant.upsert(points);
     _fakeQdrant = qdrant;
     _seeded = true;
@@ -534,7 +541,6 @@ let _realSeeded = false;
 let _realEmbeddingProvider = null;
 let _realRerankProvider = null;
 const REAL_VECTOR_VERSION = "v1";
-// Qwen3-Embedding-8B produces 1024-dim vectors by default
 const REAL_DIM = 1024;
 const REAL_QDRANT_CONFIG = {
     url: "real://siliconflow",
@@ -542,6 +548,7 @@ const REAL_QDRANT_CONFIG = {
     vectorSize: REAL_DIM,
     distance: "Cosine",
 };
+const REAL_PERSIST_PATH = process.env.VECTOR_PERSIST_PATH ?? new URL("../../.qdrant-real.json", import.meta.url).pathname;
 function getRealEmbeddingProvider() {
     if (!_realEmbeddingProvider) {
         const apiKey = process.env.SILICONFLOW_API_KEY;
@@ -562,9 +569,19 @@ function getRealRerankProvider() {
     }
     return _realRerankProvider;
 }
+function forceResync() {
+    return process.env.VECTOR_FORCE_RESYNC === "true";
+}
 async function getRealSeededQdrant() {
     if (_realQdrant && _realSeeded)
         return _realQdrant;
+    const qdrant = new FakeQdrantClient();
+    if (!forceResync() && qdrant.loadFromFile(REAL_PERSIST_PATH)) {
+        process.stderr.write(`[vector-mcp] loaded ${qdrant.pointCount} points from ${REAL_PERSIST_PATH}\n`);
+        _realQdrant = qdrant;
+        _realSeeded = true;
+        return qdrant;
+    }
     const embeddingProvider = getRealEmbeddingProvider();
     const mysqlConfig = mysqlConfigFromEnv();
     let sourceMapping;
@@ -599,11 +616,12 @@ async function getRealSeededQdrant() {
     const envLimit = process.env["MYSQL_FETCH_LIMIT"];
     const maxRows = envLimit && envLimit.trim() !== "" ? Number(envLimit) : undefined;
     const rows = await fetchCreatorRows(mysqlConfig, sourceMapping, maxRows);
-    const qdrant = new FakeQdrantClient();
     const schema = buildCollectionSchema(REAL_QDRANT_CONFIG);
     const points = await buildVectorPoints(rows, embeddingProvider, REAL_VECTOR_VERSION);
     await qdrant.ensureCollection(schema);
+    qdrant.setPersistencePath(REAL_PERSIST_PATH);
     await qdrant.upsert(points);
+    process.stderr.write(`[vector-mcp] synced ${points.length} points, persisted to ${REAL_PERSIST_PATH}\n`);
     _realQdrant = qdrant;
     _realSeeded = true;
     return qdrant;
@@ -767,8 +785,14 @@ async function handleSearch(params, traceId) {
     ]);
     // Restore original points if geo pre-filter was applied
     if (geoPreFiltered) {
-        _fakeQdrant = null;
-        _seeded = false;
+        if (isRealMode) {
+            _realQdrant = null;
+            _realSeeded = false;
+        }
+        else {
+            _fakeQdrant = null;
+            _seeded = false;
+        }
     }
     // RRF fusion
     const denseScored = denseResults.map((r) => ({

@@ -7,4 +7,6 @@ YPmcn/dist/
 .codegraph/
 __pycache__/
 *.pyc
+vector-mcp/.qdrant-*.json
+YPmcn/vector-mcp/
 

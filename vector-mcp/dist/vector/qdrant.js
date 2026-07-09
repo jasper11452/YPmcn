@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 export function buildCollectionSchema(config) {
     return {
         collectionName: config.collectionName,
@@ -48,6 +50,50 @@ export class FakeQdrantClient {
     constructor(options) {
         this.unavailable = options?.unavailable ?? false;
     }
+    // ── Persistence ──────────────────────────────────────────────────────────
+    persistPath = null;
+    /** Set the file path for automatic persistence after each upsert. */
+    setPersistencePath(filePath) {
+        this.persistPath = filePath;
+    }
+    /** Serialize schemas + points to a JSON file. */
+    saveToFile(filePath) {
+        const target = filePath ?? this.persistPath;
+        if (!target)
+            throw new Error("No persistence path configured");
+        const dir = dirname(target);
+        if (!existsSync(dir))
+            mkdirSync(dir, { recursive: true });
+        const data = {
+            schemas: this.schemas,
+            points: this.points,
+            savedAt: new Date().toISOString(),
+        };
+        writeFileSync(target, JSON.stringify(data));
+    }
+    /** Deserialize schemas + points from a JSON file. Returns true on success. */
+    loadFromFile(filePath) {
+        if (!existsSync(filePath))
+            return false;
+        try {
+            const raw = readFileSync(filePath, "utf-8");
+            const data = JSON.parse(raw);
+            if (Array.isArray(data.schemas))
+                this.schemas = data.schemas;
+            if (Array.isArray(data.points))
+                this.points = data.points;
+            this.persistPath = filePath;
+            return this.points.length > 0;
+        }
+        catch {
+            return false;
+        }
+    }
+    /** Number of points currently in memory. */
+    get pointCount() {
+        return this.points.length;
+    }
+    // ── Qdrant operations ────────────────────────────────────────────────────
     assertAvailable() {
         if (this.unavailable) {
             const err = new Error("Qdrant is unavailable");
@@ -70,6 +116,8 @@ export class FakeQdrantClient {
                 this.points.push(point);
             }
         }
+        if (this.persistPath)
+            this.saveToFile();
     }
     async search(params) {
         this.assertAvailable();

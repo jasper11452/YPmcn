@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "vector-mcp": {
+      "command": "node",
+      "args": ["./vector-mcp/dist/server.js"],
+      "env": {
+        "VECTOR_MCP_MODE": "real",
+        "SILICONFLOW_API_KEY": "sk-xzqmgshuguqetlittqimmlktzwqdkbjtekholkxotqsgpvxa",
+        "MYSQL_HOST": "d-oa-test.eshypdata.com",
+        "MYSQL_PORT": "3306",
+        "MYSQL_USER": "ypmcn",
+        "MYSQL_PASSWORD": "Yp123456!@#",
+        "MYSQL_DATABASE": "ypmcn"
+      }
+    }
+  }
+}
