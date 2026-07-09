@@ -84,13 +84,15 @@ validate_requirement
 → create_submission_batch（复用 rank_creators 的 run_id，先生成首批提报表给媒介看）
 ```
 
-**每次调业务工具前跑自检脚本**（从插件根目录运行），脚本说 ok 再调：
+**每次调业务工具前跑自检脚本**：按 [脚本安装和调用指南](references/script-self-check-guide.md) 从插件根目录用 `python3` 执行；脚本返回 `{"ok": true}` 再调业务工具。
 
 | 脚本 | 什么时候跑 | 作用 |
 |---|---|---|
 | `python3 scripts/check_flow_order.py` | 每次调业务工具前 | 检查步骤顺序是否有跳 |
 | `python3 scripts/check_requirement_params.py` | 调 validate_requirement 前 | 检查 platform/金额/返点精度 |
 | `python3 scripts/check_distribution_readiness.py` | 调 create_with_distributions 前 | 检查 5 个前置确认是否完成 |
+
+不得使用 `uv`、`pip`、`npm` 或临时安装动作来运行这些自检脚本；脚本只依赖 Python 标准库。
 
 - 写调用超时/断连（无幂等键），不重试，用 `trace_id` 让后端查
 - 合格 MCN < 5 家不凑数，预警媒介手扒

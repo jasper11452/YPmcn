@@ -4,6 +4,8 @@ import plugin, {
   runBeforeToolCallGuards,
 } from "../dist/index.js";
 
+process.env.YPMCN_START_LOCAL_MCP = "0";
+
 function initialValidateParams(overrides = {}) {
   return {
     raw_messages: [

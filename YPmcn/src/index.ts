@@ -1,4 +1,10 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { fork, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * YPmcn 媒介助手 — OpenClaw Plugin Runtime
@@ -7,7 +13,9 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
  * - validate_requirement 只校验当前运行时 inputSchema 已暴露的字段。
  * - workflow_state 存在时再执行状态、高风险和 gate 防护，不伪造未部署字段。
  * - MCP 响应细项不阻断主流程；只解析可选状态扩展用于恢复和 gate。
- * - create_with_distributions 工具由 SSE MCP Server (https://mcp.eshypdata.com/sse) 提供，插件仅做 hooks 拦截。
+ * - 插件启动时自动拉起本地 MCP Server (mock-mcp.mjs) 在 localhost:19876，
+ *   提供 validate_requirement / search_creators / rank_mcns 等 12 个 DB-backed 工具。
+ *   create_with_distributions 由同一 MCP Server 提供，本插件负责 hooks 拦截。
  */
 
 export interface ToolCallContext {
@@ -1112,11 +1120,49 @@ export function registerHooks(api: { on: (name: string, handler: (...args: any[]
   );
 }
 
+const MCP_SERVER_PORT = 19876;
+let mcpServerProcess: ChildProcess | null = null;
+
+function startMcpServer(): void {
+  if (mcpServerProcess) return;
+
+  const serverPath = join(__dirname, "..", "mock-mcp.mjs");
+
+  // Only start local MCP server when source file exists (dev builds only; production uses remote SSE MCP)
+  if (!existsSync(serverPath)) return;
+
+  try {
+    mcpServerProcess = fork(serverPath, [], {
+      env: { ...process.env },
+      detached: true,
+      stdio: "ignore",
+    });
+
+    mcpServerProcess.on("exit", (code: number | null) => {
+      console.error(`[ypmcn-mcp] server exited with code ${code}`);
+      mcpServerProcess = null;
+    });
+
+    mcpServerProcess.on("error", (err: Error) => {
+      console.error(`[ypmcn-mcp] failed to start: ${err.message}`);
+      mcpServerProcess = null;
+    });
+    mcpServerProcess.unref();
+
+    console.error(`[ypmcn-mcp] started on port ${MCP_SERVER_PORT}`);
+  } catch (err) {
+    console.error(`[ypmcn-mcp] failed to fork: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 const plugin: ReturnType<typeof definePluginEntry> = definePluginEntry({
   id: "ypmcn-media-assistant",
   name: "YPmcn 媒介助手",
   description: "按业务阶段调用独立 MCP，并以人工 gate、短回复和可恢复状态管理达人提报流程。",
   register(api) {
+    if (process.env.YPMCN_START_LOCAL_MCP !== "0") {
+      startMcpServer();
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const a = api as any;
     registerHooks(a);

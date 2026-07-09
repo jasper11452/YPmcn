@@ -45,10 +45,10 @@ npm test
 4. ready/draft/失败分别按前端回复规范呈现，不泄露完整 JSON。
 5. 工具缺失或 schema 冲突时返回 `integration_required`。
 
-包外 Python 检查使用：
+包外 Python 检查使用系统 `python3`，不依赖 `uv`：
 
 ```bash
-uv run python -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
 ```
 
 ## 4. 真实 MCP 集成

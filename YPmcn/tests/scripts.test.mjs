@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { describe, it } from "node:test";
 
 function runScript(scriptPath, input) {
-  const output = execFileSync("uv", ["run", scriptPath], {
+  const output = execFileSync("python3", [scriptPath], {
     cwd: new URL("..", import.meta.url),
     input: JSON.stringify(input),
     encoding: "utf8",
