@@ -13,11 +13,19 @@ import mysql from "mysql2/promise";
 import { lookupSupplierWecomGroup } from "./src/send_wecom.mjs";
 
 const PORT = 19876, LOG = "/tmp/mock-mcp-log.jsonl";
-const DB = { host:"d-oa-test.eshypdata.com",port:3306,user:"ypmcn",password:"Yp123456!@#",database:"ypmcn",connectTimeout:5000 };
+
+function requiredEnv(...names) {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  throw new Error(`Missing required environment variable: ${names.join(" or ")}`);
+}
+const DB = { host:"d-oa-test.eshypdata.com",port:3306,user:"ypmcn",password:requiredEnv("MYSQL_PASSWORD"),database:"ypmcn",connectTimeout:5000 };
 
 // 后端 API 配置 — 转发 create_with_distributions 到后端，由后端发送企微
 const BACKEND_API_URL = process.env.YPMCN_BACKEND_URL || "https://ypmcn.eshypdata.com";
-const BACKEND_API_KEY = process.env.YPMCN_API_KEY || process.env.YP_WECOM_API_KEY || "";
+const BACKEND_API_KEY = requiredEnv("YPMCN_API_KEY", "YP_WECOM_API_KEY");
 
 let pool=null;
 async function getPool(){if(!pool)pool=mysql.createPool({...DB,waitForConnections:true,connectionLimit:3});return pool;}
@@ -652,25 +660,10 @@ async function dbCreateWithDistributions(p){
     }
   }
 
-  // 无后端配置时的 fallback mock
   return {
-    success: true,
-    data: {
-      id: tid("dist"),
-      status: "mock_no_backend",
-      columns_used: columns.length,
-      prefill_rows_total: Object.values(prefillRowsBySupplier).reduce((sum, rows) => sum + rows.length, 0),
-      distributions: {
-        created: resolvedSupplierIds.map(s => ({ supplier: s, status: "pending" })),
-        skipped: [],
-      },
-      wecom_summary: "未配置 YPMCN_API_KEY，企微未实际发送（mock 模式）",
-    },
-    error: null,
-    workflow_state: {
-      phase: "waiting_mcn_return",
-      allowed_actions: ["ingest_mcn_submissions", "manual_source_creators"],
-    },
+    success: false,
+    data: null,
+    error: "缺少后端 API 凭据，已拒绝创建分发",
   };
 }
 

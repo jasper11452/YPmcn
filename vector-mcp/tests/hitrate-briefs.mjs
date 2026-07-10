@@ -19,14 +19,19 @@ const evidenceDir = join(projectRoot, ".omo/evidence");
 const evidencePath = join(evidenceDir, "hitrate-briefs.json");
 mkdirSync(evidenceDir, { recursive: true });
 
+function requiredEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+}
 const env = {
   ...process.env,
   VECTOR_MCP_MODE: "real",
-  SILICONFLOW_API_KEY: "sk-xzqmgshuguqetlittqimmlktzwqdkbjtekholkxotqsgpvxa",
+  SILICONFLOW_API_KEY: requiredEnv("SILICONFLOW_API_KEY"),
   MYSQL_HOST: "d-oa-test.eshypdata.com",
   MYSQL_PORT: "3306",
   MYSQL_USER: "ypmcn",
-  MYSQL_PASSWORD: "Yp123456!@#",
+  MYSQL_PASSWORD: requiredEnv("MYSQL_PASSWORD"),
   MYSQL_DATABASE: "ypmcn",
 };
 

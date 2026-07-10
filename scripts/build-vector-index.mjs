@@ -4,7 +4,12 @@ import mysql from 'mysql2/promise';
 import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-const DB = {host:"d-oa-test.eshypdata.com",port:3306,user:"ypmcn",password:"Yp123456!@#",database:"ypmcn"};
+function requiredEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+}
+const DB = {host:"d-oa-test.eshypdata.com",port:3306,user:"ypmcn",password:requiredEnv("MYSQL_PASSWORD"),database:"ypmcn"};
 const OUT = "/tmp/ypmcn-vectors.json";
 const DIM = 128;
 

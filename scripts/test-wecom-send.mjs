@@ -31,11 +31,16 @@ import {
   sendDistributionToSupplier,
 } from "../src/send_wecom.mjs";
 
+function requiredEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+}
 const DB = {
   host: "d-oa-test.eshypdata.com",
   port: 3306,
   user: "ypmcn",
-  password: "Yp123456!@#",
+  password: requiredEnv("MYSQL_PASSWORD"),
   database: "ypmcn",
   connectTimeout: 5000,
 };
