@@ -72,6 +72,127 @@ describe("secret release scanner", () => {
     assert.equal(JSON.stringify(findings).includes(password), false);
   });
 
+  it("reports multiline literal API-key and DB-password assignments", async (t) => {
+    const { scanPaths } = await import(scannerUrl);
+    const directory = withTempDir(t);
+    const sourcePath = join(directory, "multiline-config.mjs");
+    const secret = ["opaque", "multiline", "A".repeat(24)].join("-");
+    const password = ["multiline", "db", "B".repeat(18)].join("-");
+
+    writeFileSync(
+      sourcePath,
+      [
+        "const apiKey =",
+        `  ${JSON.stringify(secret)};`,
+        "const db = {",
+        "  password:",
+        `    ${JSON.stringify(password)},`,
+        "};",
+      ].join("\n"),
+    );
+
+    const findings = scanPaths([sourcePath]);
+
+    assert.deepEqual(
+      findings.map(({ rule, line }) => ({ rule, line })),
+      [
+        { rule: "generic-api-key", line: 1 },
+        { rule: "literal-db-password", line: 4 },
+      ],
+    );
+    assert.equal(JSON.stringify(findings).includes(secret), false);
+    assert.equal(JSON.stringify(findings).includes(password), false);
+  });
+
+  it("reports a DB-password literal fallback after an environment read", async (t) => {
+    const { scanPaths } = await import(scannerUrl);
+    const directory = withTempDir(t);
+    const sourcePath = join(directory, "password-fallback.mjs");
+    const password = ["fallback", "db", "C".repeat(18)].join("-");
+
+    writeFileSync(
+      sourcePath,
+      `const db = { password: process.env.MYSQL_PASSWORD || ${JSON.stringify(password)} };\n`,
+    );
+
+    const findings = scanPaths([sourcePath]);
+
+    assert.deepEqual(
+      findings.map(({ rule, line }) => ({ rule, line })),
+      [{ rule: "literal-db-password", line: 1 }],
+    );
+    assert.equal(JSON.stringify(findings).includes(password), false);
+  });
+
+  it("does not exempt real-looking credentials containing placeholder substrings", async (t) => {
+    const { scanPaths } = await import(scannerUrl);
+    const directory = withTempDir(t);
+    const sourcePath = join(directory, "placeholder-substrings.mjs");
+    const markers = [
+      ["te", "st"].join(""),
+      ["mo", "ck"].join(""),
+      ["fa", "ke"].join(""),
+      ["dum", "my"].join(""),
+    ];
+    const lines = markers.flatMap((marker, index) => {
+      const apiKey = ["opaque", marker, "D".repeat(24)].join("-");
+      const password = ["opaque", marker, "E".repeat(18)].join("-");
+      return [
+        `const service${index}ApiKey = ${JSON.stringify(apiKey)};`,
+        `const db${index} = { password: ${JSON.stringify(password)} };`,
+      ];
+    });
+
+    writeFileSync(sourcePath, lines.join("\n"));
+
+    const findings = scanPaths([sourcePath]);
+
+    assert.deepEqual(
+      findings.map(({ rule }) => rule),
+      markers.flatMap(() => ["generic-api-key", "literal-db-password"]),
+    );
+  });
+
+  it("ignores assignment-like text inside JS strings and composed placeholder values", async (t) => {
+    const { scanPaths } = await import(scannerUrl);
+    const directory = withTempDir(t);
+    const sourcePath = join(directory, "safe-fixtures.mjs");
+    const guidePath = join(directory, "safe-guide.md");
+    const urlLine = [
+      "const firstUrl = `https://example.invalid/get?corpsecret=",
+      "${corpSecret}",
+      "`;",
+    ].join("");
+    const secondUrlLine = [
+      "const secondUrl = `https://example.invalid/send?access_token=",
+      "${token}",
+      "`;",
+    ].join("");
+
+    writeFileSync(
+      sourcePath,
+      [
+        urlLine,
+        "throw new Error(\"request failed\");",
+        secondUrlLine,
+        `const password = ["${["syn", "thetic"].join("")}", "parts"].join("-");`,
+        "const dbPassword = \"P\".repeat(18);",
+      ].join("\n"),
+    );
+    writeFileSync(
+      guidePath,
+      [
+        "| setup | `export SILICONFLOW_API_KEY=sk-xxx` | placeholder only |",
+        "",
+        "```bash",
+        "node -e \"console.log('ready')\"",
+        "```",
+      ].join("\n"),
+    );
+
+    assert.deepEqual(scanPaths([sourcePath, guidePath]), []);
+  });
+
   it("scans npm tarballs without extracting them", async (t) => {
     const { scanPaths } = await import(scannerUrl);
     const directory = withTempDir(t);
