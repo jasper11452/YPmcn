@@ -180,6 +180,68 @@ describe("secret release scanner", () => {
     assert.deepEqual(scanPaths([sourcePath]), []);
   });
 
+  it("reports literal credential assignments inside JS and TS comments", async (t) => {
+    const { scanPaths } = await import(scannerUrl);
+    const directory = withTempDir(t);
+    const sourcePath = join(directory, "commented-credentials.ts");
+    const secret = ["opaque", "comment", "L".repeat(24)].join("-");
+    const password = ["comment", "db", "M".repeat(18)].join("-");
+
+    writeFileSync(
+      sourcePath,
+      [
+        `// apiKey = ${JSON.stringify(secret)};`,
+        "/*",
+        ` * "password": ${JSON.stringify(password)},`,
+        " */",
+      ].join("\n"),
+    );
+
+    const findings = scanPaths([sourcePath]);
+
+    assert.deepEqual(
+      findings.map(({ rule, line }) => ({ rule, line })),
+      [
+        { rule: "generic-api-key", line: 1 },
+        { rule: "literal-db-password", line: 3 },
+      ],
+    );
+  });
+
+  it("reports complete literal credentials inside transparent grouping parentheses", async (t) => {
+    const { scanPaths } = await import(scannerUrl);
+    const directory = withTempDir(t);
+    const sourcePath = join(directory, "grouped-credentials.mjs");
+    const secret = ["opaque", "grouped", "N".repeat(24)].join("-");
+    const password = ["grouped", "db", "O".repeat(18)].join("-");
+
+    writeFileSync(
+      sourcePath,
+      [
+        "const apiKey = (",
+        "  (",
+        `    ${JSON.stringify(secret)}`,
+        "  )",
+        ");",
+        "const db = {",
+        "  password: (",
+        `    (${JSON.stringify(password)})`,
+        "  ),",
+        "};",
+      ].join("\n"),
+    );
+
+    const findings = scanPaths([sourcePath]);
+
+    assert.deepEqual(
+      findings.map(({ rule, line }) => ({ rule, line })),
+      [
+        { rule: "generic-api-key", line: 1 },
+        { rule: "literal-db-password", line: 7 },
+      ],
+    );
+  });
+
   it("reports a DB-password literal fallback after an environment read", async (t) => {
     const { scanPaths } = await import(scannerUrl);
     const directory = withTempDir(t);

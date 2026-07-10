@@ -56,17 +56,31 @@ function codeAssignmentCandidates(text) {
   const candidates = [];
   let index = 0;
 
+  function appendTrackedTextCandidates(start, end) {
+    for (const candidate of textAssignmentCandidates(text.slice(start, end))) {
+      candidates.push({
+        expressionStart: start + candidate.expressionStart,
+        index: start + candidate.index,
+        name: candidate.name,
+      });
+    }
+  }
+
   while (index < text.length) {
     const character = text[index];
 
     if (character === "/" && text[index + 1] === "/") {
       const newline = text.indexOf("\n", index + 2);
+      const end = newline === -1 ? text.length : newline;
+      appendTrackedTextCandidates(index, end);
       index = newline === -1 ? text.length : newline + 1;
       continue;
     }
     if (character === "/" && text[index + 1] === "*") {
       const close = text.indexOf("*/", index + 2);
-      index = close === -1 ? text.length : close + 2;
+      const end = close === -1 ? text.length : close + 2;
+      appendTrackedTextCandidates(index, end);
+      index = end;
       continue;
     }
 
@@ -213,16 +227,23 @@ function literalValues(expression) {
     .replace(/\bDeno\.env\.get\s*\([^)]*\)/g, "")
     .replace(/\b(?:process\.env|import\.meta\.env)\s*\[[^\]]*\]/g, "");
   const values = [];
-  let depth = 0;
+  const containers = [];
 
   for (let index = 0; index < source.length; index += 1) {
     const character = source[index];
-    if (character === "(" || character === "[" || character === "{") {
-      depth += 1;
+    if (character === "(") {
+      let previous = index - 1;
+      while (previous >= 0 && /\s/.test(source[previous])) previous -= 1;
+      const isCall = /[A-Za-z0-9_$)\]]/.test(source[previous] ?? "");
+      containers.push({ close: ")", opaque: isCall });
+      continue;
+    }
+    if (character === "[" || character === "{") {
+      containers.push({ close: character === "[" ? "]" : "}", opaque: true });
       continue;
     }
     if (character === ")" || character === "]" || character === "}") {
-      depth = Math.max(0, depth - 1);
+      if (containers.at(-1)?.close === character) containers.pop();
       continue;
     }
     if (character !== "\"" && character !== "'" && character !== "`") continue;
@@ -244,7 +265,8 @@ function literalValues(expression) {
     while (next < source.length && /\s/.test(source[next])) next += 1;
     const methodCall = source.slice(next).match(/^(?:\?\.|\.)\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\(([^)]*)\)/);
     const constructedFromArguments = methodCall && methodCall[1].trim().length > 0;
-    if (depth === 0 && index < source.length && !constructedFromArguments) {
+    const insideOpaqueContainer = containers.some(({ opaque }) => opaque);
+    if (!insideOpaqueContainer && index < source.length && !constructedFromArguments) {
       values.push(source.slice(valueStart, index));
     }
   }
