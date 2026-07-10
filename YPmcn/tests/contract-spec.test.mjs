@@ -23,92 +23,389 @@ const REQUIRED_TOOLS = [
 
 const OPTIONAL_TOOLS = ["get_workflow_state"];
 
-const EXPECTED_PROPERTY_TYPES = {
+const TOOL_EXPECTATIONS = {
   validate_requirement: {
-    platform: "string",
-    submission_deadline_at: "string",
-    submission_deadline_raw: "string",
-    raw_messages_json: "string",
-    budget_min_cents: "integer",
-    budget_max_cents: "integer",
-    budget_raw: "string",
-    rebate_min_rate: "number",
-    rebate_max_rate: "number",
-    rebate_raw: "string",
-    quantity_total: "integer",
-    project_name: "string",
-    brand: "string",
-    product: "string",
-    content_requirements: "string",
-    category_requirements: "array",
-    requirements_json: "object",
-    raw_messages: "array",
-    note: "string",
+    propertyTypes: {
+      platform: "string",
+      submission_deadline_at: "string",
+      submission_deadline_raw: "string",
+      raw_messages_json: "string",
+      budget_min_cents: "integer",
+      budget_max_cents: "integer",
+      budget_raw: "string",
+      rebate_min_rate: "number",
+      rebate_max_rate: "number",
+      rebate_raw: "string",
+      quantity_total: "integer",
+      project_name: "string",
+      brand: "string",
+      product: "string",
+      content_requirements: "string",
+      category_requirements: "array",
+      requirements_json: "object",
+      raw_messages: "array",
+      note: "string",
+    },
+    required: [
+      "platform",
+      "submission_deadline_at",
+      "submission_deadline_raw",
+      "raw_messages_json",
+      "budget_min_cents",
+      "budget_max_cents",
+      "budget_raw",
+      "rebate_min_rate",
+      "rebate_max_rate",
+      "rebate_raw",
+      "quantity_total",
+    ],
+    sideEffects: "business-write",
+    writers: { always: ["customer_demands"], conditional: [] },
+    retry: {
+      policy: "reconcile-authoritative-state",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "query-customer-demands-by-authoritative-id",
+    },
+    outputEnvelope: "standard",
+    successEvidence: ["success === true", "data.id", "data.status"],
   },
-  search_creators: { requirement_id: "string" },
-  rank_mcns: { candidate_pool_id: "string" },
-  select_inquiry_form_fields: { mcn_recommendation_id: "string" },
+  search_creators: {
+    propertyTypes: { requirement_id: "string" },
+    required: ["requirement_id"],
+    sideEffects: "business-write",
+    writers: { always: ["creator_candidate_pool"], conditional: [] },
+    retry: {
+      policy: "reconcile-authoritative-state",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "query-candidate-pool-by-requirement-id",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.id",
+      "data.candidate_pool_written",
+    ],
+  },
+  rank_mcns: {
+    propertyTypes: { candidate_pool_id: "string" },
+    required: ["candidate_pool_id"],
+    sideEffects: "business-write",
+    writers: { always: ["mcn_recommendation_items"], conditional: [] },
+    retry: {
+      policy: "reconcile-authoritative-state",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "query-mcn-recommendation-by-candidate-pool-id",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.id",
+      "data.inquiry_advice",
+    ],
+  },
+  select_inquiry_form_fields: {
+    propertyTypes: { mcn_recommendation_id: "string" },
+    required: ["mcn_recommendation_id"],
+    sideEffects: "read-only",
+    writers: { always: [], conditional: [] },
+    retry: {
+      policy: "query-safe",
+      blindRetry: true,
+      unknownOutcome: "not-applicable",
+      reconcileWith: null,
+    },
+    outputEnvelope: "top-level-field-selection",
+    successEvidence: [
+      "success === true",
+      "fields",
+      "items",
+      "selected_count === items.length",
+      "selected_count > 0",
+    ],
+  },
   create_with_distributions: {
-    mcn_recommendation_id: "string",
-    projectName: "string",
-    description: "string",
-    deadline: "string",
-    remindAt: "string",
-    usageScope: "string",
-    supplierIds: "array",
-    columns: "array",
-    sendWechatNotification: "boolean",
-    preview_only: "boolean",
-    prefillRowsBySupplier: "object",
+    propertyTypes: {
+      mcn_recommendation_id: "string",
+      projectName: "string",
+      description: "string",
+      deadline: "string",
+      remindAt: "string",
+      usageScope: "string",
+      supplierIds: "array",
+      columns: "array",
+      sendWechatNotification: "boolean",
+      preview_only: "boolean",
+      prefillRowsBySupplier: "object",
+    },
+    required: [
+      "mcn_recommendation_id",
+      "projectName",
+      "description",
+      "deadline",
+      "remindAt",
+      "usageScope",
+      "supplierIds",
+      "columns",
+      "sendWechatNotification",
+      "preview_only",
+    ],
+    sideEffects: "provider-write",
+    writers: { always: [], conditional: [] },
+    retry: {
+      policy: "reconcile-provider-reference",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "sync_mcn_inquiry_status",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.provider_project_id",
+      "data.distribution_reference",
+      "data.distributions.length > 0",
+    ],
   },
   sync_mcn_inquiry_status: {
-    mcn_recommendation_id: "string",
-    requirement_id: "string",
+    propertyTypes: {
+      mcn_recommendation_id: "string",
+      requirement_id: "string",
+    },
+    required: ["mcn_recommendation_id", "requirement_id"],
+    sideEffects: "business-write",
+    writers: { always: ["mcn_inquiries"], conditional: [] },
+    retry: {
+      policy: "idempotent-business-key",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "sync_mcn_inquiry_status",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.inquiry_batch_id",
+      "data.inquiry_ids",
+      "data.snapshot_id",
+      "data.lifecycle_status",
+      "data.response_status",
+    ],
   },
   ingest_mcn_submissions: {
-    mcn_recommendation_id: "string",
-    requirement_id: "string",
-    trigger: "string",
+    propertyTypes: {
+      mcn_recommendation_id: "string",
+      requirement_id: "string",
+      trigger: "string",
+    },
+    required: ["mcn_recommendation_id", "requirement_id", "trigger"],
+    sideEffects: "business-write",
+    writers: {
+      always: ["mcn_submission_items"],
+      conditional: ["creator_supply_offers"],
+    },
+    retry: {
+      policy: "reconcile-provider-rows",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "sync_mcn_inquiry_status",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.ingest_id",
+      "data.ingested_count",
+    ],
   },
   manual_source_creators: {
-    requirement_id: "string",
-    manual_results: "array",
+    propertyTypes: {
+      requirement_id: "string",
+      manual_results: "array",
+    },
+    required: ["requirement_id", "manual_results"],
+    sideEffects: "business-write",
+    writers: {
+      always: ["manual_sourced_creators"],
+      conditional: ["creator_supply_offers"],
+    },
+    retry: {
+      policy: "reconcile-authoritative-state",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "query-manual-batch-by-requirement-id",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.manual_batch_id",
+      "data.imported_count",
+    ],
   },
   rank_creators: {
-    mcn_recommendation_id: "string",
-    ranking_strategy: "string",
-    manual_batch_ids: "array",
+    propertyTypes: {
+      mcn_recommendation_id: "string",
+      ranking_strategy: "string",
+      manual_batch_ids: "array",
+    },
+    required: ["mcn_recommendation_id"],
+    sideEffects: "business-write",
+    writers: {
+      always: ["recommendation_runs", "creator_recommendation_items"],
+      conditional: [],
+    },
+    retry: {
+      policy: "reconcile-authoritative-state",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "get_recommendation_run_detail",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.run_id",
+      "data.ranked_count",
+    ],
   },
-  create_submission_batch: { run_id: "string" },
+  create_submission_batch: {
+    propertyTypes: { run_id: "string" },
+    required: ["run_id"],
+    sideEffects: "business-write",
+    writers: {
+      always: ["submission_batches", "creator_submissions"],
+      conditional: [],
+    },
+    retry: {
+      policy: "reuse-current-unfinished-batch",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "get_recommendation_run_detail",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.batch_id",
+      "data.batch_no",
+      "data.submitted_count",
+    ],
+  },
   record_client_feedback: {
-    run_id: "string",
-    feedback_items: "array",
+    propertyTypes: {
+      run_id: "string",
+      feedback_items: "array",
+    },
+    required: ["run_id", "feedback_items"],
+    sideEffects: "business-write",
+    writers: {
+      always: ["creator_submissions"],
+      conditional: ["customer_demands"],
+    },
+    retry: {
+      policy: "reconcile-authoritative-state",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "get_recommendation_run_detail",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.updated_count",
+      "data.next_action",
+    ],
   },
   get_recommendation_run_detail: {
-    run_id: "string",
-    include_submissions: "boolean",
-    include_creator_detail: "boolean",
-    include_feedback: "boolean",
+    propertyTypes: {
+      run_id: "string",
+      include_submissions: "boolean",
+      include_creator_detail: "boolean",
+      include_feedback: "boolean",
+    },
+    required: ["run_id"],
+    sideEffects: "read-only",
+    writers: { always: [], conditional: [] },
+    retry: {
+      policy: "query-safe",
+      blindRetry: true,
+      unknownOutcome: "not-applicable",
+      reconcileWith: null,
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.run_id",
+      "data.recommendation_snapshot",
+    ],
   },
   get_creator_detail: {
-    creator_id: "string",
-    platform: "string",
-    platform_account_id: "string",
-    include_offers: "boolean",
-    include_mcn: "boolean",
-    include_recent_metrics: "boolean",
-    include_vector_text: "boolean",
+    propertyTypes: {
+      creator_id: "string",
+      platform: "string",
+      platform_account_id: "string",
+      include_offers: "boolean",
+      include_mcn: "boolean",
+      include_recent_metrics: "boolean",
+      include_vector_text: "boolean",
+    },
+    required: [],
+    sideEffects: "read-only",
+    writers: { always: [], conditional: [] },
+    retry: {
+      policy: "query-safe",
+      blindRetry: true,
+      unknownOutcome: "not-applicable",
+      reconcileWith: null,
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.creator_id",
+      "data.creator_detail",
+    ],
   },
   audit_manual_adjustment: {
-    run_id: "string",
-    adjustments: "array",
-    operator_id: "string",
+    propertyTypes: {
+      run_id: "string",
+      adjustments: "array",
+      operator_id: "string",
+    },
+    required: ["run_id", "adjustments", "operator_id"],
+    sideEffects: "business-write",
+    writers: { always: ["manual_adjustment_audits"], conditional: [] },
+    retry: {
+      policy: "reconcile-authoritative-state",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "get_recommendation_run_detail",
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.audit_id",
+      "data.items",
+      "data.written_count",
+    ],
   },
   get_workflow_state: {
-    requirement_id: "string",
-    mcn_recommendation_id: "string",
-    inquiry_batch_id: "string",
-    run_id: "string",
+    propertyTypes: {
+      requirement_id: "string",
+      mcn_recommendation_id: "string",
+      inquiry_batch_id: "string",
+      run_id: "string",
+    },
+    required: [],
+    sideEffects: "read-only",
+    writers: { always: [], conditional: [] },
+    retry: {
+      policy: "query-safe",
+      blindRetry: true,
+      unknownOutcome: "not-applicable",
+      reconcileWith: null,
+    },
+    outputEnvelope: "standard",
+    successEvidence: [
+      "success === true",
+      "data.phase",
+      "data.current_identifier",
+    ],
   },
 };
 
@@ -122,6 +419,27 @@ async function loadSpec(relativePath) {
 
 function allWriters(tool) {
   return [...tool.writers.always, ...tool.writers.conditional];
+}
+
+function assertToolContract(name, tool) {
+  assert.deepEqual(
+    {
+      propertyTypes: Object.fromEntries(
+        Object.entries(tool.properties).map(([property, schema]) => [
+          property,
+          schema.type,
+        ]),
+      ),
+      required: tool.required,
+      sideEffects: tool.sideEffects,
+      writers: tool.writers,
+      retry: tool.retry,
+      outputEnvelope: tool.outputEnvelope,
+      successEvidence: tool.successEvidence,
+    },
+    TOOL_EXPECTATIONS[name],
+    `${name} contract drifted`,
+  );
 }
 
 describe("mvp-v2 machine-readable contract profile", () => {
@@ -170,40 +488,122 @@ describe("mvp-v2 machine-readable contract profile", () => {
           `${name} both accepts and forbids ${forbidden}`,
         );
       }
-      assert.deepEqual(
-        Object.fromEntries(
-          Object.entries(tool.properties).map(([property, schema]) => [
-            property,
-            schema.type,
-          ]),
-        ),
-        EXPECTED_PROPERTY_TYPES[name],
-        `${name} property types drifted`,
+      for (const [property, schema] of Object.entries(tool.properties)) {
+        assert.equal(
+          typeof schema.type,
+          "string",
+          `${name}.${property} has no explicit property type`,
+        );
+      }
+    }
+  });
+
+  it("matches the exact approved contract row for every V2 tool", async () => {
+    const profile = await loadSpec(V2_PROFILE);
+    const expectedToolNames = [...REQUIRED_TOOLS, ...OPTIONAL_TOOLS];
+
+    assert.deepEqual(Object.keys(TOOL_EXPECTATIONS), expectedToolNames);
+    for (const name of expectedToolNames) {
+      assertToolContract(name, profile.tools[name]);
+    }
+  });
+
+  it("rejects cloned contract rows when exact oracle fields are mutated", async () => {
+    const profile = await loadSpec(V2_PROFILE);
+    const mutationCases = [
+      {
+        label: "removed required field",
+        name: "create_with_distributions",
+        mutate: (tool) => tool.required.pop(),
+      },
+      {
+        label: "changed required field",
+        name: "search_creators",
+        mutate: (tool) => {
+          tool.required[0] = "demand_id";
+        },
+      },
+      {
+        label: "changed side-effect class",
+        name: "select_inquiry_form_fields",
+        mutate: (tool) => {
+          tool.sideEffects = "business-write";
+        },
+      },
+      {
+        label: "changed always-writer",
+        name: "sync_mcn_inquiry_status",
+        mutate: (tool) => {
+          tool.writers.always[0] = "mcn_submission_items";
+        },
+      },
+      {
+        label: "removed conditional writer",
+        name: "ingest_mcn_submissions",
+        mutate: (tool) => tool.writers.conditional.pop(),
+      },
+      {
+        label: "changed retry policy",
+        name: "search_creators",
+        mutate: (tool) => {
+          tool.retry.policy = "query-safe";
+        },
+      },
+      {
+        label: "changed blind-retry flag",
+        name: "select_inquiry_form_fields",
+        mutate: (tool) => {
+          tool.retry.blindRetry = false;
+        },
+      },
+      {
+        label: "changed unknown-outcome handling",
+        name: "create_with_distributions",
+        mutate: (tool) => {
+          tool.retry.unknownOutcome = "retry-immediately";
+        },
+      },
+      {
+        label: "changed reconciliation path",
+        name: "sync_mcn_inquiry_status",
+        mutate: (tool) => {
+          tool.retry.reconcileWith = "search_creators";
+        },
+      },
+      {
+        label: "changed output envelope",
+        name: "select_inquiry_form_fields",
+        mutate: (tool) => {
+          tool.outputEnvelope = "standard";
+        },
+      },
+      {
+        label: "removed success evidence",
+        name: "rank_creators",
+        mutate: (tool) => tool.successEvidence.pop(),
+      },
+      {
+        label: "changed success evidence",
+        name: "validate_requirement",
+        mutate: (tool) => {
+          tool.successEvidence[0] = "success === false";
+        },
+      },
+    ];
+
+    for (const { label, name, mutate } of mutationCases) {
+      const mutated = structuredClone(profile.tools[name]);
+      mutate(mutated);
+      assert.throws(
+        () => assertToolContract(name, mutated),
+        new RegExp(`${name} contract drifted`),
+        label,
       );
     }
   });
 
   it("uses only V2 identifiers and preserves the documented input alternatives", async () => {
     const profile = await loadSpec(V2_PROFILE);
-    const requiredDemandFields = [
-      "platform",
-      "submission_deadline_at",
-      "submission_deadline_raw",
-      "raw_messages_json",
-      "budget_min_cents",
-      "budget_max_cents",
-      "budget_raw",
-      "rebate_min_rate",
-      "rebate_max_rate",
-      "rebate_raw",
-      "quantity_total",
-    ];
-
-    assert.deepEqual(
-      profile.tools.validate_requirement.required,
-      requiredDemandFields,
-    );
-    assert.equal(profile.tools.validate_requirement.properties.note.type, "string");
 
     for (const [name, tool] of Object.entries(profile.tools)) {
       if (name === "validate_requirement") continue;
@@ -218,17 +618,12 @@ describe("mvp-v2 machine-readable contract profile", () => {
       Object.keys(profile.tools.sync_mcn_inquiry_status.properties),
       ["mcn_recommendation_id", "requirement_id"],
     );
-    assert.deepEqual(profile.tools.sync_mcn_inquiry_status.required, [
-      "mcn_recommendation_id",
-      "requirement_id",
-    ]);
     assert.ok(
       !Object.hasOwn(profile.tools.ingest_mcn_submissions.properties, "items"),
     );
     assert.ok(
       profile.tools.ingest_mcn_submissions.forbidden.includes("items"),
     );
-    assert.deepEqual(profile.tools.create_submission_batch.required, ["run_id"]);
     assert.deepEqual(
       Object.keys(profile.tools.create_submission_batch.properties),
       ["run_id"],
@@ -323,14 +718,6 @@ describe("mvp-v2 machine-readable contract profile", () => {
       .map((tool) => tool.name);
     assert.deepEqual(inquiryWriters, ["sync_mcn_inquiry_status"]);
 
-    assert.equal(
-      profile.tools.select_inquiry_form_fields.sideEffects,
-      "read-only",
-    );
-    assert.equal(
-      profile.tools.create_with_distributions.sideEffects,
-      "provider-write",
-    );
     assert.deepEqual(
       allWriters(profile.tools.create_with_distributions),
       [],
@@ -384,19 +771,5 @@ describe("mvp-v2 machine-readable contract profile", () => {
       .filter((tool) => tool.outputEnvelope !== "standard")
       .map((tool) => tool.name);
     assert.deepEqual(envelopeExceptions, ["select_inquiry_form_fields"]);
-    assert.equal(
-      profile.tools.select_inquiry_form_fields.outputEnvelope,
-      "top-level-field-selection",
-    );
-    assert.deepEqual(
-      profile.tools.select_inquiry_form_fields.successEvidence,
-      [
-        "success === true",
-        "fields",
-        "items",
-        "selected_count === items.length",
-        "selected_count > 0",
-      ],
-    );
   });
 });
