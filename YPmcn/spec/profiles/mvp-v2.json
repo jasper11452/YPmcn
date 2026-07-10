@@ -1,0 +1,1062 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "mode": "writable",
+  "requiredTools": [
+    "validate_requirement",
+    "search_creators",
+    "rank_mcns",
+    "select_inquiry_form_fields",
+    "create_with_distributions",
+    "sync_mcn_inquiry_status",
+    "ingest_mcn_submissions",
+    "manual_source_creators",
+    "rank_creators",
+    "create_submission_batch",
+    "record_client_feedback",
+    "get_recommendation_run_detail",
+    "get_creator_detail",
+    "audit_manual_adjustment"
+  ],
+  "optionalTools": [
+    "get_workflow_state"
+  ],
+  "outputEnvelopes": {
+    "standard": {
+      "type": "object",
+      "required": [
+        "success",
+        "data",
+        "error"
+      ],
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "data": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "error": {
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "details": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "top-level-field-selection": {
+      "type": "object",
+      "required": [
+        "success",
+        "fields",
+        "items",
+        "selected_count"
+      ],
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "fields": {
+          "type": "array"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1
+        },
+        "selected_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "constraints": [
+        "selected_count === items.length",
+        "selected_count > 0"
+      ]
+    }
+  },
+  "tools": {
+    "validate_requirement": {
+      "name": "validate_requirement",
+      "required": [
+        "platform",
+        "submission_deadline_at",
+        "submission_deadline_raw",
+        "raw_messages_json",
+        "budget_min_cents",
+        "budget_max_cents",
+        "budget_raw",
+        "rebate_min_rate",
+        "rebate_max_rate",
+        "rebate_raw",
+        "quantity_total"
+      ],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "xhs",
+            "dy"
+          ]
+        },
+        "submission_deadline_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "submission_deadline_raw": {
+          "type": "string",
+          "minLength": 1
+        },
+        "raw_messages_json": {
+          "type": "string",
+          "minLength": 1
+        },
+        "budget_min_cents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget_max_cents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget_raw": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rebate_min_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rebate_max_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rebate_raw": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity_total": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "project_name": {
+          "type": "string"
+        },
+        "brand": {
+          "type": "string"
+        },
+        "product": {
+          "type": "string"
+        },
+        "content_requirements": {
+          "type": "string"
+        },
+        "category_requirements": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "requirements_json": {
+          "type": "object"
+        },
+        "raw_messages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "role",
+              "content"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sent_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "forbidden": [],
+      "sideEffects": "business-write",
+      "writers": {
+        "always": [
+          "customer_demands"
+        ],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "reconcile-authoritative-state",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "query-customer-demands-by-authoritative-id"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.id",
+        "data.status"
+      ]
+    },
+    "search_creators": {
+      "name": "search_creators",
+      "required": [
+        "requirement_id"
+      ],
+      "properties": {
+        "requirement_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "business-write",
+      "writers": {
+        "always": [
+          "creator_candidate_pool"
+        ],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "reconcile-authoritative-state",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "query-candidate-pool-by-requirement-id"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.id",
+        "data.candidate_pool_written"
+      ]
+    },
+    "rank_mcns": {
+      "name": "rank_mcns",
+      "required": [
+        "candidate_pool_id"
+      ],
+      "properties": {
+        "candidate_pool_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "business-write",
+      "writers": {
+        "always": [
+          "mcn_recommendation_items"
+        ],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "reconcile-authoritative-state",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "query-mcn-recommendation-by-candidate-pool-id"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.id",
+        "data.inquiry_advice"
+      ]
+    },
+    "select_inquiry_form_fields": {
+      "name": "select_inquiry_form_fields",
+      "required": [
+        "mcn_recommendation_id"
+      ],
+      "properties": {
+        "mcn_recommendation_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "read-only",
+      "writers": {
+        "always": [],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "query-safe",
+        "blindRetry": true,
+        "unknownOutcome": "not-applicable",
+        "reconcileWith": null
+      },
+      "outputEnvelope": "top-level-field-selection",
+      "successEvidence": [
+        "success === true",
+        "fields",
+        "items",
+        "selected_count === items.length",
+        "selected_count > 0"
+      ]
+    },
+    "create_with_distributions": {
+      "name": "create_with_distributions",
+      "required": [
+        "mcn_recommendation_id",
+        "projectName",
+        "description",
+        "deadline",
+        "remindAt",
+        "usageScope",
+        "supplierIds",
+        "columns",
+        "sendWechatNotification",
+        "preview_only"
+      ],
+      "properties": {
+        "mcn_recommendation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "projectName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deadline": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "remindAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "usageScope": {
+          "type": "string",
+          "const": "project"
+        },
+        "supplierIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "ordered": true,
+          "items": {
+            "type": "object",
+            "required": [
+              "key",
+              "name",
+              "type",
+              "required"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sendWechatNotification": {
+          "type": "boolean"
+        },
+        "preview_only": {
+          "type": "boolean",
+          "const": false
+        },
+        "prefillRowsBySupplier": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array"
+          }
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "provider-write",
+      "providerEffects": [
+        "create-project",
+        "create-distributions",
+        "send-wechat-notification"
+      ],
+      "writers": {
+        "always": [],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "reconcile-provider-reference",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "sync_mcn_inquiry_status"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.provider_project_id",
+        "data.distribution_reference",
+        "data.distributions.length > 0"
+      ]
+    },
+    "sync_mcn_inquiry_status": {
+      "name": "sync_mcn_inquiry_status",
+      "required": [
+        "mcn_recommendation_id",
+        "requirement_id"
+      ],
+      "properties": {
+        "mcn_recommendation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirement_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "business-write",
+      "coordination": [
+        "create-or-reuse-first-sync-snapshot",
+        "create-or-reuse-inquiry-batch",
+        "create-or-reuse-per-supplier-inquiries",
+        "create-or-reuse-single-recovery-cron"
+      ],
+      "writers": {
+        "always": [
+          "mcn_inquiries"
+        ],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "idempotent-business-key",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "sync_mcn_inquiry_status"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
+      ]
+    },
+    "ingest_mcn_submissions": {
+      "name": "ingest_mcn_submissions",
+      "required": [
+        "mcn_recommendation_id",
+        "requirement_id",
+        "trigger"
+      ],
+      "properties": {
+        "mcn_recommendation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "scheduled"
+          ]
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version",
+        "items"
+      ],
+      "sideEffects": "business-write",
+      "writers": {
+        "always": [
+          "mcn_submission_items"
+        ],
+        "conditional": [
+          "creator_supply_offers"
+        ]
+      },
+      "retry": {
+        "policy": "reconcile-provider-rows",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "sync_mcn_inquiry_status"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.ingest_id",
+        "data.ingested_count"
+      ]
+    },
+    "manual_source_creators": {
+      "name": "manual_source_creators",
+      "required": [
+        "requirement_id",
+        "manual_results"
+      ],
+      "properties": {
+        "requirement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manual_results": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "platform",
+              "platform_account_id",
+              "source_url"
+            ],
+            "properties": {
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "xhs",
+                  "dy"
+                ]
+              },
+              "platform_account_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "nickname": {
+                "type": "string"
+              },
+              "source_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "offer_price_cents": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "rebate_rate": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "business-write",
+      "writers": {
+        "always": [
+          "manual_sourced_creators"
+        ],
+        "conditional": [
+          "creator_supply_offers"
+        ]
+      },
+      "retry": {
+        "policy": "reconcile-authoritative-state",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "query-manual-batch-by-requirement-id"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.manual_batch_id",
+        "data.imported_count"
+      ]
+    },
+    "rank_creators": {
+      "name": "rank_creators",
+      "required": [
+        "mcn_recommendation_id"
+      ],
+      "properties": {
+        "mcn_recommendation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ranking_strategy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manual_batch_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "business-write",
+      "writers": {
+        "always": [
+          "recommendation_runs",
+          "creator_recommendation_items"
+        ],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "reconcile-authoritative-state",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "get_recommendation_run_detail"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.run_id",
+        "data.ranked_count"
+      ]
+    },
+    "create_submission_batch": {
+      "name": "create_submission_batch",
+      "required": [
+        "run_id"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version",
+        "allow_need_confirm_with_risk"
+      ],
+      "sideEffects": "business-write",
+      "writers": {
+        "always": [
+          "submission_batches",
+          "creator_submissions"
+        ],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "reuse-current-unfinished-batch",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "get_recommendation_run_detail"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.batch_id",
+        "data.batch_no",
+        "data.submitted_count"
+      ]
+    },
+    "record_client_feedback": {
+      "name": "record_client_feedback",
+      "required": [
+        "run_id",
+        "feedback_items"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "feedback_items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "creator_submission_id",
+              "decision"
+            ],
+            "properties": {
+              "creator_submission_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "selected",
+                  "rejected",
+                  "alternate",
+                  "replace",
+                  "requirement_change"
+                ]
+              },
+              "comment": {
+                "type": "string"
+              },
+              "requirement_changes": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "business-write",
+      "writers": {
+        "always": [
+          "creator_submissions"
+        ],
+        "conditional": [
+          "customer_demands"
+        ]
+      },
+      "retry": {
+        "policy": "reconcile-authoritative-state",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "get_recommendation_run_detail"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.updated_count",
+        "data.next_action"
+      ]
+    },
+    "get_recommendation_run_detail": {
+      "name": "get_recommendation_run_detail",
+      "required": [
+        "run_id"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "include_submissions": {
+          "type": "boolean"
+        },
+        "include_creator_detail": {
+          "type": "boolean"
+        },
+        "include_feedback": {
+          "type": "boolean"
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "read-only",
+      "writers": {
+        "always": [],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "query-safe",
+        "blindRetry": true,
+        "unknownOutcome": "not-applicable",
+        "reconcileWith": null
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.run_id",
+        "data.recommendation_snapshot"
+      ]
+    },
+    "get_creator_detail": {
+      "name": "get_creator_detail",
+      "required": [],
+      "alternativeMode": "exactly-one",
+      "requiredAlternatives": [
+        [
+          "creator_id"
+        ],
+        [
+          "platform",
+          "platform_account_id"
+        ]
+      ],
+      "properties": {
+        "creator_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "xhs",
+            "dy"
+          ]
+        },
+        "platform_account_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "include_offers": {
+          "type": "boolean"
+        },
+        "include_mcn": {
+          "type": "boolean"
+        },
+        "include_recent_metrics": {
+          "type": "boolean"
+        },
+        "include_vector_text": {
+          "type": "boolean"
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "read-only",
+      "writers": {
+        "always": [],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "query-safe",
+        "blindRetry": true,
+        "unknownOutcome": "not-applicable",
+        "reconcileWith": null
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.creator_id",
+        "data.creator_detail"
+      ]
+    },
+    "audit_manual_adjustment": {
+      "name": "audit_manual_adjustment",
+      "required": [
+        "run_id",
+        "adjustments",
+        "operator_id"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adjustments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "action",
+              "target_creator_id",
+              "reason",
+              "before_rank",
+              "after_rank"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "remove",
+                  "replace",
+                  "force_add",
+                  "rerank"
+                ]
+              },
+              "target_creator_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "replacement_creator_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "before_rank": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "after_rank": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "operator_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "business-write",
+      "writers": {
+        "always": [
+          "manual_adjustment_audits"
+        ],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "reconcile-authoritative-state",
+        "blindRetry": false,
+        "unknownOutcome": "reconcile-before-retry",
+        "reconcileWith": "get_recommendation_run_detail"
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.audit_id",
+        "data.items",
+        "data.written_count"
+      ]
+    },
+    "get_workflow_state": {
+      "name": "get_workflow_state",
+      "required": [],
+      "alternativeMode": "exactly-one",
+      "requiredAlternatives": [
+        [
+          "requirement_id"
+        ],
+        [
+          "mcn_recommendation_id"
+        ],
+        [
+          "inquiry_batch_id"
+        ],
+        [
+          "run_id"
+        ]
+      ],
+      "properties": {
+        "requirement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mcn_recommendation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inquiry_batch_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "forbidden": [
+        "demand_id",
+        "demand_version"
+      ],
+      "sideEffects": "read-only",
+      "writers": {
+        "always": [],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "query-safe",
+        "blindRetry": true,
+        "unknownOutcome": "not-applicable",
+        "reconcileWith": null
+      },
+      "outputEnvelope": "standard",
+      "successEvidence": [
+        "success === true",
+        "data.phase",
+        "data.current_identifier"
+      ]
+    }
+  }
+}
