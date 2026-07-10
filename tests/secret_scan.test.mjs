@@ -104,6 +104,82 @@ describe("secret release scanner", () => {
     assert.equal(JSON.stringify(findings).includes(password), false);
   });
 
+  it("reports quoted JS object properties containing literal credentials", async (t) => {
+    const { scanPaths } = await import(scannerUrl);
+    const directory = withTempDir(t);
+    const sourcePath = join(directory, "quoted-properties.mjs");
+    const secret = ["opaque", "quoted", "F".repeat(24)].join("-");
+    const password = ["quoted", "db", "G".repeat(18)].join("-");
+
+    writeFileSync(
+      sourcePath,
+      [
+        "const config = {",
+        `  "apiKey": ${JSON.stringify(secret)},`,
+        `  "password": ${JSON.stringify(password)},`,
+        "};",
+      ].join("\n"),
+    );
+
+    const findings = scanPaths([sourcePath]);
+
+    assert.deepEqual(
+      findings.map(({ rule, line }) => ({ rule, line })),
+      [
+        { rule: "generic-api-key", line: 2 },
+        { rule: "literal-db-password", line: 3 },
+      ],
+    );
+  });
+
+  it("reports complete literal credentials followed by string operations", async (t) => {
+    const { scanPaths } = await import(scannerUrl);
+    const directory = withTempDir(t);
+    const sourcePath = join(directory, "trimmed-credentials.mjs");
+    const secret = ["opaque", "trimmed", "H".repeat(24)].join("-");
+    const password = ["trimmed", "db", "I".repeat(18)].join("-");
+
+    writeFileSync(
+      sourcePath,
+      [
+        `const apiKey = ${JSON.stringify(` ${secret} `)}.trim();`,
+        `const db = { password: ${JSON.stringify(` ${password} `)}.trim() };`,
+      ].join("\n"),
+    );
+
+    const findings = scanPaths([sourcePath]);
+
+    assert.deepEqual(
+      findings.map(({ rule, line }) => ({ rule, line })),
+      [
+        { rule: "generic-api-key", line: 1 },
+        { rule: "literal-db-password", line: 2 },
+      ],
+    );
+    assert.equal(JSON.stringify(findings).includes(secret), false);
+    assert.equal(JSON.stringify(findings).includes(password), false);
+  });
+
+  it("ignores assignment-like prose inside a multiline template string", async (t) => {
+    const { scanPaths } = await import(scannerUrl);
+    const directory = withTempDir(t);
+    const sourcePath = join(directory, "template-prose.mjs");
+    const secret = ["opaque", "prose", "J".repeat(24)].join("-");
+    const password = ["prose", "db", "K".repeat(18)].join("-");
+
+    writeFileSync(
+      sourcePath,
+      [
+        "const documentation = `",
+        `apiKey = ${JSON.stringify(secret)};`,
+        `password: ${JSON.stringify(password)},`,
+        "`;",
+      ].join("\n"),
+    );
+
+    assert.deepEqual(scanPaths([sourcePath]), []);
+  });
+
   it("reports a DB-password literal fallback after an environment read", async (t) => {
     const { scanPaths } = await import(scannerUrl);
     const directory = withTempDir(t);

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const API_KEY_PREFIX = /\b(?:sk|sf)-[A-Za-z0-9][A-Za-z0-9_-]{15,}\b/i;
 const ASSIGNMENT_NAME = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*[:=]/g;
+const QUOTED_ASSIGNMENT_NAME = /(["'])([A-Za-z_$][A-Za-z0-9_$]*)\1\s*[:=]/g;
 const API_KEY_NAME = /(?:api_?key|apikey|access_?token|auth_?token|client_?secret|corp_?secret)/i;
 const DB_PASSWORD_NAME = /^(?:password|(?:mysql|database|db)_?password)$/i;
 const EXPLICIT_PLACEHOLDER = /^(?:<[^>]+>|\{\{[^}]+\}\}|redacted|replace[-_ ]?me|your[-_ ]?(?:api[-_ ]?key|password|token|secret)|(?:test|mock|fake|dummy)(?:[-_ ]?(?:api[-_ ]?key|key|password|token|secret))?|pass|password|secret|example|placeholder|[*x•]+)$/i;
@@ -16,6 +17,131 @@ function isPlaceholderOrDynamic(value) {
   if (!normalized) return true;
   if (/\$\{|\$[A-Za-z_{]|process\.env|import\.meta\.env|Deno\.env/i.test(normalized)) return true;
   return EXPLICIT_PLACEHOLDER.test(normalized);
+}
+
+function isCodeFile(file) {
+  return /\.(?:[cm]?[jt]s|[jt]sx)$/i.test(file);
+}
+
+function skipWhitespace(text, start) {
+  let index = start;
+  while (index < text.length && /\s/.test(text[index])) index += 1;
+  return index;
+}
+
+function readQuotedToken(text, start) {
+  const quote = text[start];
+  let escaped = false;
+  let index = start + 1;
+  let value = "";
+
+  for (; index < text.length; index += 1) {
+    const character = text[index];
+    if (escaped) {
+      value += character;
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (character === quote) {
+      break;
+    } else {
+      value += character;
+    }
+  }
+
+  return { end: index, value };
+}
+
+function codeAssignmentCandidates(text) {
+  const candidates = [];
+  let index = 0;
+
+  while (index < text.length) {
+    const character = text[index];
+
+    if (character === "/" && text[index + 1] === "/") {
+      const newline = text.indexOf("\n", index + 2);
+      index = newline === -1 ? text.length : newline + 1;
+      continue;
+    }
+    if (character === "/" && text[index + 1] === "*") {
+      const close = text.indexOf("*/", index + 2);
+      index = close === -1 ? text.length : close + 2;
+      continue;
+    }
+
+    if (character === "\"" || character === "'" || character === "`") {
+      const { end, value } = readQuotedToken(text, index);
+      if (character !== "`" && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value)) {
+        const separator = skipWhitespace(text, end + 1);
+        if (text[separator] === ":" || text[separator] === "=") {
+          candidates.push({
+            expressionStart: separator + 1,
+            index,
+            name: value,
+          });
+        }
+      }
+      index = Math.min(text.length, end + 1);
+      continue;
+    }
+
+    if (/[A-Za-z_$]/.test(character)) {
+      const start = index;
+      index += 1;
+      while (index < text.length && /[A-Za-z0-9_$]/.test(text[index])) index += 1;
+      const name = text.slice(start, index);
+      const separator = skipWhitespace(text, index);
+      if (text[separator] === ":" || text[separator] === "=") {
+        candidates.push({
+          expressionStart: separator + 1,
+          index: start,
+          name,
+        });
+      }
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return candidates;
+}
+
+function textAssignmentCandidates(text) {
+  const candidates = [];
+  for (const match of text.matchAll(ASSIGNMENT_NAME)) {
+    const index = match.index ?? 0;
+    candidates.push({
+      expressionStart: index + match[0].length,
+      index,
+      name: match[1],
+    });
+  }
+  for (const match of text.matchAll(QUOTED_ASSIGNMENT_NAME)) {
+    const index = match.index ?? 0;
+    candidates.push({
+      expressionStart: index + match[0].length,
+      index,
+      name: match[2],
+    });
+  }
+
+  const seen = new Set();
+  return candidates
+    .sort((left, right) => left.index - right.index)
+    .filter((candidate) => {
+      const key = `${candidate.index}:${candidate.expressionStart}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function assignmentCandidates(file, text) {
+  return isCodeFile(file)
+    ? codeAssignmentCandidates(text)
+    : textAssignmentCandidates(text);
 }
 
 function readAssignmentExpression(text, start) {
@@ -116,41 +242,14 @@ function literalValues(expression) {
     }
     let next = index + 1;
     while (next < source.length && /\s/.test(source[next])) next += 1;
-    const continuesComputation = source[next] === "."
-      || source[next] === "("
-      || source[next] === "["
-      || source.startsWith("?.", next);
-    if (depth === 0 && index < source.length && !continuesComputation) {
+    const methodCall = source.slice(next).match(/^(?:\?\.|\.)\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\(([^)]*)\)/);
+    const constructedFromArguments = methodCall && methodCall[1].trim().length > 0;
+    if (depth === 0 && index < source.length && !constructedFromArguments) {
       values.push(source.slice(valueStart, index));
     }
   }
 
   return values;
-}
-
-function isCodeFile(file) {
-  return /\.(?:[cm]?[jt]s|[jt]sx)$/i.test(file);
-}
-
-function isInsideQuotedTextOnLine(text, index) {
-  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
-  let escaped = false;
-  let quote = null;
-
-  for (let cursor = lineStart; cursor < index; cursor += 1) {
-    const character = text[cursor];
-    if (escaped) {
-      escaped = false;
-    } else if (character === "\\") {
-      escaped = true;
-    } else if (quote && character === quote) {
-      quote = null;
-    } else if (!quote && (character === "\"" || character === "'" || character === "`")) {
-      quote = character;
-    }
-  }
-
-  return quote !== null;
 }
 
 function lineStarts(text) {
@@ -188,15 +287,13 @@ function scanText(file, text) {
     findings.push({ file, rule, line });
   }
 
-  for (const assignment of text.matchAll(ASSIGNMENT_NAME)) {
-    const isApiKey = API_KEY_NAME.test(assignment[1]);
-    const isDbPassword = DB_PASSWORD_NAME.test(assignment[1]);
+  for (const assignment of assignmentCandidates(file, text)) {
+    const isApiKey = API_KEY_NAME.test(assignment.name);
+    const isDbPassword = DB_PASSWORD_NAME.test(assignment.name);
     if (!isApiKey && !isDbPassword) continue;
 
-    const assignmentIndex = assignment.index ?? 0;
-    if (isCodeFile(file) && isInsideQuotedTextOnLine(text, assignmentIndex)) continue;
-    const expressionStart = assignmentIndex + assignment[0].length;
-    const { end, expression } = readAssignmentExpression(text, expressionStart);
+    const assignmentIndex = assignment.index;
+    const { end, expression } = readAssignmentExpression(text, assignment.expressionStart);
     const values = literalValues(expression);
     const line = lineNumberAt(starts, assignmentIndex);
 
