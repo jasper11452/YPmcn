@@ -145,7 +145,7 @@
       "evidence": [
         "success === true",
         "data.provider_project_id",
-        "data.distribution_reference",
+        "data.distribution_batch_ref",
         "data.distributions.length > 0"
       ],
       "nextPhase": "distribution_sync_pending"
@@ -286,8 +286,10 @@
       ],
       "evidence": [
         "success === true",
-        "data.ingest_id",
-        "data.ingested_count"
+        "data.id",
+        "data.accepted_count",
+        "data.rejected_count",
+        "data.created_submission_item_count"
       ],
       "nextPhase": "recovery_sync_pending"
     },
@@ -305,8 +307,10 @@
       ],
       "evidence": [
         "success === true",
-        "data.ingest_id",
-        "data.ingested_count"
+        "data.id",
+        "data.accepted_count",
+        "data.rejected_count",
+        "data.created_submission_item_count"
       ],
       "nextPhase": "recovery_sync_pending"
     },
@@ -376,7 +380,7 @@
       ],
       "evidence": [
         "success === true",
-        "data.batch_id",
+        "data.id",
         "data.batch_no",
         "data.submitted_count"
       ],

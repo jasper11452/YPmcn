@@ -154,7 +154,7 @@ const WORKFLOW_TRANSITIONS = [
     evidence: [
       "success === true",
       "data.provider_project_id",
-      "data.distribution_reference",
+      "data.distribution_batch_ref",
       "data.distributions.length > 0",
     ],
     nextPhase: "distribution_sync_pending",
@@ -270,8 +270,10 @@ const WORKFLOW_TRANSITIONS = [
     ],
     evidence: [
       "success === true",
-      "data.ingest_id",
-      "data.ingested_count",
+      "data.id",
+      "data.accepted_count",
+      "data.rejected_count",
+      "data.created_submission_item_count",
     ],
     nextPhase: "recovery_sync_pending",
   },
@@ -286,8 +288,10 @@ const WORKFLOW_TRANSITIONS = [
     ],
     evidence: [
       "success === true",
-      "data.ingest_id",
-      "data.ingested_count",
+      "data.id",
+      "data.accepted_count",
+      "data.rejected_count",
+      "data.created_submission_item_count",
     ],
     nextPhase: "recovery_sync_pending",
   },
@@ -339,7 +343,7 @@ const WORKFLOW_TRANSITIONS = [
     guards: ["params.run_id === state.run_id"],
     evidence: [
       "success === true",
-      "data.batch_id",
+      "data.id",
       "data.batch_no",
       "data.submitted_count",
     ],
@@ -867,6 +871,28 @@ const LEGACY_PROPERTY_TYPES = {
   },
 };
 
+const AUTHORITATIVE_TARGET_SUCCESS_EVIDENCE = {
+  create_with_distributions: [
+    "success === true",
+    "data.provider_project_id",
+    "data.distribution_batch_ref",
+    "data.distributions.length > 0",
+  ],
+  ingest_mcn_submissions: [
+    "success === true",
+    "data.id",
+    "data.accepted_count",
+    "data.rejected_count",
+    "data.created_submission_item_count",
+  ],
+  create_submission_batch: [
+    "success === true",
+    "data.id",
+    "data.batch_no",
+    "data.submitted_count",
+  ],
+};
+
 const TOOL_EXPECTATIONS = {
   validate_requirement: {
     propertyTypes: {
@@ -1008,7 +1034,7 @@ const TOOL_EXPECTATIONS = {
     successEvidence: [
       "success === true",
       "data.provider_project_id",
-      "data.distribution_reference",
+      "data.distribution_batch_ref",
       "data.distributions.length > 0",
     ],
   },
@@ -1060,8 +1086,10 @@ const TOOL_EXPECTATIONS = {
     outputEnvelope: "standard",
     successEvidence: [
       "success === true",
-      "data.ingest_id",
-      "data.ingested_count",
+      "data.id",
+      "data.accepted_count",
+      "data.rejected_count",
+      "data.created_submission_item_count",
     ],
   },
   manual_source_creators: {
@@ -1130,7 +1158,7 @@ const TOOL_EXPECTATIONS = {
     outputEnvelope: "standard",
     successEvidence: [
       "success === true",
-      "data.batch_id",
+      "data.id",
       "data.batch_no",
       "data.submitted_count",
     ],
@@ -1602,6 +1630,35 @@ describe("mvp-v2 machine-readable contract profile", () => {
     }
   });
 
+  it("matches the supplied tool-contract success evidence for every target use", async () => {
+    const [profile, workflow] = await Promise.all([
+      loadSpec(V2_PROFILE),
+      loadSpec(WORKFLOW_SPEC),
+    ]);
+
+    for (const [name, expectedEvidence] of Object.entries(
+      AUTHORITATIVE_TARGET_SUCCESS_EVIDENCE,
+    )) {
+      assert.deepEqual(
+        profile.tools[name].successEvidence,
+        expectedEvidence,
+        `${name} profile success evidence drifted from the supplied tool contract`,
+      );
+
+      const transitions = workflow.transitions.filter(
+        ({ trigger }) => trigger.type === "tool" && trigger.name === name,
+      );
+      assert.ok(transitions.length > 0, `${name} has no workflow transition`);
+      for (const transition of transitions) {
+        assert.deepEqual(
+          transition.evidence,
+          expectedEvidence,
+          `${transition.id} success evidence drifted from the supplied tool contract`,
+        );
+      }
+    }
+  });
+
   it("matches the exact approved contract row for every V2 tool", async () => {
     const profile = await loadSpec(V2_PROFILE);
     const expectedToolNames = [...REQUIRED_TOOLS, ...OPTIONAL_TOOLS];
@@ -1691,6 +1748,25 @@ describe("mvp-v2 machine-readable contract profile", () => {
         name: "validate_requirement",
         mutate: (tool) => {
           tool.successEvidence[0] = "success === false";
+        },
+      },
+      {
+        label: "renamed distribution success evidence",
+        name: "create_with_distributions",
+        mutate: (tool) => {
+          tool.successEvidence[2] = "data.distribution_reference";
+        },
+      },
+      {
+        label: "removed ingest success evidence",
+        name: "ingest_mcn_submissions",
+        mutate: (tool) => tool.successEvidence.splice(3, 1),
+      },
+      {
+        label: "renamed submission-batch success evidence",
+        name: "create_submission_batch",
+        mutate: (tool) => {
+          tool.successEvidence[1] = "data.batch_id";
         },
       },
     ];
