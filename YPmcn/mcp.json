@@ -2,9 +2,11 @@
   "mcpServers": {
     "vector-mcp": {
       "command": "node",
-      "args": ["./vector-mcp/dist/server.js"],
+      "args": [
+        "./vector-mcp/dist/server.js"
+      ],
       "env": {
-        "VECTOR_MCP_MODE": "real",
+        "VECTOR_MCP_MODE": "${VECTOR_MCP_MODE}",
         "SILICONFLOW_API_KEY": "${SILICONFLOW_API_KEY}",
         "MYSQL_HOST": "${MYSQL_HOST}",
         "MYSQL_PORT": "${MYSQL_PORT}",

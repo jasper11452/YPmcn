@@ -1,5 +1,15 @@
 {
+  "name": "ypmcn-contract-first-automation",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "npm run verify",
+    "verify": "node scripts/verify.mjs",
+    "verify:provider": "node scripts/check-provider-contract.mjs --url https://mcp.eshypdata.com/sse",
+    "pack:yp": "node scripts/prepare-package.mjs"
+  },
   "dependencies": {
-    "mysql2": "^3.22.6"
+    "mysql2": "3.22.6"
   }
 }

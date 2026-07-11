@@ -1,7 +1,7 @@
 {
   "name": "ypmcn-media-assistant",
-  "version": "2.1.7",
-  "description": "YPmcn 媒介助手 OpenClaw 插件：流程编排、MCP 调用、人工 gate 与达人提报管理",
+  "version": "3.0.0",
+  "description": "YPmcn mvp-v2 媒介助手：契约优先的 OpenClaw 流程门禁与可恢复状态管理",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,28 +9,26 @@
     ".claude-plugin/",
     "dist/",
     "skills/",
+    "spec/",
     "vector-mcp/dist/",
     "mcp.json",
     "openclaw.plugin.json"
   ],
   "scripts": {
     "build": "tsc",
-    "build:vector-mcp": "cd ../vector-mcp && npx tsc && mkdir -p ../YPmcn/vector-mcp && cp -r dist ../YPmcn/vector-mcp/",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "pack:yp": "npm run build && npm run build:vector-mcp && npm pack --pack-destination ..",
+    "pack:yp": "node ../scripts/prepare-package.mjs",
     "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "mysql2": "3.22.6"
   },
   "peerDependencies": {
     "openclaw": "*"
   },
-  "peerDependenciesMeta": {
-    "mysql2": {
-      "optional": true
-    }
-  },
   "devDependencies": {
-    "openclaw": "*",
-    "typescript": "^5.0.0"
+    "openclaw": "2026.6.11",
+    "typescript": "5.9.3"
   },
   "keywords": [
     "openclaw",
@@ -40,8 +38,10 @@
     "creator"
   ],
   "license": "MIT",
-  "openclaw.hooks": "./dist/index.js",
-  "openclaw.extensions": [
-    "./dist/index.js"
-  ]
+  "openclaw": {
+    "hooks": "./dist/index.js",
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
 }
