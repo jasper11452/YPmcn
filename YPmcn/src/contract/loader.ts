@@ -103,7 +103,48 @@ function validateLegacyToolMap(
   const tools = requireRecord(value, label);
   validateToolMapKeys(tools, expectedNames, label);
   for (const [name, rawTool] of Object.entries(tools)) {
-    validateCommonTool(rawTool, name, label);
+    const tool = validateCommonTool(rawTool, name, label);
+    const expectedToolKeys = new Set([
+      "name",
+      "required",
+      "properties",
+      "capability",
+      "executable",
+      "writerAuthorization",
+      "writers",
+    ]);
+    for (const key of expectedToolKeys) {
+      if (!hasOwn(tool, key)) throw new Error(`${label}.${name}.${key} is missing`);
+    }
+    for (const key of Object.keys(tool)) {
+      if (!expectedToolKeys.has(key)) {
+        throw new Error(`${label}.${name}.${key} is not declared`);
+      }
+    }
+    if (tool.capability !== "detection-only") {
+      throw new Error(`${label}.${name}.capability must be detection-only`);
+    }
+    if (tool.executable !== false) {
+      throw new Error(`${label}.${name}.executable must be false`);
+    }
+    if (tool.writerAuthorization !== "none") {
+      throw new Error(`${label}.${name}.writerAuthorization must be none`);
+    }
+    const writers = requireRecord(tool.writers, `${label}.${name}.writers`);
+    for (const key of ["always", "conditional"]) {
+      if (!hasOwn(writers, key)) throw new Error(`${label}.${name}.writers.${key} is missing`);
+    }
+    for (const key of Object.keys(writers)) {
+      if (key !== "always" && key !== "conditional") {
+        throw new Error(`${label}.${name}.writers.${key} is not declared`);
+      }
+    }
+    if (!isStringArray(writers.always) || !isStringArray(writers.conditional)) {
+      throw new Error(`${label}.${name}.writers must contain string arrays`);
+    }
+    if (writers.always.length > 0 || writers.conditional.length > 0) {
+      throw new Error(`${label}.${name} cannot authorize writers`);
+    }
   }
   return tools as unknown as Record<string, LegacyObservedToolContract>;
 }
@@ -156,6 +197,19 @@ function validateLegacyProfile(value: unknown): LegacyContractProfile {
   return profile as unknown as LegacyContractProfile;
 }
 
+function cloneJsonDocument(value: unknown): unknown {
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new Error("Contract profile document must be JSON-like");
+  }
+  if (serialized === undefined) {
+    throw new Error("Contract profile document must be JSON-like");
+  }
+  return JSON.parse(serialized) as unknown;
+}
+
 export function validateContractProfileDocument(
   name: "mvp-v2",
   value: unknown,
@@ -172,7 +226,14 @@ export function validateContractProfileDocument(
   name: ContractProfileName,
   value: unknown,
 ): ContractProfile {
-  return name === "mvp-v2" ? validateMvpProfile(value) : validateLegacyProfile(value);
+  if (!isProfileName(name)) {
+    throw new Error(`Unsupported contract profile: ${String(name)}`);
+  }
+  const snapshot = cloneJsonDocument(value);
+  const validated = name === "mvp-v2"
+    ? validateMvpProfile(snapshot)
+    : validateLegacyProfile(snapshot);
+  return deepFreeze(validated);
 }
 
 function deepFreeze<T>(value: T): T {

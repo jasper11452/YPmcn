@@ -265,6 +265,56 @@ describe("contract loader", () => {
     assert.throws(() => loadContractProfile("constructor"), /unsupported contract profile/i);
   });
 
+  it("runtime allowlists parsed-document profile names", () => {
+    for (const name of [
+      "mvp-v3",
+      "../mvp-v2",
+      "profiles/mvp-v2",
+      "mvp-v2.json",
+      "..\\mvp-v2",
+      "constructor",
+      "toString",
+      "__proto__",
+      "hasOwnProperty",
+    ]) {
+      assert.throws(
+        () => contractLoader.validateContractProfileDocument(name, {}),
+        /unsupported contract profile/i,
+        name,
+      );
+    }
+  });
+
+  it("returns independent deeply frozen parsed-document snapshots", () => {
+    const input = structuredClone(loadContractProfile("mvp-v2"));
+    const first = contractLoader.validateContractProfileDocument("mvp-v2", input);
+    const second = contractLoader.validateContractProfileDocument("mvp-v2", input);
+
+    assert.notStrictEqual(first, input);
+    assert.notStrictEqual(first, second);
+    assert.notStrictEqual(first.tools, input.tools);
+    assert.notStrictEqual(first.tools.search_creators, input.tools.search_creators);
+    assertDeepFrozen(first);
+
+    input.requiredTools[0] = "mutated_after_validation";
+    input.tools.search_creators.required[0] = "mutated_after_validation";
+    assert.equal(first.requiredTools[0], V2_REQUIRED_TOOLS[0]);
+    assert.equal(first.tools.search_creators.required[0], "requirement_id");
+    assert.throws(() => first.requiredTools.push("mutated_result"), TypeError);
+    assert.throws(
+      () => {
+        first.tools.search_creators.required[0] = "mutated_result";
+      },
+      TypeError,
+    );
+
+    assert.strictEqual(
+      loadContractProfile("mvp-v2"),
+      loadContractProfile("mvp-v2"),
+      "canonical loader cache identity must remain stable",
+    );
+  });
+
   it("rejects duplicate, overlapping, missing, extra, and malformed MVP tool declarations", () => {
     const validateDocument = contractLoader.validateContractProfileDocument;
     assert.equal(typeof validateDocument, "function");
@@ -352,6 +402,86 @@ describe("contract loader", () => {
     for (const { label, mutate } of mutations) {
       const profile = structuredClone(loadContractProfile("legacy-1.9.4"));
       mutate(profile);
+      assert.throws(
+        () => validateDocument("legacy-1.9.4", profile),
+        Error,
+        label,
+      );
+    }
+  });
+
+  it("enforces every detection-only legacy tool capability and zero-writer invariant", () => {
+    const validateDocument = contractLoader.validateContractProfileDocument;
+    const mutations = [
+      {
+        label: "missing capability",
+        mutate: (tool) => delete tool.capability,
+      },
+      {
+        label: "changed capability",
+        mutate: (tool) => {
+          tool.capability = "writable";
+        },
+      },
+      {
+        label: "missing executable",
+        mutate: (tool) => delete tool.executable,
+      },
+      {
+        label: "executable legacy tool",
+        mutate: (tool) => {
+          tool.executable = true;
+        },
+      },
+      {
+        label: "missing writer authorization",
+        mutate: (tool) => delete tool.writerAuthorization,
+      },
+      {
+        label: "changed writer authorization",
+        mutate: (tool) => {
+          tool.writerAuthorization = "business-write";
+        },
+      },
+      {
+        label: "missing writers",
+        mutate: (tool) => delete tool.writers,
+      },
+      {
+        label: "changed writers",
+        mutate: (tool) => {
+          tool.writers = "none";
+        },
+      },
+      {
+        label: "missing always-writer array",
+        mutate: (tool) => delete tool.writers.always,
+      },
+      {
+        label: "malformed always-writer array",
+        mutate: (tool) => {
+          tool.writers.always = "customer_demands";
+        },
+      },
+      {
+        label: "malformed conditional-writer array",
+        mutate: (tool) => {
+          tool.writers.conditional = { table: "customer_demands" };
+        },
+      },
+      {
+        label: "authorized always-writer",
+        mutate: (tool) => tool.writers.always.push("customer_demands"),
+      },
+      {
+        label: "authorized conditional-writer",
+        mutate: (tool) => tool.writers.conditional.push("customer_demands"),
+      },
+    ];
+
+    for (const { label, mutate } of mutations) {
+      const profile = structuredClone(loadContractProfile("legacy-1.9.4"));
+      mutate(profile.observedSummary.tools.search_creators);
       assert.throws(
         () => validateDocument("legacy-1.9.4", profile),
         Error,
