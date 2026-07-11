@@ -2090,7 +2090,23 @@
       },
       "forbidden": [
         "demand_id",
-        "demand_version"
+        "demand_version",
+        "mode",
+        "provider_project_id",
+        "provider_distribution_id",
+        "distribution_batch_ref",
+        "distributions",
+        "fields",
+        "items",
+        "selected_count",
+        "inquiry_batch_id",
+        "inquiry_ids",
+        "snapshot_id",
+        "lifecycle_status",
+        "response_status",
+        "submitted_item_count",
+        "missing_item_count",
+        "count"
       ],
       "sideEffects": "business-write",
       "coordination": [
@@ -2585,9 +2601,11 @@
       "sideEffects": "business-write",
       "writers": {
         "always": [
-          "manual_adjustment_audits"
+          "creator_recommendation_items"
         ],
-        "conditional": []
+        "conditional": [
+          "creator_submissions"
+        ]
       },
       "retry": {
         "policy": "reconcile-authoritative-state",

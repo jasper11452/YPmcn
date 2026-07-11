@@ -104,9 +104,11 @@
     {
       "tool": "audit_manual_adjustment",
       "always": [
-        "manual_adjustment_audits"
+        "creator_recommendation_items"
       ],
-      "conditional": []
+      "conditional": [
+        "creator_submissions"
+      ]
     },
     {
       "tool": "get_workflow_state",

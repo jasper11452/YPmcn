@@ -142,6 +142,46 @@ describe("network-free mvp-v2 reference MCP", () => {
     assert.equal(networkCalls, 0);
   });
 
+  it("returns declared detail and audit success evidence", async () => {
+    const state = createReferenceState({ now: () => START });
+
+    const detail = value(await state.callTool("get_creator_detail", {
+      creator_id: "creator-0001",
+    }));
+    assert.equal(detail.success, true);
+    assert.equal(detail.data.creator_id, "creator-0001");
+    assert.deepEqual(detail.data.creator_detail, { creator_id: "creator-0001" });
+    assert.equal(Object.hasOwn(detail.data, "creator"), false);
+
+    const platformDetail = value(await state.callTool("get_creator_detail", {
+      platform: "xhs",
+      platform_account_id: "account-0001",
+    }));
+    assert.equal(platformDetail.data.creator_id, "xhs:account-0001");
+    assert.deepEqual(platformDetail.data.creator_detail, {
+      platform: "xhs",
+      platform_account_id: "account-0001",
+    });
+
+    const adjustment = {
+      action: "rerank",
+      target_creator_id: "creator-0001",
+      reason: "媒介已确认调整",
+      before_rank: 2,
+      after_rank: 1,
+    };
+    const audit = value(await state.callTool("audit_manual_adjustment", {
+      run_id: "run-0001",
+      adjustments: [adjustment],
+      operator_id: "operator-0001",
+    }));
+    assert.equal(audit.success, true);
+    assert.equal(audit.data.audit_id, "audit-0001");
+    assert.deepEqual(audit.data.items, [adjustment]);
+    assert.equal(audit.data.written_count, 1);
+    assert.equal(Object.hasOwn(audit.data, "recorded"), false);
+  });
+
   it("speaks JSON-RPC MCP 2024-11-05 over stdio and marks calls simulated", async (testContext) => {
     const child = spawn(process.execPath, [serverPath], {
       cwd: repoRoot,
@@ -179,4 +219,3 @@ describe("network-free mvp-v2 reference MCP", () => {
     await once(child, "exit");
   });
 });
-

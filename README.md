@@ -21,13 +21,11 @@
 ## 验证
 
 ```bash
-cd YPmcn && npm test
-node --test tests/reference_mcp.test.mjs tests/provider_contract.test.mjs
-PYTHONDONTWRITEBYTECODE=1 uv run --no-project python -B -m unittest -v tests/test_skill_package.py
-node scripts/check-provider-contract.mjs --url https://mcp.eshypdata.com/sse
+npm run verify
+npm run verify:provider
 ```
 
-生产预检当前应以非零退出，并报告上述三个缺失工具。该失败是上线门禁，不是仓库离线测试失败。统一入口将在 `npm run verify` 与独立的 `npm run verify:provider` 中维护。
+`npm run verify` 统一执行密钥扫描、插件契约与 Hook、reference MCP、文档、向量 MCP 和发布包验证。`npm run verify:provider` 是独立的只读生产门禁；当前应以非零退出并报告上述三个缺失工具。该失败是上线门禁，不是仓库离线测试失败。
 
 ## 安全边界
 

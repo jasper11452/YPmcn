@@ -488,8 +488,8 @@ const DATABASE_WRITER_OWNERSHIP = [
   },
   {
     tool: "audit_manual_adjustment",
-    always: ["manual_adjustment_audits"],
-    conditional: [],
+    always: ["creator_recommendation_items"],
+    conditional: ["creator_submissions"],
   },
   {
     tool: "get_workflow_state",
@@ -1292,7 +1292,10 @@ const TOOL_EXPECTATIONS = {
     },
     required: ["run_id", "adjustments", "operator_id"],
     sideEffects: "business-write",
-    writers: { always: ["manual_adjustment_audits"], conditional: [] },
+    writers: {
+      always: ["creator_recommendation_items"],
+      conditional: ["creator_submissions"],
+    },
     retry: {
       policy: "reconcile-authoritative-state",
       blindRetry: false,
@@ -1966,6 +1969,29 @@ describe("mvp-v2 machine-readable contract profile", () => {
       Object.keys(profile.tools.sync_mcn_inquiry_status.properties),
       ["mcn_recommendation_id", "requirement_id"],
     );
+    for (const forbidden of [
+      "mode",
+      "provider_project_id",
+      "provider_distribution_id",
+      "distribution_batch_ref",
+      "distributions",
+      "fields",
+      "items",
+      "selected_count",
+      "inquiry_batch_id",
+      "inquiry_ids",
+      "snapshot_id",
+      "lifecycle_status",
+      "response_status",
+      "submitted_item_count",
+      "missing_item_count",
+      "count",
+    ]) {
+      assert.ok(
+        profile.tools.sync_mcn_inquiry_status.forbidden.includes(forbidden),
+        `sync_mcn_inquiry_status permits caller-owned ${forbidden}`,
+      );
+    }
     assert.ok(
       !Object.hasOwn(profile.tools.ingest_mcn_submissions.properties, "items"),
     );
@@ -2075,9 +2101,13 @@ describe("mvp-v2 machine-readable contract profile", () => {
         "mcn_inquiries",
       ),
     );
+    assert.deepEqual(allWriters(profile.tools.audit_manual_adjustment), [
+      "creator_recommendation_items",
+      "creator_submissions",
+    ]);
     assert.ok(
       !allWriters(profile.tools.audit_manual_adjustment).includes(
-        "creator_recommendation_items",
+        "manual_adjustment_audits",
       ),
     );
   });

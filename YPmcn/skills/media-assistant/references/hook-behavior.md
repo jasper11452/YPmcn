@@ -11,6 +11,10 @@ Hook 是 mvp-v2 的本地安全门，不是数据库事实来源。状态按 `se
 | `agent_turn_prepare` | 注入 phase 和安全 ID 摘要，不记录 payload |
 | `session_end` | 只删除结束会话的投影 |
 
+## 业务文档与机器阶段映射
+
+原始业务文档展示的是面向 Hook 的简化状态投影；完整权威定义在 `YPmcn/spec/workflow.json` 的 14 个机器阶段。业务文档中的 `project_distribution_completed` 是展示布尔值，不是额外阶段：它由首次 sync 的权威证据派生，对应 `distribution_sync_pending → waiting_return`，不能由普通消息或 Agent 自行置位。
+
 ## provider 发送守卫
 
 `create_with_distributions` 缺任一证据即阻断：

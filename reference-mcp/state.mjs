@@ -394,10 +394,17 @@ export function createReferenceState(options = {}) {
           : standardError("INVALID_INPUT", "Unknown run_id");
         break;
       case "get_creator_detail":
-        output = standardSuccess({ creator: clone(args) });
+        output = standardSuccess({
+          creator_id: args.creator_id ?? `${args.platform}:${args.platform_account_id}`,
+          creator_detail: clone(args),
+        });
         break;
       case "audit_manual_adjustment":
-        output = standardSuccess({ audit_id: "audit-0001", recorded: true });
+        output = standardSuccess({
+          audit_id: "audit-0001",
+          items: clone(args.adjustments),
+          written_count: args.adjustments.length,
+        });
         break;
       case "get_workflow_state":
         output = standardSuccess(snapshot());
