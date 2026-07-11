@@ -8,6 +8,17 @@ const LEGACY_PROFILE = "profiles/legacy-1.9.4.json";
 const WORKFLOW_SPEC = "workflow.json";
 const DATABASE_SPEC = "database.json";
 const ERRORS_SPEC = "errors.json";
+const CREATOR_SCHEMA_CSV =
+  "../skills/media-assistant/references/creator_candidate_pool_schema.csv";
+
+const JSON_VALUE_TYPES = [
+  "array",
+  "boolean",
+  "null",
+  "number",
+  "object",
+  "string",
+];
 
 const REQUIRED_TOOLS = [
   "validate_requirement",
@@ -1333,6 +1344,19 @@ async function loadSpec(relativePath) {
   return JSON.parse(source);
 }
 
+async function loadCreatorSchemaFields() {
+  const source = await readFile(
+    new URL(CREATOR_SCHEMA_CSV, import.meta.url),
+    "utf8",
+  );
+  const [header, ...rows] = source.replace(/^\uFEFF/, "").trim().split(/\r?\n/);
+  const fieldIndex = header.split(",").indexOf("字段");
+  assert.notEqual(fieldIndex, -1, "authority CSV is missing the 字段 column");
+  return rows
+    .map((row) => row.split(",")[fieldIndex]?.trim())
+    .filter(Boolean);
+}
+
 function canonicalizeJson(value) {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalizeJson).join(",")}]`;
@@ -1662,12 +1686,103 @@ describe("mvp-v2 machine-readable contract profile", () => {
         );
       }
       for (const [property, schema] of Object.entries(tool.properties)) {
-        assert.equal(
-          typeof schema.type,
-          "string",
+        assert.ok(
+          typeof schema.type === "string" ||
+            (Array.isArray(schema.type) &&
+              schema.type.length > 0 &&
+              schema.type.every((type) => typeof type === "string")),
           `${name}.${property} has no explicit property type`,
         );
       }
+    }
+  });
+
+  it("declares at-least-one raw or structured requirement input modes", async () => {
+    const profile = await loadSpec(V2_PROFILE);
+    const tool = profile.tools.validate_requirement;
+    const structuredFields = Object.keys(tool.properties).filter(
+      (field) => field !== "raw_messages" && field !== "raw_messages_json",
+    );
+
+    assert.deepEqual(tool.required, []);
+    assert.deepEqual(tool.inputModes, {
+      policy: "at-least-one",
+      allowMultiple: true,
+      modes: {
+        raw: { matchAny: ["raw_messages", "raw_messages_json"] },
+        structured: { matchAny: structuredFields },
+      },
+    });
+  });
+
+  it("allows every checked-in authority CSV field without inventing unknown scalar types", async () => {
+    const [profile, csvFields] = await Promise.all([
+      loadSpec(V2_PROFILE),
+      loadCreatorSchemaFields(),
+    ]);
+    const properties = profile.tools.validate_requirement.properties;
+    const strongerSchemaFields = new Set([
+      "platform",
+      "submission_deadline_at",
+      "submission_deadline_raw",
+      "raw_messages_json",
+      "budget_min_cents",
+      "budget_max_cents",
+      "budget_raw",
+      "rebate_min_rate",
+      "rebate_max_rate",
+      "rebate_raw",
+      "quantity_total",
+      "project_name",
+      "brand",
+      "product",
+      "note",
+    ]);
+
+    assert.equal(new Set(csvFields).size, csvFields.length);
+    for (const field of csvFields) {
+      assert.ok(Object.hasOwn(properties, field), `missing CSV field ${field}`);
+      if (!strongerSchemaFields.has(field)) {
+        assert.deepEqual(
+          properties[field].type,
+          JSON_VALUE_TYPES,
+          `${field} invents an unsupported scalar type`,
+        );
+      }
+    }
+  });
+
+  it("matches the authoritative nested manual-source and feedback payload fields", async () => {
+    const profile = await loadSpec(V2_PROFILE);
+    const manualItem =
+      profile.tools.manual_source_creators.properties.manual_results.items;
+    const feedbackItem =
+      profile.tools.record_client_feedback.properties.feedback_items.items;
+
+    assert.deepEqual(manualItem.required, [
+      "platform",
+      "platform_account_id",
+      "profile_url",
+    ]);
+    for (const field of [
+      "platform",
+      "platform_account_id",
+      "nickname",
+      "profile_url",
+    ]) {
+      assert.ok(Object.hasOwn(manualItem.properties, field), field);
+    }
+    assert.equal(Object.hasOwn(manualItem.properties, "source_url"), false);
+
+    assert.deepEqual(feedbackItem.required, ["submission_id", "status"]);
+    assert.deepEqual(Object.keys(feedbackItem.properties), [
+      "submission_id",
+      "status",
+      "reason",
+    ]);
+    assert.equal(Object.hasOwn(feedbackItem.properties.status, "enum"), false);
+    for (const field of ["creator_submission_id", "decision", "comment"]) {
+      assert.equal(Object.hasOwn(feedbackItem.properties, field), false, field);
     }
   });
 

@@ -112,6 +112,38 @@ const DOCUMENTED_FIELD_SELECTION = {
   output_format: "数据库字段名：字段备注",
 };
 
+const VALID_REQUIREMENT_INPUT_MODES = {
+  policy: "at-least-one",
+  allowMultiple: true,
+  modes: {
+    raw: { matchAny: ["raw_messages", "raw_messages_json"] },
+    structured: { matchAny: ["platform", "quantity_total"] },
+  },
+};
+
+const DOCUMENTED_MANUAL_SOURCE = {
+  requirement_id: "customer_demand_pk_123",
+  manual_results: [
+    {
+      platform: "xhs",
+      platform_account_id: "account_002",
+      nickname: "达人B",
+      profile_url: "https://example.com/creator/account_002",
+    },
+  ],
+};
+
+const DOCUMENTED_CLIENT_FEEDBACK = {
+  run_id: "run_123",
+  feedback_items: [
+    {
+      submission_id: "submission_001",
+      status: "rejected",
+      reason: "价格偏高",
+    },
+  ],
+};
+
 function assertDeepFrozen(value) {
   if (value === null || typeof value !== "object") return;
   assert.equal(Object.isFrozen(value), true);
@@ -369,6 +401,56 @@ describe("contract loader", () => {
     }
   });
 
+  it("validates declarative input-mode policy shape and declared property references", () => {
+    const validateDocument = contractLoader.validateContractProfileDocument;
+    const validProfile = structuredClone(loadContractProfile("mvp-v2"));
+    validProfile.tools.validate_requirement.inputModes = structuredClone(
+      VALID_REQUIREMENT_INPUT_MODES,
+    );
+    assert.doesNotThrow(() => validateDocument("mvp-v2", validProfile));
+
+    const mutations = [
+      {
+        label: "unsupported policy",
+        mutate: (inputModes) => {
+          inputModes.policy = "exactly-one";
+        },
+      },
+      {
+        label: "missing allowMultiple",
+        mutate: (inputModes) => delete inputModes.allowMultiple,
+      },
+      {
+        label: "malformed modes",
+        mutate: (inputModes) => {
+          inputModes.modes = [];
+        },
+      },
+      {
+        label: "malformed matchAny",
+        mutate: (inputModes) => {
+          inputModes.modes.raw.matchAny = "raw_messages";
+        },
+      },
+      {
+        label: "undeclared property reference",
+        mutate: (inputModes) => {
+          inputModes.modes.structured.matchAny.push("invented_requirement_field");
+        },
+      },
+    ];
+
+    for (const { label, mutate } of mutations) {
+      const profile = structuredClone(validProfile);
+      mutate(profile.tools.validate_requirement.inputModes);
+      assert.throws(
+        () => validateDocument("mvp-v2", profile),
+        Error,
+        label,
+      );
+    }
+  });
+
   it("rejects duplicate, missing, extra, and inherited legacy observed tool declarations", () => {
     const validateDocument = contractLoader.validateContractProfileDocument;
     assert.equal(typeof validateDocument, "function");
@@ -531,9 +613,99 @@ describe("contract loader", () => {
       /tools: Record<string, LegacyObservedToolContract>;/,
     );
   });
+
+  it("publishes generic declarative input-mode policy types", () => {
+    const declarations = readFileSync(
+      new URL("../dist/contract/types.d.ts", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(declarations, /export interface ToolInputMode \{/);
+    assert.match(declarations, /matchAny: string\[\];/);
+    assert.match(declarations, /export interface ToolInputModes \{/);
+    assert.match(declarations, /policy: "at-least-one";/);
+    assert.match(declarations, /allowMultiple: true;/);
+    assert.match(declarations, /modes: Record<string, ToolInputMode>;/);
+    assert.match(declarations, /inputModes\?: ToolInputModes;/);
+  });
 });
 
 describe("tool parameter validation", () => {
+  it("accepts raw-only, partial structured, complete structured, and coexisting requirement intake", () => {
+    const rawOnly = {
+      raw_messages: [{ role: "client", content: "小红书找 10 个美妆达人" }],
+    };
+    const partialStructured = { platform: "xhs" };
+
+    assert.deepEqual(validateToolParams("validate_requirement", rawOnly), []);
+    assert.deepEqual(
+      validateToolParams("validate_requirement", partialStructured),
+      [],
+    );
+    assert.deepEqual(validateToolParams("validate_requirement", validDemand()), []);
+    assert.deepEqual(
+      validateToolParams("validate_requirement", {
+        ...partialStructured,
+        raw_messages_json: '[{"role":"client","content":"补充原文"}]',
+      }),
+      [],
+    );
+  });
+
+  it("rejects truly empty requirement intake at the input-mode boundary", () => {
+    const issues = validateToolParams("validate_requirement", {});
+
+    assert.deepEqual(issues.map(({ code, path }) => ({ code, path })), [
+      { code: "INVALID_INPUT", path: "$" },
+    ]);
+  });
+
+  it("accepts an authority-CSV followercount structured intake field", () => {
+    assert.deepEqual(
+      validateToolParams("validate_requirement", { followercount: 123_456 }),
+      [],
+    );
+  });
+
+  it("accepts the documented manual-source payload and rejects the invented source_url", () => {
+    assert.deepEqual(
+      validateToolParams("manual_source_creators", DOCUMENTED_MANUAL_SOURCE),
+      [],
+    );
+
+    const invented = structuredClone(DOCUMENTED_MANUAL_SOURCE);
+    const [item] = invented.manual_results;
+    item.source_url = item.profile_url;
+    delete item.profile_url;
+    assertHasIssue(
+      validateToolParams("manual_source_creators", invented),
+      "SCHEMA_MISMATCH",
+      "$.manual_results[0].source_url",
+    );
+  });
+
+  it("accepts the documented feedback payload and rejects invented legacy item names", () => {
+    assert.deepEqual(
+      validateToolParams("record_client_feedback", DOCUMENTED_CLIENT_FEEDBACK),
+      [],
+    );
+
+    assertHasIssue(
+      validateToolParams("record_client_feedback", {
+        run_id: "run_123",
+        feedback_items: [
+          {
+            creator_submission_id: "submission_001",
+            decision: "rejected",
+            comment: "价格偏高",
+          },
+        ],
+      }),
+      "SCHEMA_MISMATCH",
+      "$.feedback_items[0].creator_submission_id",
+    );
+  });
+
   it("accepts the target search_creators requirement identifier", () => {
     assert.deepEqual(
       validateToolParams("search_creators", { requirement_id: "req-1" }),
