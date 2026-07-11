@@ -490,6 +490,31 @@ describe("contract loader", () => {
     }
   });
 
+  it("requires every legacy detection document to target MVP V2", () => {
+    const mutations = [
+      {
+        label: "missing target profile",
+        mutate: (profile) => delete profile.targetProfile,
+      },
+      {
+        label: "legacy target profile",
+        mutate: (profile) => {
+          profile.targetProfile = "legacy-1.9.4";
+        },
+      },
+    ];
+
+    for (const { label, mutate } of mutations) {
+      const profile = structuredClone(loadContractProfile("legacy-1.9.4"));
+      mutate(profile);
+      assert.throws(
+        () => contractLoader.validateContractProfileDocument("legacy-1.9.4", profile),
+        /targetProfile.*mvp-v2/i,
+        label,
+      );
+    }
+  });
+
   it("publishes a legacy observed-tool type without writable-only forbidden fields", () => {
     const declarations = readFileSync(
       new URL("../dist/contract/types.d.ts", import.meta.url),

@@ -184,6 +184,9 @@ function validateLegacyProfile(value: unknown): LegacyContractProfile {
   ) {
     throw new Error("legacy profile identity is invalid");
   }
+  if (profile.targetProfile !== "mvp-v2") {
+    throw new Error("legacy targetProfile must be mvp-v2");
+  }
   const summary = requireRecord(profile.observedSummary, "legacy.observedSummary");
   if (!isStringArray(summary.toolNames)) {
     throw new Error("legacy observed tool names must be a string array");
