@@ -1,0 +1,387 @@
+{
+  "schemaVersion": 1,
+  "profile": "legacy-1.9.4",
+  "targetProfile": "mvp-v2",
+  "mode": "detection-only",
+  "writable": false,
+  "automaticFallback": false,
+  "sourceFidelity": "observed-summary",
+  "retainedRawSnapshot": false,
+  "observationBasis": "Encoded provider tool-list summary; not a retained raw runtime snapshot",
+  "missingTargetTools": [
+    "select_inquiry_form_fields",
+    "sync_mcn_inquiry_status",
+    "create_with_distributions"
+  ],
+  "schemaHashScope": "observedSummary",
+  "schemaHashAlgorithm": "sha256",
+  "schemaHashCanonicalization": "recursive-key-sort-json-v1",
+  "schemaHash": "9b1217331aa883c902495636937f94913e5c97fbfa14d36db13f219e9b1e4e19",
+  "observedSummary": {
+    "toolNames": [
+      "validate_requirement",
+      "search_creators",
+      "rank_mcns",
+      "ingest_mcn_submissions",
+      "manual_source_creators",
+      "rank_creators",
+      "create_submission_batch",
+      "record_client_feedback",
+      "get_recommendation_run_detail",
+      "get_creator_detail",
+      "audit_manual_adjustment"
+    ],
+    "tools": {
+      "validate_requirement": {
+        "name": "validate_requirement",
+        "required": [
+          "raw_messages"
+        ],
+        "properties": {
+          "raw_messages": {
+            "type": "array"
+          },
+          "project_context": {
+            "type": "object"
+          },
+          "existing_demand_id": {
+            "type": "string"
+          },
+          "existing_demand_version": {
+            "type": "integer"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "search_creators": {
+        "name": "search_creators",
+        "required": [
+          "demand_id",
+          "demand_version"
+        ],
+        "properties": {
+          "demand_id": {
+            "type": "string"
+          },
+          "demand_version": {
+            "type": "integer"
+          },
+          "authorized_relaxations": {
+            "type": "array"
+          },
+          "write_candidate_pool": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "rank_mcns": {
+        "name": "rank_mcns",
+        "required": [
+          "demand_id",
+          "demand_version",
+          "platform"
+        ],
+        "properties": {
+          "demand_id": {
+            "type": "string"
+          },
+          "demand_version": {
+            "type": "integer"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "minimum_mcn_count": {
+            "type": "integer"
+          },
+          "target_multiplier": {
+            "type": "number"
+          },
+          "buffer_rate": {
+            "type": "number"
+          },
+          "medium_risk_confirmed": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "write_mcn_recommendation_items": {
+            "type": "boolean"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "ingest_mcn_submissions": {
+        "name": "ingest_mcn_submissions",
+        "required": [
+          "inquiry_id",
+          "items"
+        ],
+        "properties": {
+          "inquiry_id": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "manual_source_creators": {
+        "name": "manual_source_creators",
+        "required": [
+          "demand_id",
+          "demand_version"
+        ],
+        "properties": {
+          "demand_id": {
+            "type": "string"
+          },
+          "demand_version": {
+            "type": "integer"
+          },
+          "search_context": {
+            "type": "object"
+          },
+          "manual_results": {
+            "type": "array"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "rank_creators": {
+        "name": "rank_creators",
+        "required": [
+          "demand_id",
+          "demand_version",
+          "ranking_strategy"
+        ],
+        "properties": {
+          "demand_id": {
+            "type": "string"
+          },
+          "demand_version": {
+            "type": "integer"
+          },
+          "ranking_strategy": {
+            "type": "string"
+          },
+          "run_type": {
+            "type": "string"
+          },
+          "candidate_ids": {
+            "type": "array"
+          },
+          "ranking_weights": {
+            "type": "object"
+          },
+          "feedback_preferences": {
+            "type": "object"
+          },
+          "exclude_submitted": {
+            "type": "boolean"
+          },
+          "allow_manual_sourced_in_initial_run": {
+            "type": "boolean"
+          },
+          "source_priority": {
+            "type": "array"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "write_recommendation_items": {
+            "type": "boolean"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "create_submission_batch": {
+        "name": "create_submission_batch",
+        "required": [
+          "run_id"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "target_submission_count": {
+            "type": "integer"
+          },
+          "recommendation_item_ids": {
+            "type": "array"
+          },
+          "exclude_submitted": {
+            "type": "boolean"
+          },
+          "allow_need_confirm_with_risk": {
+            "type": "boolean"
+          },
+          "created_by": {
+            "type": "string"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "record_client_feedback": {
+        "name": "record_client_feedback",
+        "required": [
+          "run_id",
+          "feedback_items"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "feedback_items": {
+            "type": "array"
+          },
+          "requirement_changes": {
+            "type": "object"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "get_recommendation_run_detail": {
+        "name": "get_recommendation_run_detail",
+        "required": [
+          "run_id"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "include_submissions": {
+            "type": "boolean"
+          },
+          "include_creator_detail": {
+            "type": "boolean"
+          },
+          "include_feedback": {
+            "type": "boolean"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "get_creator_detail": {
+        "name": "get_creator_detail",
+        "required": [
+          "platform",
+          "platform_account_id"
+        ],
+        "properties": {
+          "platform": {
+            "type": "string"
+          },
+          "platform_account_id": {
+            "type": "string"
+          },
+          "include_offers": {
+            "type": "boolean"
+          },
+          "include_mcn": {
+            "type": "boolean"
+          },
+          "include_vector_text": {
+            "type": "boolean"
+          },
+          "include_recent_metrics": {
+            "type": "boolean"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      },
+      "audit_manual_adjustment": {
+        "name": "audit_manual_adjustment",
+        "required": [
+          "run_id",
+          "adjustments",
+          "operator_id"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "adjustments": {
+            "type": "array"
+          },
+          "operator_id": {
+            "type": "string"
+          }
+        },
+        "capability": "detection-only",
+        "executable": false,
+        "writerAuthorization": "none",
+        "writers": {
+          "always": [],
+          "conditional": []
+        }
+      }
+    }
+  }
+}

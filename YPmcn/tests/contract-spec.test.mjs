@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 const V2_PROFILE = "profiles/mvp-v2.json";
+const LEGACY_PROFILE = "profiles/legacy-1.9.4.json";
 
 const REQUIRED_TOOLS = [
   "validate_requirement",
@@ -22,6 +24,123 @@ const REQUIRED_TOOLS = [
 ];
 
 const OPTIONAL_TOOLS = ["get_workflow_state"];
+
+const LEGACY_TOOL_NAMES = [
+  "validate_requirement",
+  "search_creators",
+  "rank_mcns",
+  "ingest_mcn_submissions",
+  "manual_source_creators",
+  "rank_creators",
+  "create_submission_batch",
+  "record_client_feedback",
+  "get_recommendation_run_detail",
+  "get_creator_detail",
+  "audit_manual_adjustment",
+];
+
+const LEGACY_MISSING_TARGET_TOOLS = [
+  "select_inquiry_form_fields",
+  "sync_mcn_inquiry_status",
+  "create_with_distributions",
+];
+
+const LEGACY_REQUIRED_FIELDS = {
+  validate_requirement: ["raw_messages"],
+  search_creators: ["demand_id", "demand_version"],
+  rank_mcns: ["demand_id", "demand_version", "platform"],
+  ingest_mcn_submissions: ["inquiry_id", "items"],
+  manual_source_creators: ["demand_id", "demand_version"],
+  rank_creators: ["demand_id", "demand_version", "ranking_strategy"],
+  create_submission_batch: ["run_id"],
+  record_client_feedback: ["run_id", "feedback_items"],
+  get_recommendation_run_detail: ["run_id"],
+  get_creator_detail: ["platform", "platform_account_id"],
+  audit_manual_adjustment: ["run_id", "adjustments", "operator_id"],
+};
+
+const LEGACY_PROPERTY_TYPES = {
+  validate_requirement: {
+    raw_messages: "array",
+    project_context: "object",
+    existing_demand_id: "string",
+    existing_demand_version: "integer",
+  },
+  search_creators: {
+    demand_id: "string",
+    demand_version: "integer",
+    authorized_relaxations: "array",
+    write_candidate_pool: "boolean",
+    limit: "integer",
+  },
+  rank_mcns: {
+    demand_id: "string",
+    demand_version: "integer",
+    platform: "string",
+    minimum_mcn_count: "integer",
+    target_multiplier: "number",
+    buffer_rate: "number",
+    medium_risk_confirmed: "boolean",
+    limit: "integer",
+    write_mcn_recommendation_items: "boolean",
+  },
+  ingest_mcn_submissions: {
+    inquiry_id: "string",
+    items: "array",
+  },
+  manual_source_creators: {
+    demand_id: "string",
+    demand_version: "integer",
+    search_context: "object",
+    manual_results: "array",
+  },
+  rank_creators: {
+    demand_id: "string",
+    demand_version: "integer",
+    ranking_strategy: "string",
+    run_type: "string",
+    candidate_ids: "array",
+    ranking_weights: "object",
+    feedback_preferences: "object",
+    exclude_submitted: "boolean",
+    allow_manual_sourced_in_initial_run: "boolean",
+    source_priority: "array",
+    limit: "integer",
+    write_recommendation_items: "boolean",
+  },
+  create_submission_batch: {
+    run_id: "string",
+    target_submission_count: "integer",
+    recommendation_item_ids: "array",
+    exclude_submitted: "boolean",
+    allow_need_confirm_with_risk: "boolean",
+    created_by: "string",
+  },
+  record_client_feedback: {
+    run_id: "string",
+    feedback_items: "array",
+    requirement_changes: "object",
+  },
+  get_recommendation_run_detail: {
+    run_id: "string",
+    include_submissions: "boolean",
+    include_creator_detail: "boolean",
+    include_feedback: "boolean",
+  },
+  get_creator_detail: {
+    platform: "string",
+    platform_account_id: "string",
+    include_offers: "boolean",
+    include_mcn: "boolean",
+    include_vector_text: "boolean",
+    include_recent_metrics: "boolean",
+  },
+  audit_manual_adjustment: {
+    run_id: "string",
+    adjustments: "array",
+    operator_id: "string",
+  },
+};
 
 const TOOL_EXPECTATIONS = {
   validate_requirement: {
@@ -417,6 +536,19 @@ async function loadSpec(relativePath) {
   return JSON.parse(source);
 }
 
+function canonicalizeJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalizeJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalizeJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function allWriters(tool) {
   return [...tool.writers.always, ...tool.writers.conditional];
 }
@@ -771,5 +903,124 @@ describe("mvp-v2 machine-readable contract profile", () => {
       .filter((tool) => tool.outputEnvelope !== "standard")
       .map((tool) => tool.name);
     assert.deepEqual(envelopeExceptions, ["select_inquiry_form_fields"]);
+  });
+});
+
+describe("legacy-1.9.4 detection profile", () => {
+  it("records exactly the observed target tools and three target gaps", async () => {
+    const profile = await loadSpec(LEGACY_PROFILE);
+
+    assert.equal(profile.schemaVersion, 1);
+    assert.equal(profile.profile, "legacy-1.9.4");
+    assert.equal(profile.targetProfile, "mvp-v2");
+    assert.equal(profile.sourceFidelity, "observed-summary");
+    assert.equal(profile.retainedRawSnapshot, false);
+    assert.deepEqual(profile.missingTargetTools, LEGACY_MISSING_TARGET_TOOLS);
+    assert.deepEqual(profile.observedSummary.toolNames, LEGACY_TOOL_NAMES);
+    assert.deepEqual(
+      Object.keys(profile.observedSummary.tools),
+      LEGACY_TOOL_NAMES,
+    );
+    assert.deepEqual(
+      REQUIRED_TOOLS.filter((name) => !LEGACY_TOOL_NAMES.includes(name)).sort(),
+      [...LEGACY_MISSING_TARGET_TOOLS].sort(),
+    );
+  });
+
+  it("preserves required old identifiers and other observed payload signals", async () => {
+    const profile = await loadSpec(LEGACY_PROFILE);
+    const { tools } = profile.observedSummary;
+
+    for (const [name, required] of Object.entries(LEGACY_REQUIRED_FIELDS)) {
+      assert.deepEqual(tools[name].required, required, `${name} required drifted`);
+      for (const field of required) {
+        assert.ok(
+          Object.hasOwn(tools[name].properties, field),
+          `${name} omits required property ${field}`,
+        );
+      }
+      assert.deepEqual(
+        Object.fromEntries(
+          Object.entries(tools[name].properties).map(([property, schema]) => [
+            property,
+            schema.type,
+          ]),
+        ),
+        LEGACY_PROPERTY_TYPES[name],
+        `${name} properties drifted`,
+      );
+    }
+
+    for (const name of [
+      "search_creators",
+      "rank_mcns",
+      "manual_source_creators",
+      "rank_creators",
+    ]) {
+      assert.equal(tools[name].properties.demand_id.type, "string");
+      assert.equal(tools[name].properties.demand_version.type, "integer");
+    }
+
+    assert.equal(
+      tools.ingest_mcn_submissions.properties.inquiry_id.type,
+      "string",
+    );
+    assert.equal(tools.ingest_mcn_submissions.properties.items.type, "array");
+    assert.equal(
+      tools.create_submission_batch.properties.allow_need_confirm_with_risk
+        .type,
+      "boolean",
+    );
+    assert.ok(
+      !tools.create_submission_batch.required.includes(
+        "allow_need_confirm_with_risk",
+      ),
+    );
+  });
+
+  it("cannot authorize execution, writers, writable selection, or fallback", async () => {
+    const [legacy, v2] = await Promise.all([
+      loadSpec(LEGACY_PROFILE),
+      loadSpec(V2_PROFILE),
+    ]);
+
+    assert.equal(legacy.mode, "detection-only");
+    assert.equal(legacy.writable, false);
+    assert.equal(legacy.automaticFallback, false);
+    for (const [name, tool] of Object.entries(legacy.observedSummary.tools)) {
+      assert.equal(tool.capability, "detection-only", `${name} is executable`);
+      assert.equal(tool.executable, false, `${name} is executable`);
+      assert.equal(
+        tool.writerAuthorization,
+        "none",
+        `${name} grants writer authorization`,
+      );
+      assert.deepEqual(tool.writers, { always: [], conditional: [] });
+    }
+
+    const writableProfiles = [legacy, v2]
+      .filter(
+        (profile) => profile.mode === "writable" && profile.writable !== false,
+      )
+      .map((profile) => profile.profile);
+    assert.deepEqual(writableProfiles, ["mvp-v2"]);
+  });
+
+  it("reproduces the declared SHA-256 from the canonical observed summary", async () => {
+    const profile = await loadSpec(LEGACY_PROFILE);
+
+    assert.equal(profile.schemaHashScope, "observedSummary");
+    assert.equal(profile.schemaHashAlgorithm, "sha256");
+    assert.equal(
+      profile.schemaHashCanonicalization,
+      "recursive-key-sort-json-v1",
+    );
+    assert.match(profile.schemaHash, /^[a-f0-9]{64}$/);
+
+    const canonicalSummary = canonicalizeJson(profile.observedSummary);
+    const reproducedHash = createHash("sha256")
+      .update(canonicalSummary, "utf8")
+      .digest("hex");
+    assert.equal(reproducedHash, profile.schemaHash);
   });
 });
