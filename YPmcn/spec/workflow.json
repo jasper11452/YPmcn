@@ -67,7 +67,8 @@
         "name": "validate_requirement"
       },
       "guards": [
-        "required-demand-fields-present"
+        "required-demand-fields-present",
+        "result.data.status === ready"
       ],
       "evidence": [
         "success === true",

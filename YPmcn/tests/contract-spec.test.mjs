@@ -91,7 +91,10 @@ const WORKFLOW_TRANSITIONS = [
     id: "requirement-validated",
     from: "requirement_draft",
     trigger: { type: "tool", name: "validate_requirement" },
-    guards: ["required-demand-fields-present"],
+    guards: [
+      "required-demand-fields-present",
+      "result.data.status === ready",
+    ],
     evidence: [
       "success === true",
       "data.id",
@@ -1323,20 +1326,65 @@ function assertWorkflowContract(workflow) {
   );
 }
 
-function transitionAllowsLifecycleStatus(transition, lifecycleStatus) {
-  const guards = new Set(transition.guards);
-  const terminalGuard =
-    "result.data.lifecycle_status in [recovered, closed]";
-  const nonterminalGuard =
-    "result.data.lifecycle_status not in [recovered, closed]";
-  const isTerminal = ["recovered", "closed"].includes(lifecycleStatus);
+function evaluateWorkflowGuard(guard, context) {
+  const lifecycleSubject =
+    "(?:result\\.data\\.lifecycle_status|authoritative-lifecycle-status|latest-authoritative-sync-lifecycle-status)";
+  const membership = guard.match(
+    new RegExp(`^(${lifecycleSubject}) (in|not in) \\[([^\\]]+)\\]$`),
+  );
+  if (membership) {
+    const [, , operator, encodedStatuses] = membership;
+    const statuses = encodedStatuses
+      .split(",")
+      .map((status) => status.trim())
+      .filter(Boolean);
+    const included = statuses.includes(context.lifecycleStatus);
+    return operator === "in" ? included : !included;
+  }
 
-  if (guards.has(terminalGuard)) return isTerminal;
-  if (guards.has(nonterminalGuard)) return !isTerminal;
-  return true;
+  const equality = guard.match(
+    new RegExp(`^(${lifecycleSubject}) === ([a-z_]+)$`),
+  );
+  if (equality) return context.lifecycleStatus === equality[2];
+  if (guard.includes("lifecycle")) {
+    throw new Error(`Unrecognized lifecycle predicate: ${guard}`);
+  }
+
+  switch (guard) {
+    case "required-demand-fields-present":
+      return context.requiredDemandFieldsPresent === true;
+    case "result.data.status === ready":
+      return context.requirementStatus === "ready";
+    case "explicit-recovery-intent-in-current-session":
+    case "state.manual_recovery_confirmed_at-is-current":
+      return context.mode === "manual" && context.manualConfirmed === true;
+    case "ctx.recovery_trigger === manual":
+      return context.mode === "manual";
+    case "ctx.trigger === cron":
+      return context.mode === "scheduled";
+    case "params.trigger === manual":
+      return context.mode === "manual";
+    case "params.trigger === scheduled":
+      return context.mode === "scheduled";
+    case "current-session-successful-sync-evidence-present":
+      return context.successfulSync === true;
+    case "current-session-successful-ingest-evidence-present":
+      return context.successfulIngest === true;
+    default:
+      return context.allowedGuards?.has(guard) === true;
+  }
 }
 
-function reachableWorkflowTransitions(workflow, startPhase, lifecycleStatus) {
+function transitionApplies(transition, context) {
+  return transition.guards.every((guard) =>
+    evaluateWorkflowGuard(guard, context),
+  );
+}
+
+function traverseWorkflow(
+  workflow,
+  { startPhase, context, allowedTriggerNames },
+) {
   const pendingPhases = [startPhase];
   const visitedPhases = new Set();
   const traversed = [];
@@ -1347,11 +1395,10 @@ function reachableWorkflowTransitions(workflow, startPhase, lifecycleStatus) {
     visitedPhases.add(phase);
 
     for (const transition of workflow.transitions.filter(
-      ({ from }) => from === phase,
+      ({ from, trigger }) =>
+        from === phase && allowedTriggerNames.has(trigger.name),
     )) {
-      if (!transitionAllowsLifecycleStatus(transition, lifecycleStatus)) {
-        continue;
-      }
+      if (!transitionApplies(transition, context)) continue;
       traversed.push(transition);
       if (!visitedPhases.has(transition.nextPhase)) {
         pendingPhases.push(transition.nextPhase);
@@ -1359,44 +1406,102 @@ function reachableWorkflowTransitions(workflow, startPhase, lifecycleStatus) {
     }
   }
 
-  return traversed;
+  return { phases: visitedPhases, transitions: traversed };
 }
 
-function assertTerminalRecoveryIsolation(workflow) {
-  for (const lifecycleStatus of ["recovered", "closed"]) {
-    const traversed = reachableWorkflowTransitions(
-      workflow,
-      "waiting_return",
-      lifecycleStatus,
-    );
-    const reconciliationIds = traversed
-      .filter(
-        ({ from, trigger, nextPhase }) =>
-          from === "waiting_return" &&
-          trigger.name === "sync_mcn_inquiry_status" &&
-          nextPhase === "recovered",
-      )
-      .map(({ id }) => id);
+const RECOVERY_TRIGGER_NAMES = new Set([
+  "manual_recovery_confirmed",
+  "sync_mcn_inquiry_status",
+  "ingest_mcn_submissions",
+  "recovery_requested",
+]);
 
-    assert.deepEqual(
-      reconciliationIds,
-      [
-        "manual-terminal-reconciliation",
-        "scheduled-terminal-reconciliation",
-      ],
-      `${lifecycleStatus} lacks a disjoint terminal reconciliation path`,
+function recoveryContext(mode, lifecycleStatus) {
+  return {
+    mode,
+    lifecycleStatus,
+    manualConfirmed: mode === "manual",
+    successfulSync: true,
+    successfulIngest: false,
+  };
+}
+
+function assertRecoveryGraphSemantics(workflow) {
+  for (const mode of ["manual", "scheduled"]) {
+    for (const lifecycleStatus of ["recovered", "closed"]) {
+      const result = traverseWorkflow(workflow, {
+        startPhase: "waiting_return",
+        context: recoveryContext(mode, lifecycleStatus),
+        allowedTriggerNames: RECOVERY_TRIGGER_NAMES,
+      });
+      const expectedTerminalTransition =
+        mode === "manual"
+          ? "manual-terminal-reconciliation"
+          : "scheduled-terminal-reconciliation";
+
+      assert.ok(
+        result.transitions.some(({ id }) => id === expectedTerminalTransition),
+        `${mode} ${lifecycleStatus} lacks its terminal reconciliation`,
+      );
+      assert.ok(
+        result.phases.has("recovered"),
+        `${mode} ${lifecycleStatus} does not reach recovered`,
+      );
+      assert.equal(
+        result.phases.has("recovering"),
+        false,
+        `${mode} ${lifecycleStatus} visits recovering`,
+      );
+      assert.equal(
+        result.transitions.some(
+          ({ trigger }) => trigger.name === "ingest_mcn_submissions",
+        ),
+        false,
+        `${mode} ${lifecycleStatus} reaches submission ingest`,
+      );
+    }
+  }
+
+  const nonterminalCases = [
+    {
+      mode: "manual",
+      lifecycleStatus: "recover_requested",
+      syncTransition: "manual-recovery-sync",
+      ingestTransition: "manual-submission-ingest",
+      wrongIngestTransition: "scheduled-submission-ingest",
+    },
+    {
+      mode: "scheduled",
+      lifecycleStatus: "waiting_return",
+      syncTransition: "scheduled-recovery-sync",
+      ingestTransition: "scheduled-submission-ingest",
+      wrongIngestTransition: "manual-submission-ingest",
+    },
+  ];
+  for (const testCase of nonterminalCases) {
+    const result = traverseWorkflow(workflow, {
+      startPhase: "waiting_return",
+      context: recoveryContext(testCase.mode, testCase.lifecycleStatus),
+      allowedTriggerNames: RECOVERY_TRIGGER_NAMES,
+    });
+    const transitionIds = result.transitions.map(({ id }) => id);
+
+    assert.ok(
+      result.phases.has("recovering"),
+      `${testCase.mode} nonterminal status cannot reach recovering`,
+    );
+    assert.ok(
+      transitionIds.includes(testCase.syncTransition),
+      `${testCase.mode} recovery uses the wrong sync path`,
+    );
+    assert.ok(
+      transitionIds.includes(testCase.ingestTransition),
+      `${testCase.mode} recovery cannot reach its ingest path`,
     );
     assert.equal(
-      traversed.some(({ nextPhase }) => nextPhase === "recovering"),
+      transitionIds.includes(testCase.wrongIngestTransition),
       false,
-      `${lifecycleStatus} can transition to recovering`,
-    );
-    assert.equal(
-      traversed.some(
-        ({ trigger }) => trigger.name === "ingest_mcn_submissions",
-      ),
-      false,
-      `${lifecycleStatus} can reach submission ingest`,
+      `${testCase.mode} recovery reaches the other mode's ingest`,
     );
   }
 }
@@ -1936,10 +2041,56 @@ describe("workflow contract", () => {
     }
   });
 
-  it("reconciles terminal pre-sync state without reaching recovery ingest", async () => {
+  it("advances a requirement draft only when validation status is ready", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+    const transition = workflow.transitions.find(
+      ({ id }) => id === "requirement-validated",
+    );
+    const context = { requiredDemandFieldsPresent: true };
+
+    assert.equal(
+      transitionApplies(transition, {
+        ...context,
+        requirementStatus: "draft",
+      }),
+      false,
+    );
+    assert.equal(
+      transitionApplies(transition, {
+        ...context,
+        requirementStatus: "ready",
+      }),
+      true,
+    );
+  });
+
+  it("enforces terminal and nonterminal recovery graph semantics for both modes", async () => {
     const workflow = await loadSpec(WORKFLOW_SPEC);
 
-    assertTerminalRecoveryIsolation(workflow);
+    assertRecoveryGraphSemantics(workflow);
+  });
+
+  it("keeps recovery_requested as a terminal event-only no-op", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+    const result = traverseWorkflow(workflow, {
+      startPhase: "recovered",
+      context: recoveryContext("manual", "recovered"),
+      allowedTriggerNames: new Set(["recovery_requested"]),
+    });
+
+    assert.deepEqual([...result.phases], ["recovered"]);
+    assert.deepEqual(
+      result.transitions.map(({ id }) => id),
+      ["terminal-recovery-no-op"],
+    );
+    assert.equal(
+      result.transitions.some(({ trigger }) => trigger.type === "tool"),
+      false,
+    );
+    assert.deepEqual(result.transitions[0].evidence, [
+      "error.code === RECOVERY_ALREADY_TERMINAL",
+      "no-write-tool-invoked",
+    ]);
   });
 
   it("detects a mutation to a workflow transition", async () => {
@@ -1955,31 +2106,100 @@ describe("workflow contract", () => {
     );
   });
 
-  it("detects mutations to terminal recovery guards and paths", async () => {
+  it("detects lifecycle, terminal-path, and mode-context mutations", async () => {
     const workflow = await loadSpec(WORKFLOW_SPEC);
-    assertTerminalRecoveryIsolation(workflow);
+    assertRecoveryGraphSemantics(workflow);
 
-    const guardMutation = structuredClone(workflow);
-    const manualRecovery = guardMutation.transitions.find(
+    const mutationCases = [
+      {
+        label: "removed closed from terminal guard",
+        mutate: (mutated) => {
+          const transition = mutated.transitions.find(
+            ({ id }) => id === "manual-terminal-reconciliation",
+          );
+          transition.guards = transition.guards.map((guard) =>
+            guard ===
+            "result.data.lifecycle_status in [recovered, closed]"
+              ? "result.data.lifecycle_status in [recovered]"
+              : guard,
+          );
+        },
+      },
+      {
+        label: "redirected terminal path",
+        mutate: (mutated) => {
+          mutated.transitions.find(
+            ({ id }) => id === "manual-terminal-reconciliation",
+          ).nextPhase = "recovering";
+        },
+      },
+      {
+        label: "weakened nonterminal guard",
+        mutate: (mutated) => {
+          const transition = mutated.transitions.find(
+            ({ id }) => id === "manual-recovery-sync",
+          );
+          transition.guards = transition.guards.map((guard) =>
+            guard ===
+            "result.data.lifecycle_status not in [recovered, closed]"
+              ? "result.data.lifecycle_status not in [recovered]"
+              : guard,
+          );
+        },
+      },
+      {
+        label: "broken manual context",
+        mutate: (mutated) => {
+          const transition = mutated.transitions.find(
+            ({ id }) => id === "manual-terminal-reconciliation",
+          );
+          transition.guards = transition.guards.map((guard) =>
+            guard === "ctx.recovery_trigger === manual"
+              ? "ctx.recovery_trigger === scheduled"
+              : guard,
+          );
+        },
+      },
+      {
+        label: "broken cron context",
+        mutate: (mutated) => {
+          const transition = mutated.transitions.find(
+            ({ id }) => id === "scheduled-terminal-reconciliation",
+          );
+          transition.guards = transition.guards.map((guard) =>
+            guard === "ctx.trigger === cron"
+              ? "ctx.trigger === timer"
+              : guard,
+          );
+        },
+      },
+    ];
+
+    for (const { label, mutate } of mutationCases) {
+      const mutated = structuredClone(workflow);
+      mutate(mutated);
+      assert.throws(
+        () => assertRecoveryGraphSemantics(mutated),
+        `${label} was not detected`,
+      );
+    }
+  });
+
+  it("rejects unrecognized lifecycle predicates instead of failing open", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+    const mutated = structuredClone(workflow);
+    const transition = mutated.transitions.find(
       ({ id }) => id === "manual-recovery-sync",
     );
-    manualRecovery.guards = manualRecovery.guards.filter(
-      (guard) =>
-        guard !==
-        "result.data.lifecycle_status not in [recovered, closed]",
-    );
-    assert.throws(
-      () => assertTerminalRecoveryIsolation(guardMutation),
-      /can transition to recovering/,
+    transition.guards = transition.guards.map((guard) =>
+      guard === "result.data.lifecycle_status not in [recovered, closed]"
+        ? "result.data.lifecycle_status excludes [recovered, closed]"
+        : guard,
     );
 
-    const pathMutation = structuredClone(workflow);
-    pathMutation.transitions.find(
-      ({ id }) => id === "manual-terminal-reconciliation",
-    ).nextPhase = "recovering";
     assert.throws(
-      () => assertTerminalRecoveryIsolation(pathMutation),
-      /lacks a disjoint terminal reconciliation path/,
+      () => assertRecoveryGraphSemantics(mutated),
+      /Unrecognized lifecycle predicate/,
     );
   });
 });
