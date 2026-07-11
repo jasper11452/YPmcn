@@ -8,7 +8,12 @@ import type {
 } from "./types.js";
 
 const FIELD_DEFINITION_KEYS = ["key", "name", "type", "required"] as const;
-const FIELD_SELECTION_KEYS = new Set(["success", "fields", "items", "selected_count"]);
+const FIELD_SELECTION_REQUIRED_KEYS = ["success", "fields", "items", "selected_count"] as const;
+const FIELD_SELECTION_DISPLAY_KEYS = ["url", "message", "description", "output_format"] as const;
+const FIELD_SELECTION_KEYS: ReadonlySet<string> = new Set([
+  ...FIELD_SELECTION_REQUIRED_KEYS,
+  ...FIELD_SELECTION_DISPLAY_KEYS,
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -96,15 +101,14 @@ function collectSchemaMismatches(
   const properties = schema.properties ?? {};
   for (const key of Object.keys(value)) {
     const childPath = propertyPath(path, key);
-    const propertySchema = properties[key];
     if (forbidden.has(key)) {
       issues.push(
         issue("SCHEMA_MISMATCH", childPath, `Property ${key} is forbidden by the target contract.`),
       );
       continue;
     }
-    if (propertySchema) {
-      issues.push(...collectSchemaMismatches(propertySchema, value[key], childPath));
+    if (hasOwn(properties, key)) {
+      issues.push(...collectSchemaMismatches(properties[key], value[key], childPath));
       continue;
     }
     if (isRecord(schema.additionalProperties)) {
@@ -192,7 +196,7 @@ function validateSchema(schema: ContractSchema, value: unknown, path: string): V
     }
     if (isRecord(schema.additionalProperties)) {
       for (const key of Object.keys(value)) {
-        if (!(key in (schema.properties ?? {}))) {
+        if (!hasOwn(schema.properties ?? {}, key)) {
           issues.push(
             ...validateSchema(schema.additionalProperties, value[key], propertyPath(path, key)),
           );
@@ -262,7 +266,10 @@ export function validateToolParams(
       issue("INTEGRATION_REQUIRED", "$.profile", "The target contract profile is unavailable."),
     ];
   }
-  const contract = typeof tool === "string" ? profile.tools[tool] : undefined;
+  const contract =
+    typeof tool === "string" && hasOwn(profile.tools, tool)
+      ? profile.tools[tool]
+      : undefined;
   if (!contract) {
     return [
       issue(
@@ -366,7 +373,7 @@ export function validateFieldSelection(result: unknown): ValidationIssue[] {
   }
 
   const issues: ValidationIssue[] = [];
-  for (const key of FIELD_SELECTION_KEYS) {
+  for (const key of FIELD_SELECTION_REQUIRED_KEYS) {
     if (!hasOwn(result, key)) {
       issues.push(fieldIssue(propertyPath("$", key), "Required top-level property is missing."));
     }
@@ -378,6 +385,11 @@ export function validateFieldSelection(result: unknown): ValidationIssue[] {
   }
   if (result.success !== true) {
     issues.push(fieldIssue("$.success", "Field selection must report success=true."));
+  }
+  for (const key of FIELD_SELECTION_DISPLAY_KEYS) {
+    if (hasOwn(result, key) && typeof result[key] !== "string") {
+      issues.push(fieldIssue(propertyPath("$", key), "Display metadata must be a string."));
+    }
   }
 
   issues.push(...validateFieldMap(result.fields));

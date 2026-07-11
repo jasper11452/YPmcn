@@ -28,6 +28,47 @@ const REQUIRED_TOOLS = [
 
 const OPTIONAL_TOOLS = ["get_workflow_state"];
 
+const FIELD_DEFINITION_SCHEMA = {
+  type: "object",
+  required: ["key", "name", "type", "required"],
+  properties: {
+    key: { type: "string", minLength: 1 },
+    name: { type: "string", minLength: 1 },
+    type: { type: "string", minLength: 1 },
+    required: { type: "boolean" },
+  },
+  additionalProperties: false,
+};
+
+const FIELD_SELECTION_ENVELOPE = {
+  type: "object",
+  required: ["success", "fields", "items", "selected_count"],
+  properties: {
+    success: { type: "boolean", const: true },
+    url: { type: "string" },
+    message: { type: "string" },
+    description: { type: "string" },
+    fields: {
+      type: "object",
+      minProperties: 1,
+      additionalProperties: FIELD_DEFINITION_SCHEMA,
+    },
+    items: {
+      type: "array",
+      minItems: 1,
+      ordered: true,
+      items: FIELD_DEFINITION_SCHEMA,
+    },
+    selected_count: { type: "integer", minimum: 1 },
+    output_format: { type: "string" },
+  },
+  additionalProperties: false,
+  constraints: [
+    "selected_count === items.length",
+    "selected_count > 0",
+  ],
+};
+
 const WORKFLOW_PHASES = [
   "requirement_draft",
   "requirement_ready",
@@ -1667,6 +1708,15 @@ describe("mvp-v2 machine-readable contract profile", () => {
     for (const name of expectedToolNames) {
       assertToolContract(name, profile.tools[name]);
     }
+  });
+
+  it("matches the exact approved top-level field-selection envelope", async () => {
+    const profile = await loadSpec(V2_PROFILE);
+
+    assert.deepEqual(
+      profile.outputEnvelopes["top-level-field-selection"],
+      FIELD_SELECTION_ENVELOPE,
+    );
   });
 
   it("rejects cloned contract rows when exact oracle fields are mutated", async () => {

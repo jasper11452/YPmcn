@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
+import * as contractLoader from "../dist/contract/loader.js";
 import {
+  validateFieldSelection,
+  validateToolParams,
+} from "../dist/contract/validator.js";
+
+const {
   expectedRequiredTools,
   loadContractProfile,
   loadDatabaseContract,
   loadErrorCatalog,
   loadWorkflowContract,
-} from "../dist/contract/loader.js";
-import {
-  validateFieldSelection,
-  validateToolParams,
-} from "../dist/contract/validator.js";
+} = contractLoader;
 
 const V2_REQUIRED_TOOLS = [
   "validate_requirement",
@@ -56,6 +59,57 @@ const FIELD_TWO = {
   name: "报价",
   type: "number",
   required: false,
+};
+
+const DOCUMENTED_FIELD_SELECTION = {
+  success: true,
+  url: "http://127.0.0.1:8000/demand-field-selector",
+  message: "已接收需求字段选择结果",
+  description:
+    "friendcount：关注数\npostcount：作品数\nsumpost：累计作品数\nsumpost_bussiness：商业作品数\nuserfavoritscount：收藏数\nuserlikecount：获赞数",
+  fields: {
+    friendcount: { key: "friendcount", name: "关注数", type: "BIGINT", required: true },
+    postcount: { key: "postcount", name: "作品数", type: "BIGINT", required: true },
+    sumpost: { key: "sumpost", name: "累计作品数", type: "BIGINT", required: true },
+    sumpost_bussiness: {
+      key: "sumpost_bussiness",
+      name: "商业作品数",
+      type: "BIGINT",
+      required: true,
+    },
+    userfavoritscount: {
+      key: "userfavoritscount",
+      name: "收藏数",
+      type: "BIGINT",
+      required: true,
+    },
+    userlikecount: {
+      key: "userlikecount",
+      name: "获赞数",
+      type: "BIGINT",
+      required: true,
+    },
+  },
+  items: [
+    { key: "friendcount", name: "关注数", type: "BIGINT", required: true },
+    { key: "postcount", name: "作品数", type: "BIGINT", required: true },
+    { key: "sumpost", name: "累计作品数", type: "BIGINT", required: true },
+    {
+      key: "sumpost_bussiness",
+      name: "商业作品数",
+      type: "BIGINT",
+      required: true,
+    },
+    {
+      key: "userfavoritscount",
+      name: "收藏数",
+      type: "BIGINT",
+      required: true,
+    },
+    { key: "userlikecount", name: "获赞数", type: "BIGINT", required: true },
+  ],
+  selected_count: 6,
+  output_format: "数据库字段名：字段备注",
 };
 
 function assertDeepFrozen(value) {
@@ -201,6 +255,127 @@ describe("contract loader", () => {
       LEGACY_OBSERVED_TOOLS,
     );
   });
+
+  it("exposes reusable parsed-document validation without widening profile loading", () => {
+    assert.equal(
+      typeof contractLoader.validateContractProfileDocument,
+      "function",
+      "loader must expose typed document validation for isolated fixtures",
+    );
+    assert.throws(() => loadContractProfile("constructor"), /unsupported contract profile/i);
+  });
+
+  it("rejects duplicate, overlapping, missing, extra, and malformed MVP tool declarations", () => {
+    const validateDocument = contractLoader.validateContractProfileDocument;
+    assert.equal(typeof validateDocument, "function");
+    const mutations = [
+      {
+        label: "duplicate required tool",
+        mutate: (profile) => profile.requiredTools.push(profile.requiredTools[0]),
+      },
+      {
+        label: "duplicate optional tool",
+        mutate: (profile) => profile.optionalTools.push(profile.optionalTools[0]),
+      },
+      {
+        label: "required/optional overlap",
+        mutate: (profile) => profile.optionalTools.push(profile.requiredTools[0]),
+      },
+      {
+        label: "missing tool-map key",
+        mutate: (profile) => delete profile.tools[profile.requiredTools[0]],
+      },
+      {
+        label: "extra tool-map key",
+        mutate: (profile) => {
+          profile.tools.extra_tool = structuredClone(profile.tools.search_creators);
+          profile.tools.extra_tool.name = "extra_tool";
+        },
+      },
+      {
+        label: "inherited prototype name is not a tool-map key",
+        mutate: (profile) => profile.requiredTools.push("constructor"),
+      },
+      {
+        label: "missing writable forbidden array",
+        mutate: (profile) => delete profile.tools.search_creators.forbidden,
+      },
+      {
+        label: "malformed writable forbidden array",
+        mutate: (profile) => {
+          profile.tools.search_creators.forbidden = "demand_id";
+        },
+      },
+    ];
+
+    for (const { label, mutate } of mutations) {
+      const profile = structuredClone(loadContractProfile("mvp-v2"));
+      mutate(profile);
+      assert.throws(
+        () => validateDocument("mvp-v2", profile),
+        Error,
+        label,
+      );
+    }
+  });
+
+  it("rejects duplicate, missing, extra, and inherited legacy observed tool declarations", () => {
+    const validateDocument = contractLoader.validateContractProfileDocument;
+    assert.equal(typeof validateDocument, "function");
+    const mutations = [
+      {
+        label: "duplicate observed tool",
+        mutate: (profile) => {
+          profile.observedSummary.toolNames.push(profile.observedSummary.toolNames[0]);
+        },
+      },
+      {
+        label: "missing observed tool-map key",
+        mutate: (profile) => {
+          delete profile.observedSummary.tools[profile.observedSummary.toolNames[0]];
+        },
+      },
+      {
+        label: "extra observed tool-map key",
+        mutate: (profile) => {
+          const tools = profile.observedSummary.tools;
+          tools.extra_tool = structuredClone(tools.search_creators);
+          tools.extra_tool.name = "extra_tool";
+        },
+      },
+      {
+        label: "inherited prototype name is not an observed tool-map key",
+        mutate: (profile) => profile.observedSummary.toolNames.push("toString"),
+      },
+    ];
+
+    for (const { label, mutate } of mutations) {
+      const profile = structuredClone(loadContractProfile("legacy-1.9.4"));
+      mutate(profile);
+      assert.throws(
+        () => validateDocument("legacy-1.9.4", profile),
+        Error,
+        label,
+      );
+    }
+  });
+
+  it("publishes a legacy observed-tool type without writable-only forbidden fields", () => {
+    const declarations = readFileSync(
+      new URL("../dist/contract/types.d.ts", import.meta.url),
+      "utf8",
+    );
+    const legacyType = declarations.match(
+      /export interface LegacyObservedToolContract \{([\s\S]*?)\n\}/,
+    );
+
+    assert.ok(legacyType, "LegacyObservedToolContract declaration is missing");
+    assert.doesNotMatch(legacyType[1], /\bforbidden\b/);
+    assert.match(
+      declarations,
+      /tools: Record<string, LegacyObservedToolContract>;/,
+    );
+  });
 });
 
 describe("tool parameter validation", () => {
@@ -252,6 +427,39 @@ describe("tool parameter validation", () => {
   it("fails closed for an unknown target tool", () => {
     const issues = validateToolParams("send_invented_distribution", {});
     assertHasIssue(issues, "INTEGRATION_REQUIRED", "$.tool");
+  });
+
+  it("fails closed for inherited Object prototype tool names", () => {
+    for (const tool of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      assertHasIssue(validateToolParams(tool, {}), "INTEGRATION_REQUIRED", "$.tool");
+    }
+  });
+
+  it("rejects JSON-own Object prototype names as undeclared target params", () => {
+    for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      const params = JSON.parse(
+        `{"requirement_id":"req-1","${name}":"unexpected"}`,
+      );
+      assert.equal(Object.hasOwn(params, name), true);
+      assertHasIssue(
+        validateToolParams("search_creators", params),
+        "SCHEMA_MISMATCH",
+        `$.${name}`,
+      );
+    }
+  });
+
+  it("validates prototype-named own values through additionalProperties schemas", () => {
+    const prefillRowsBySupplier = JSON.parse('{"constructor":"not-an-array"}');
+    assert.equal(Object.hasOwn(prefillRowsBySupplier, "constructor"), true);
+    assertHasIssue(
+      validateToolParams(
+        "create_with_distributions",
+        validDistribution({ prefillRowsBySupplier }),
+      ),
+      "INVALID_INPUT",
+      "$.prefillRowsBySupplier.constructor",
+    );
   });
 
   it("fails closed for an unknown profile without throwing", () => {
@@ -414,6 +622,47 @@ describe("field-selection validation", () => {
     );
   });
 
+  it("accepts the documented successful selector response with display metadata", () => {
+    assert.deepEqual(validateFieldSelection(DOCUMENTED_FIELD_SELECTION), []);
+  });
+
+  it("keeps the machine envelope and runtime field-selection validator consistent", () => {
+    const profile = loadContractProfile("mvp-v2");
+    const envelope = profile.outputEnvelopes["top-level-field-selection"];
+
+    assert.deepEqual(Object.keys(envelope.properties), [
+      "success",
+      "url",
+      "message",
+      "description",
+      "fields",
+      "items",
+      "selected_count",
+      "output_format",
+    ]);
+    assert.equal(envelope.additionalProperties, false);
+    assert.equal(envelope.properties.fields.type, "object");
+    assert.equal(envelope.properties.items.type, "array");
+    assert.equal(envelope.properties.items.ordered, true);
+    assert.deepEqual(
+      envelope.properties.fields.additionalProperties,
+      envelope.properties.items.items,
+    );
+    assert.deepEqual(validateFieldSelection(DOCUMENTED_FIELD_SELECTION), []);
+  });
+
+  it("validates documented display metadata as strings", () => {
+    for (const key of ["url", "message", "description", "output_format"]) {
+      const issues = validateFieldSelection({
+        ...DOCUMENTED_FIELD_SELECTION,
+        [key]: 42,
+      });
+      const displayIssue = issues.find((candidate) => candidate.path === `$.${key}`);
+      assert.ok(displayIssue, `${key} must produce a field-selection issue`);
+      assert.match(displayIssue.message, /string/i);
+    }
+  });
+
   it("rejects non-objects, unsuccessful results, envelopes, and top-level inventions", () => {
     for (const result of [
       null,
@@ -421,6 +670,8 @@ describe("field-selection validation", () => {
       { success: true, data: validFieldSelection(), error: null },
       { ...validFieldSelection(), snapshot_id: "snapshot-1" },
       { ...validFieldSelection(), session_id: "session-1" },
+      { ...validFieldSelection(), selection_session_id: "selection-1" },
+      { ...validFieldSelection(), invented_display_key: "invented" },
     ]) {
       assertHasIssue(validateFieldSelection(result), "FIELD_SELECTION_INVALID");
     }

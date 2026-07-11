@@ -54,6 +54,19 @@ export interface ToolContract {
   [key: string]: unknown;
 }
 
+export interface LegacyObservedToolContract {
+  name: string;
+  required: string[];
+  properties: Record<string, ContractSchema>;
+  capability: "detection-only";
+  executable: false;
+  writerAuthorization: "none";
+  writers: {
+    always: string[];
+    conditional: string[];
+  };
+}
+
 export interface MvpContractProfile {
   schemaVersion: number;
   profile: "mvp-v2";
@@ -66,7 +79,7 @@ export interface MvpContractProfile {
 
 export interface LegacyObservedSummary {
   toolNames: string[];
-  tools: Record<string, ToolContract>;
+  tools: Record<string, LegacyObservedToolContract>;
 }
 
 export interface LegacyContractProfile {

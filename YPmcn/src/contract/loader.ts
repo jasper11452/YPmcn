@@ -6,6 +6,7 @@ import type {
   DatabaseContract,
   ErrorCatalog,
   LegacyContractProfile,
+  LegacyObservedToolContract,
   MvpContractProfile,
   ToolContract,
   WorkflowContract,
@@ -29,6 +30,10 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!isRecord(value)) throw new Error(`${label} must be an object`);
   return value;
@@ -44,16 +49,63 @@ function readSpec(relativePath: string): unknown {
   return JSON.parse(readFileSync(specUrl, "utf8")) as unknown;
 }
 
-function validateToolMap(value: unknown, label: string): void {
-  const tools = requireRecord(value, label);
-  for (const [name, rawTool] of Object.entries(tools)) {
-    const tool = requireRecord(rawTool, `${label}.${name}`);
-    if (tool.name !== name) throw new Error(`${label}.${name}.name must match its key`);
-    if (!isStringArray(tool.required)) {
-      throw new Error(`${label}.${name}.required must be a string array`);
-    }
-    requireRecord(tool.properties, `${label}.${name}.properties`);
+function requireUnique(values: string[], label: string): void {
+  if (new Set(values).size !== values.length) {
+    throw new Error(`${label} must not contain duplicates`);
   }
+}
+
+function validateToolMapKeys(
+  tools: Record<string, unknown>,
+  expectedNames: string[],
+  label: string,
+): void {
+  const expected = new Set(expectedNames);
+  for (const name of expectedNames) {
+    if (!hasOwn(tools, name)) throw new Error(`${label}.${name} is missing`);
+  }
+  for (const name of Object.keys(tools)) {
+    if (!expected.has(name)) throw new Error(`${label}.${name} is not declared`);
+  }
+}
+
+function validateCommonTool(rawTool: unknown, name: string, label: string): Record<string, unknown> {
+  const tool = requireRecord(rawTool, `${label}.${name}`);
+  if (tool.name !== name) throw new Error(`${label}.${name}.name must match its key`);
+  if (!isStringArray(tool.required)) {
+    throw new Error(`${label}.${name}.required must be a string array`);
+  }
+  requireRecord(tool.properties, `${label}.${name}.properties`);
+  return tool;
+}
+
+function validateWritableToolMap(
+  value: unknown,
+  expectedNames: string[],
+  label: string,
+): Record<string, ToolContract> {
+  const tools = requireRecord(value, label);
+  validateToolMapKeys(tools, expectedNames, label);
+  for (const [name, rawTool] of Object.entries(tools)) {
+    const tool = validateCommonTool(rawTool, name, label);
+    if (!isStringArray(tool.forbidden)) {
+      throw new Error(`${label}.${name}.forbidden must be a string array`);
+    }
+  }
+  return tools as unknown as Record<string, ToolContract>;
+}
+
+function validateLegacyToolMap(
+  value: unknown,
+  expectedNames: string[],
+  label: string,
+): Record<string, LegacyObservedToolContract> {
+  const tools = requireRecord(value, label);
+  validateToolMapKeys(tools, expectedNames, label);
+  for (const [name, rawTool] of Object.entries(tools)) {
+    validateCommonTool(rawTool, name, label);
+  }
+  return tools as unknown as Record<string, LegacyObservedToolContract>;
 }
 
 function validateMvpProfile(value: unknown): MvpContractProfile {
@@ -64,11 +116,19 @@ function validateMvpProfile(value: unknown): MvpContractProfile {
   if (!isStringArray(profile.requiredTools) || !isStringArray(profile.optionalTools)) {
     throw new Error("mvp-v2 tool lists must be string arrays");
   }
-  validateToolMap(profile.tools, "mvp-v2.tools");
-  const tools = profile.tools as Record<string, ToolContract>;
-  for (const name of [...profile.requiredTools, ...profile.optionalTools]) {
-    if (!(name in tools)) throw new Error(`mvp-v2 tool ${name} is not defined`);
+  requireUnique(profile.requiredTools, "mvp-v2.requiredTools");
+  requireUnique(profile.optionalTools, "mvp-v2.optionalTools");
+  const required = new Set(profile.requiredTools);
+  for (const name of profile.optionalTools) {
+    if (required.has(name)) {
+      throw new Error(`mvp-v2 tool ${name} cannot be both required and optional`);
+    }
   }
+  validateWritableToolMap(
+    profile.tools,
+    [...profile.requiredTools, ...profile.optionalTools],
+    "mvp-v2.tools",
+  );
   return profile as unknown as MvpContractProfile;
 }
 
@@ -87,12 +147,32 @@ function validateLegacyProfile(value: unknown): LegacyContractProfile {
   if (!isStringArray(summary.toolNames)) {
     throw new Error("legacy observed tool names must be a string array");
   }
-  validateToolMap(summary.tools, "legacy.observedSummary.tools");
-  const tools = summary.tools as Record<string, ToolContract>;
-  for (const name of summary.toolNames) {
-    if (!(name in tools)) throw new Error(`legacy observed tool ${name} is not defined`);
-  }
+  requireUnique(summary.toolNames, "legacy.observedSummary.toolNames");
+  validateLegacyToolMap(
+    summary.tools,
+    summary.toolNames,
+    "legacy.observedSummary.tools",
+  );
   return profile as unknown as LegacyContractProfile;
+}
+
+export function validateContractProfileDocument(
+  name: "mvp-v2",
+  value: unknown,
+): MvpContractProfile;
+export function validateContractProfileDocument(
+  name: "legacy-1.9.4",
+  value: unknown,
+): LegacyContractProfile;
+export function validateContractProfileDocument(
+  name: ContractProfileName,
+  value: unknown,
+): ContractProfile;
+export function validateContractProfileDocument(
+  name: ContractProfileName,
+  value: unknown,
+): ContractProfile {
+  return name === "mvp-v2" ? validateMvpProfile(value) : validateLegacyProfile(value);
 }
 
 function deepFreeze<T>(value: T): T {
@@ -115,7 +195,7 @@ export function loadContractProfile(name: string): ContractProfile {
   if (cached) return cached;
 
   const parsed = readSpec(PROFILE_FILES[name]);
-  const validated = name === "mvp-v2" ? validateMvpProfile(parsed) : validateLegacyProfile(parsed);
+  const validated = validateContractProfileDocument(name, parsed);
   const frozen = deepFreeze(validated);
   profileCache.set(name, frozen);
   return frozen;

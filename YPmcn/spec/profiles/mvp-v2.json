@@ -81,18 +81,87 @@
           "type": "boolean",
           "const": true
         },
+        "url": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
         "fields": {
-          "type": "array"
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "key",
+              "name",
+              "type",
+              "required"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
         },
         "items": {
           "type": "array",
-          "minItems": 1
+          "minItems": 1,
+          "ordered": true,
+          "items": {
+            "type": "object",
+            "required": [
+              "key",
+              "name",
+              "type",
+              "required"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
         },
         "selected_count": {
           "type": "integer",
           "minimum": 1
+        },
+        "output_format": {
+          "type": "string"
         }
       },
+      "additionalProperties": false,
       "constraints": [
         "selected_count === items.length",
         "selected_count > 0"
