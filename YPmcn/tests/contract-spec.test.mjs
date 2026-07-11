@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
@@ -19,6 +20,10 @@ const JSON_VALUE_TYPES = [
   "object",
   "string",
 ];
+
+const CREATOR_SCHEMA_FIELDS = parseCreatorSchemaFields(
+  readFileSync(new URL(CREATOR_SCHEMA_CSV, import.meta.url), "utf8"),
+);
 
 const REQUIRED_TOOLS = [
   "validate_requirement",
@@ -948,6 +953,9 @@ const AUTHORITATIVE_TARGET_SUCCESS_EVIDENCE = {
 const TOOL_EXPECTATIONS = {
   validate_requirement: {
     propertyTypes: {
+      ...Object.fromEntries(
+        CREATOR_SCHEMA_FIELDS.map((field) => [field, JSON_VALUE_TYPES]),
+      ),
       platform: "string",
       submission_deadline_at: "string",
       submission_deadline_raw: "string",
@@ -968,19 +976,7 @@ const TOOL_EXPECTATIONS = {
       raw_messages: "array",
       note: "string",
     },
-    required: [
-      "platform",
-      "submission_deadline_at",
-      "submission_deadline_raw",
-      "raw_messages_json",
-      "budget_min_cents",
-      "budget_max_cents",
-      "budget_raw",
-      "rebate_min_rate",
-      "rebate_max_rate",
-      "rebate_raw",
-      "quantity_total",
-    ],
+    required: [],
     sideEffects: "business-write",
     writers: { always: ["customer_demands"], conditional: [] },
     retry: {
@@ -1344,17 +1340,24 @@ async function loadSpec(relativePath) {
   return JSON.parse(source);
 }
 
-async function loadCreatorSchemaFields() {
-  const source = await readFile(
-    new URL(CREATOR_SCHEMA_CSV, import.meta.url),
-    "utf8",
-  );
-  const [header, ...rows] = source.replace(/^\uFEFF/, "").trim().split(/\r?\n/);
+function parseCreatorSchemaFields(source) {
+  const [header, ...rows] = source
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .split(/\r?\n/);
   const fieldIndex = header.split(",").indexOf("字段");
   assert.notEqual(fieldIndex, -1, "authority CSV is missing the 字段 column");
   return rows
     .map((row) => row.split(",")[fieldIndex]?.trim())
     .filter(Boolean);
+}
+
+async function loadCreatorSchemaFields() {
+  const source = await readFile(
+    new URL(CREATOR_SCHEMA_CSV, import.meta.url),
+    "utf8",
+  );
+  return parseCreatorSchemaFields(source);
 }
 
 function canonicalizeJson(value) {

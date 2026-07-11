@@ -44,11 +44,22 @@ export interface ContractSchema {
   [key: string]: unknown;
 }
 
+export interface ToolInputMode {
+  matchAny: string[];
+}
+
+export interface ToolInputModes {
+  policy: "at-least-one";
+  allowMultiple: true;
+  modes: Record<string, ToolInputMode>;
+}
+
 export interface ToolContract {
   name: string;
   required: string[];
   requiredAlternatives?: string[][];
   alternativeMode?: "exactly-one";
+  inputModes?: ToolInputModes;
   properties: Record<string, ContractSchema>;
   forbidden: string[];
   [key: string]: unknown;

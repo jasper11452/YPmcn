@@ -690,20 +690,23 @@ describe("tool parameter validation", () => {
       [],
     );
 
-    assertHasIssue(
-      validateToolParams("record_client_feedback", {
-        run_id: "run_123",
-        feedback_items: [
-          {
-            creator_submission_id: "submission_001",
-            decision: "rejected",
-            comment: "价格偏高",
-          },
-        ],
-      }),
-      "SCHEMA_MISMATCH",
-      "$.feedback_items[0].creator_submission_id",
-    );
+    const issues = validateToolParams("record_client_feedback", {
+      run_id: "run_123",
+      feedback_items: [
+        {
+          creator_submission_id: "submission_001",
+          decision: "rejected",
+          comment: "价格偏高",
+        },
+      ],
+    });
+    for (const field of ["creator_submission_id", "decision", "comment"]) {
+      assertHasIssue(
+        issues,
+        "SCHEMA_MISMATCH",
+        `$.feedback_items[0].${field}`,
+      );
+    }
   });
 
   it("accepts the target search_creators requirement identifier", () => {

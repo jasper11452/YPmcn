@@ -227,6 +227,28 @@ function validateAlternatives(contract: ToolContract, params: Record<string, unk
   ];
 }
 
+function validateInputModes(
+  contract: ToolContract,
+  params: Record<string, unknown>,
+): ValidationIssue[] {
+  if (!contract.inputModes) return [];
+
+  const matchedModes = Object.entries(contract.inputModes.modes)
+    .filter(([, mode]) => mode.matchAny.some((key) => hasOwn(params, key)))
+    .map(([name]) => name);
+  if (matchedModes.length > 0) return [];
+
+  return [
+    issue(
+      "INVALID_INPUT",
+      "$",
+      `At least one declared input mode must match: ${Object.keys(
+        contract.inputModes.modes,
+      ).join(" or ")}.`,
+    ),
+  ];
+}
+
 function loadTargetProfile(): MvpContractProfile | undefined {
   try {
     const profile = loadContractProfile("mvp-v2");
@@ -298,6 +320,7 @@ export function validateToolParams(
   if (mismatches.length > 0) return mismatches;
 
   return [
+    ...validateInputModes(contract, params),
     ...validateAlternatives(contract, params),
     ...validateSchema(rootSchema, params, "$"),
   ];

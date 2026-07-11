@@ -171,25 +171,1514 @@
   "tools": {
     "validate_requirement": {
       "name": "validate_requirement",
-      "required": [
-        "platform",
-        "submission_deadline_at",
-        "submission_deadline_raw",
-        "raw_messages_json",
-        "budget_min_cents",
-        "budget_max_cents",
-        "budget_raw",
-        "rebate_min_rate",
-        "rebate_max_rate",
-        "rebate_raw",
-        "quantity_total"
-      ],
+      "required": [],
+      "inputModes": {
+        "policy": "at-least-one",
+        "allowMultiple": true,
+        "modes": {
+          "raw": {
+            "matchAny": [
+              "raw_messages",
+              "raw_messages_json"
+            ]
+          },
+          "structured": {
+            "matchAny": [
+              "kw_uid",
+              "date",
+              "platform",
+              "nickname",
+              "kw_profileimageurl",
+              "kw_gender",
+              "kw_province",
+              "kw_city",
+              "verified",
+              "isstarmap",
+              "content_type_label",
+              "organization",
+              "video_view_rate",
+              "index",
+              "followercount",
+              "has_tag_brand",
+              "has_social_30day",
+              "postcount",
+              "friendcount",
+              "realityfollowerrate",
+              "avglike",
+              "avgrepost",
+              "avgcomment",
+              "avgcollect",
+              "avginteract",
+              "kol_official_price_l1",
+              "kol_official_price_l2",
+              "kol_predict_price_l1",
+              "view_medium",
+              "bussiness_view_medium",
+              "kol_predict_price_l2",
+              "cpe_l1",
+              "cpe_l2",
+              "bussiness_video_view_rate",
+              "cpm_l1",
+              "cpm_l2",
+              "sumpost",
+              "daydifffollowercount",
+              "weekdifffollowercount",
+              "monthdifffollowercount",
+              "description",
+              "verifiedreason",
+              "kw_user_url",
+              "age",
+              "kw_ip_dependency",
+              "tag_brand",
+              "download_price_source_l1",
+              "download_price_source_l2",
+              "male_rate",
+              "female_rate",
+              "age1_rate",
+              "download_price_l1",
+              "age2_rate",
+              "download_price_l2",
+              "age3_rate",
+              "age4_rate",
+              "age5_rate",
+              "first_tier_city_rate",
+              "new_first_tier_city_rate",
+              "second_tier_city_rate",
+              "third_tier_below_city_rate",
+              "daily_fans_growth_rate",
+              "weekly_fans_growth_rate",
+              "monthly_fans_growth_rate",
+              "reality_followercount",
+              "verified_type",
+              "is_update_daily",
+              "city_level",
+              "index_json",
+              "sumpost_person",
+              "sumpost_bussiness",
+              "talent_type_label",
+              "has_shop_entry",
+              "userfavoritscount",
+              "userlikecount",
+              "avgview",
+              "kol_official_price_l3",
+              "kol_predict_price_l3",
+              "cpe_l3",
+              "cpm_l3",
+              "douyin_id",
+              "interaction_rate",
+              "download_price_source_l3",
+              "download_price_l3",
+              "age6_rate",
+              "kw_sec_uid",
+              "zjx_followercount",
+              "month_reach_user_count",
+              "month_deep_reach_user_count",
+              "hot_video_rate",
+              "xt_excepted_view_count",
+              "kol_official_price_other",
+              "cpe_xt",
+              "cpe_grow",
+              "cpm_xt",
+              "cpm_grow",
+              "xt_id",
+              "content_theme_label",
+              "industry_tag_label",
+              "bussiness_interaction_rate",
+              "xt_talent_type_label",
+              "grow_talent_type_label",
+              "kw_country",
+              "has_order_30day",
+              "has_organization",
+              "kol_persona_label",
+              "content_feature_label",
+              "userlikecollectcount",
+              "picture_note_interact_rate",
+              "video_note_interact_rate",
+              "xiaohongshu_id",
+              "is_active",
+              "photo_interact",
+              "video_interact",
+              "explosive_rate",
+              "view_rate3s",
+              "bussiness_view_rate3s",
+              "photo_view",
+              "video_view",
+              "daily_view",
+              "business_view",
+              "click_medium",
+              "bussiness_click_medium",
+              "active_fans_rate",
+              "view_fans_rate",
+              "interact_fans_rate",
+              "order_fans_rate",
+              "content_tag",
+              "business_industry",
+              "pgy_blogger_type_label",
+              "grow_blogger_type_label",
+              "id(32位uuid)",
+              "demand_id",
+              "demand_version",
+              "submission_deadline_at",
+              "submission_deadline_raw",
+              "budget_min_cents",
+              "budget_max_cents",
+              "budget_raw",
+              "rebate_min_rate",
+              "rebate_max_rate",
+              "rebate_raw",
+              "quantity_total",
+              "status",
+              "created_at",
+              "updated_at",
+              "note",
+              "project_name",
+              "brand",
+              "product",
+              "project_start_start",
+              "project_start_end",
+              "content_requirements",
+              "category_requirements",
+              "requirements_json"
+            ]
+          }
+        }
+      },
       "properties": {
+        "kw_uid": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "date": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
         "platform": {
           "type": "string",
           "enum": [
             "xhs",
             "dy"
+          ]
+        },
+        "nickname": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kw_profileimageurl": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kw_gender": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kw_province": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kw_city": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "verified": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "isstarmap": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "content_type_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "organization": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "video_view_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "index": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "followercount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "has_tag_brand": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "has_social_30day": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "postcount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "friendcount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "realityfollowerrate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "avglike": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "avgrepost": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "avgcomment": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "avgcollect": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "avginteract": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kol_official_price_l1": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kol_official_price_l2": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kol_predict_price_l1": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "view_medium": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "bussiness_view_medium": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kol_predict_price_l2": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpe_l1": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpe_l2": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "bussiness_video_view_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpm_l1": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpm_l2": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "sumpost": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "daydifffollowercount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "weekdifffollowercount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "monthdifffollowercount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "description": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "verifiedreason": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kw_user_url": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "age": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kw_ip_dependency": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "tag_brand": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "download_price_source_l1": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "download_price_source_l2": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "male_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "female_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "age1_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "download_price_l1": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "age2_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "download_price_l2": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "age3_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "age4_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "age5_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "first_tier_city_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "new_first_tier_city_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "second_tier_city_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "third_tier_below_city_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "daily_fans_growth_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "weekly_fans_growth_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "monthly_fans_growth_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "reality_followercount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "verified_type": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "is_update_daily": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "city_level": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "index_json": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "sumpost_person": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "sumpost_bussiness": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "talent_type_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "has_shop_entry": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "userfavoritscount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "userlikecount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "avgview": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kol_official_price_l3": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kol_predict_price_l3": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpe_l3": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpm_l3": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "douyin_id": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "interaction_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "download_price_source_l3": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "download_price_l3": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "age6_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kw_sec_uid": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "zjx_followercount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "month_reach_user_count": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "month_deep_reach_user_count": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "hot_video_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "xt_excepted_view_count": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kol_official_price_other": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpe_xt": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpe_grow": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpm_xt": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "cpm_grow": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "xt_id": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "content_theme_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "industry_tag_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "bussiness_interaction_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "xt_talent_type_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "grow_talent_type_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kw_country": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "has_order_30day": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "has_organization": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "kol_persona_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "content_feature_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "userlikecollectcount": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "picture_note_interact_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "video_note_interact_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "xiaohongshu_id": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "is_active": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "photo_interact": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "video_interact": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "explosive_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "view_rate3s": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "bussiness_view_rate3s": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "photo_view": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "video_view": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "daily_view": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "business_view": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "click_medium": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "bussiness_click_medium": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "active_fans_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "view_fans_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "interact_fans_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "order_fans_rate": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "content_tag": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "business_industry": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "pgy_blogger_type_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "grow_blogger_type_label": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "id(32位uuid)": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "demand_id": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "demand_version": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
           ]
         },
         "submission_deadline_at": {
@@ -234,6 +1723,39 @@
           "type": "integer",
           "minimum": 1
         },
+        "status": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "created_at": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "updated_at": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "note": {
+          "type": "string"
+        },
         "project_name": {
           "type": "string"
         },
@@ -242,6 +1764,26 @@
         },
         "product": {
           "type": "string"
+        },
+        "project_start_start": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
+        },
+        "project_start_end": {
+          "type": [
+            "array",
+            "boolean",
+            "null",
+            "number",
+            "object",
+            "string"
+          ]
         },
         "content_requirements": {
           "type": "string"
@@ -280,9 +1822,6 @@
             },
             "additionalProperties": false
           }
-        },
-        "note": {
-          "type": "string"
         }
       },
       "forbidden": [],
@@ -656,7 +2195,7 @@
             "required": [
               "platform",
               "platform_account_id",
-              "source_url"
+              "profile_url"
             ],
             "properties": {
               "platform": {
@@ -673,7 +2212,7 @@
               "nickname": {
                 "type": "string"
               },
-              "source_url": {
+              "profile_url": {
                 "type": "string",
                 "format": "uri"
               },
@@ -824,29 +2363,20 @@
           "items": {
             "type": "object",
             "required": [
-              "creator_submission_id",
-              "decision"
+              "submission_id",
+              "status"
             ],
             "properties": {
-              "creator_submission_id": {
+              "submission_id": {
                 "type": "string",
                 "minLength": 1
               },
-              "decision": {
+              "status": {
                 "type": "string",
-                "enum": [
-                  "selected",
-                  "rejected",
-                  "alternate",
-                  "replace",
-                  "requirement_change"
-                ]
+                "minLength": 1
               },
-              "comment": {
+              "reason": {
                 "type": "string"
-              },
-              "requirement_changes": {
-                "type": "object"
               }
             },
             "additionalProperties": false

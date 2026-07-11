@@ -79,6 +79,57 @@ function validateCommonTool(rawTool: unknown, name: string, label: string): Reco
   return tool;
 }
 
+function validateInputModes(
+  value: unknown,
+  properties: Record<string, unknown>,
+  label: string,
+): void {
+  const inputModes = requireRecord(value, label);
+  const expectedPolicyKeys = new Set(["policy", "allowMultiple", "modes"]);
+  for (const key of expectedPolicyKeys) {
+    if (!hasOwn(inputModes, key)) throw new Error(`${label}.${key} is missing`);
+  }
+  for (const key of Object.keys(inputModes)) {
+    if (!expectedPolicyKeys.has(key)) {
+      throw new Error(`${label}.${key} is not declared`);
+    }
+  }
+  if (inputModes.policy !== "at-least-one") {
+    throw new Error(`${label}.policy must be at-least-one`);
+  }
+  if (inputModes.allowMultiple !== true) {
+    throw new Error(`${label}.allowMultiple must be true`);
+  }
+
+  const modes = requireRecord(inputModes.modes, `${label}.modes`);
+  if (Object.keys(modes).length === 0) {
+    throw new Error(`${label}.modes must not be empty`);
+  }
+  for (const [name, rawMode] of Object.entries(modes)) {
+    if (name.length === 0) throw new Error(`${label}.modes has an empty name`);
+    const mode = requireRecord(rawMode, `${label}.modes.${name}`);
+    if (!hasOwn(mode, "matchAny")) {
+      throw new Error(`${label}.modes.${name}.matchAny is missing`);
+    }
+    for (const key of Object.keys(mode)) {
+      if (key !== "matchAny") {
+        throw new Error(`${label}.modes.${name}.${key} is not declared`);
+      }
+    }
+    if (!isStringArray(mode.matchAny) || mode.matchAny.length === 0) {
+      throw new Error(`${label}.modes.${name}.matchAny must be a nonempty string array`);
+    }
+    requireUnique(mode.matchAny, `${label}.modes.${name}.matchAny`);
+    for (const property of mode.matchAny) {
+      if (!hasOwn(properties, property)) {
+        throw new Error(
+          `${label}.modes.${name}.matchAny references undeclared property ${property}`,
+        );
+      }
+    }
+  }
+}
+
 function validateWritableToolMap(
   value: unknown,
   expectedNames: string[],
@@ -88,8 +139,12 @@ function validateWritableToolMap(
   validateToolMapKeys(tools, expectedNames, label);
   for (const [name, rawTool] of Object.entries(tools)) {
     const tool = validateCommonTool(rawTool, name, label);
+    const properties = requireRecord(tool.properties, `${label}.${name}.properties`);
     if (!isStringArray(tool.forbidden)) {
       throw new Error(`${label}.${name}.forbidden must be a string array`);
+    }
+    if (hasOwn(tool, "inputModes")) {
+      validateInputModes(tool.inputModes, properties, `${label}.${name}.inputModes`);
     }
   }
   return tools as unknown as Record<string, ToolContract>;
