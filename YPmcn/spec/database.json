@@ -44,7 +44,9 @@
       "always": [
         "mcn_inquiries"
       ],
-      "conditional": []
+      "conditional": [
+        "mcn_inquiry_field_snapshots"
+      ]
     },
     {
       "tool": "ingest_mcn_submissions",

@@ -495,7 +495,9 @@
         "always": [
           "mcn_inquiries"
         ],
-        "conditional": []
+        "conditional": [
+          "mcn_inquiry_field_snapshots"
+        ]
       },
       "retry": {
         "policy": "idempotent-business-key",

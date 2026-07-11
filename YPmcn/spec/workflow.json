@@ -70,9 +70,9 @@
         "required-demand-fields-present"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.id",
-        "result.data.status === ready"
+        "success === true",
+        "data.id",
+        "data.status"
       ],
       "nextPhase": "requirement_ready"
     },
@@ -87,9 +87,9 @@
         "params.requirement_id === state.requirement_id"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.id",
-        "result.data.candidate_pool_written"
+        "success === true",
+        "data.id",
+        "data.candidate_pool_written"
       ],
       "nextPhase": "candidate_pool_ready"
     },
@@ -104,9 +104,9 @@
         "params.candidate_pool_id === state.candidate_pool_id"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.id",
-        "result.data.inquiry_advice"
+        "success === true",
+        "data.id",
+        "data.inquiry_advice"
       ],
       "nextPhase": "mcn_planning"
     },
@@ -121,9 +121,11 @@
         "params.mcn_recommendation_id === state.mcn_recommendation_id"
       ],
       "evidence": [
-        "result.success === true",
-        "result.selected_count === result.items.length",
-        "result.selected_count > 0"
+        "success === true",
+        "fields",
+        "items",
+        "selected_count === items.length",
+        "selected_count > 0"
       ],
       "nextPhase": "field_selection_ready"
     },
@@ -140,9 +142,10 @@
         "params.preview_only === false"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.provider_project_id",
-        "result.data.distributions.length > 0"
+        "success === true",
+        "data.provider_project_id",
+        "data.distribution_reference",
+        "data.distributions.length > 0"
       ],
       "nextPhase": "distribution_sync_pending"
     },
@@ -158,10 +161,12 @@
         "params.requirement_id === state.requirement_id"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.snapshot_id",
-        "result.data.inquiry_batch_id",
-        "result.data.inquiry_ids.length > 0"
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
       ],
       "nextPhase": "waiting_return"
     },
@@ -189,13 +194,16 @@
       },
       "guards": [
         "state.manual_recovery_confirmed_at-is-current",
-        "ctx.recovery_trigger === manual"
+        "ctx.recovery_trigger === manual",
+        "result.data.lifecycle_status not in [recovered, closed]"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.snapshot_id",
-        "result.data.lifecycle_status",
-        "result.data.response_status"
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
       ],
       "nextPhase": "recovering"
     },
@@ -207,15 +215,61 @@
         "name": "sync_mcn_inquiry_status"
       },
       "guards": [
-        "ctx.trigger === cron"
+        "ctx.trigger === cron",
+        "result.data.lifecycle_status not in [recovered, closed]"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.snapshot_id",
-        "result.data.lifecycle_status",
-        "result.data.response_status"
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
       ],
       "nextPhase": "recovering"
+    },
+    {
+      "id": "manual-terminal-reconciliation",
+      "from": "waiting_return",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "state.manual_recovery_confirmed_at-is-current",
+        "ctx.recovery_trigger === manual",
+        "result.data.lifecycle_status in [recovered, closed]"
+      ],
+      "evidence": [
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
+      ],
+      "nextPhase": "recovered"
+    },
+    {
+      "id": "scheduled-terminal-reconciliation",
+      "from": "waiting_return",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "ctx.trigger === cron",
+        "result.data.lifecycle_status in [recovered, closed]"
+      ],
+      "evidence": [
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
+      ],
+      "nextPhase": "recovered"
     },
     {
       "id": "manual-submission-ingest",
@@ -230,9 +284,9 @@
         "current-session-successful-sync-evidence-present"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.ingest_id",
-        "result.data.ingested_count"
+        "success === true",
+        "data.ingest_id",
+        "data.ingested_count"
       ],
       "nextPhase": "recovery_sync_pending"
     },
@@ -249,9 +303,9 @@
         "current-session-successful-sync-evidence-present"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.ingest_id",
-        "result.data.ingested_count"
+        "success === true",
+        "data.ingest_id",
+        "data.ingested_count"
       ],
       "nextPhase": "recovery_sync_pending"
     },
@@ -263,12 +317,16 @@
         "name": "sync_mcn_inquiry_status"
       },
       "guards": [
-        "current-session-successful-ingest-evidence-present"
+        "current-session-successful-ingest-evidence-present",
+        "result.data.lifecycle_status === recovered"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.lifecycle_status === recovered",
-        "result.data.response_status"
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
       ],
       "nextPhase": "recovered"
     },
@@ -299,9 +357,9 @@
         "latest-authoritative-sync-lifecycle-status === recovered"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.run_id",
-        "result.data.ranked_count"
+        "success === true",
+        "data.run_id",
+        "data.ranked_count"
       ],
       "nextPhase": "recommendation_ready"
     },
@@ -316,10 +374,10 @@
         "params.run_id === state.run_id"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.batch_id",
-        "result.data.batch_no",
-        "result.data.submitted_count"
+        "success === true",
+        "data.batch_id",
+        "data.batch_no",
+        "data.submitted_count"
       ],
       "nextPhase": "submission_batch_ready"
     },
@@ -334,9 +392,9 @@
         "params.run_id === state.run_id"
       ],
       "evidence": [
-        "result.success === true",
-        "result.data.updated_count",
-        "result.data.next_action"
+        "success === true",
+        "data.updated_count",
+        "data.next_action"
       ],
       "nextPhase": "feedback_routing"
     }

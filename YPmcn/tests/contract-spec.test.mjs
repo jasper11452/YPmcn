@@ -93,9 +93,9 @@ const WORKFLOW_TRANSITIONS = [
     trigger: { type: "tool", name: "validate_requirement" },
     guards: ["required-demand-fields-present"],
     evidence: [
-      "result.success === true",
-      "result.data.id",
-      "result.data.status === ready",
+      "success === true",
+      "data.id",
+      "data.status",
     ],
     nextPhase: "requirement_ready",
   },
@@ -105,9 +105,9 @@ const WORKFLOW_TRANSITIONS = [
     trigger: { type: "tool", name: "search_creators" },
     guards: ["params.requirement_id === state.requirement_id"],
     evidence: [
-      "result.success === true",
-      "result.data.id",
-      "result.data.candidate_pool_written",
+      "success === true",
+      "data.id",
+      "data.candidate_pool_written",
     ],
     nextPhase: "candidate_pool_ready",
   },
@@ -117,9 +117,9 @@ const WORKFLOW_TRANSITIONS = [
     trigger: { type: "tool", name: "rank_mcns" },
     guards: ["params.candidate_pool_id === state.candidate_pool_id"],
     evidence: [
-      "result.success === true",
-      "result.data.id",
-      "result.data.inquiry_advice",
+      "success === true",
+      "data.id",
+      "data.inquiry_advice",
     ],
     nextPhase: "mcn_planning",
   },
@@ -131,9 +131,11 @@ const WORKFLOW_TRANSITIONS = [
       "params.mcn_recommendation_id === state.mcn_recommendation_id",
     ],
     evidence: [
-      "result.success === true",
-      "result.selected_count === result.items.length",
-      "result.selected_count > 0",
+      "success === true",
+      "fields",
+      "items",
+      "selected_count === items.length",
+      "selected_count > 0",
     ],
     nextPhase: "field_selection_ready",
   },
@@ -147,9 +149,10 @@ const WORKFLOW_TRANSITIONS = [
       "params.preview_only === false",
     ],
     evidence: [
-      "result.success === true",
-      "result.data.provider_project_id",
-      "result.data.distributions.length > 0",
+      "success === true",
+      "data.provider_project_id",
+      "data.distribution_reference",
+      "data.distributions.length > 0",
     ],
     nextPhase: "distribution_sync_pending",
   },
@@ -162,10 +165,12 @@ const WORKFLOW_TRANSITIONS = [
       "params.requirement_id === state.requirement_id",
     ],
     evidence: [
-      "result.success === true",
-      "result.data.snapshot_id",
-      "result.data.inquiry_batch_id",
-      "result.data.inquiry_ids.length > 0",
+      "success === true",
+      "data.inquiry_batch_id",
+      "data.inquiry_ids",
+      "data.snapshot_id",
+      "data.lifecycle_status",
+      "data.response_status",
     ],
     nextPhase: "waiting_return",
   },
@@ -184,12 +189,15 @@ const WORKFLOW_TRANSITIONS = [
     guards: [
       "state.manual_recovery_confirmed_at-is-current",
       "ctx.recovery_trigger === manual",
+      "result.data.lifecycle_status not in [recovered, closed]",
     ],
     evidence: [
-      "result.success === true",
-      "result.data.snapshot_id",
-      "result.data.lifecycle_status",
-      "result.data.response_status",
+      "success === true",
+      "data.inquiry_batch_id",
+      "data.inquiry_ids",
+      "data.snapshot_id",
+      "data.lifecycle_status",
+      "data.response_status",
     ],
     nextPhase: "recovering",
   },
@@ -197,14 +205,56 @@ const WORKFLOW_TRANSITIONS = [
     id: "scheduled-recovery-sync",
     from: "waiting_return",
     trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
-    guards: ["ctx.trigger === cron"],
+    guards: [
+      "ctx.trigger === cron",
+      "result.data.lifecycle_status not in [recovered, closed]",
+    ],
     evidence: [
-      "result.success === true",
-      "result.data.snapshot_id",
-      "result.data.lifecycle_status",
-      "result.data.response_status",
+      "success === true",
+      "data.inquiry_batch_id",
+      "data.inquiry_ids",
+      "data.snapshot_id",
+      "data.lifecycle_status",
+      "data.response_status",
     ],
     nextPhase: "recovering",
+  },
+  {
+    id: "manual-terminal-reconciliation",
+    from: "waiting_return",
+    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
+    guards: [
+      "state.manual_recovery_confirmed_at-is-current",
+      "ctx.recovery_trigger === manual",
+      "result.data.lifecycle_status in [recovered, closed]",
+    ],
+    evidence: [
+      "success === true",
+      "data.inquiry_batch_id",
+      "data.inquiry_ids",
+      "data.snapshot_id",
+      "data.lifecycle_status",
+      "data.response_status",
+    ],
+    nextPhase: "recovered",
+  },
+  {
+    id: "scheduled-terminal-reconciliation",
+    from: "waiting_return",
+    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
+    guards: [
+      "ctx.trigger === cron",
+      "result.data.lifecycle_status in [recovered, closed]",
+    ],
+    evidence: [
+      "success === true",
+      "data.inquiry_batch_id",
+      "data.inquiry_ids",
+      "data.snapshot_id",
+      "data.lifecycle_status",
+      "data.response_status",
+    ],
+    nextPhase: "recovered",
   },
   {
     id: "manual-submission-ingest",
@@ -216,9 +266,9 @@ const WORKFLOW_TRANSITIONS = [
       "current-session-successful-sync-evidence-present",
     ],
     evidence: [
-      "result.success === true",
-      "result.data.ingest_id",
-      "result.data.ingested_count",
+      "success === true",
+      "data.ingest_id",
+      "data.ingested_count",
     ],
     nextPhase: "recovery_sync_pending",
   },
@@ -232,9 +282,9 @@ const WORKFLOW_TRANSITIONS = [
       "current-session-successful-sync-evidence-present",
     ],
     evidence: [
-      "result.success === true",
-      "result.data.ingest_id",
-      "result.data.ingested_count",
+      "success === true",
+      "data.ingest_id",
+      "data.ingested_count",
     ],
     nextPhase: "recovery_sync_pending",
   },
@@ -242,11 +292,17 @@ const WORKFLOW_TRANSITIONS = [
     id: "recovery-final-sync",
     from: "recovery_sync_pending",
     trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
-    guards: ["current-session-successful-ingest-evidence-present"],
-    evidence: [
-      "result.success === true",
+    guards: [
+      "current-session-successful-ingest-evidence-present",
       "result.data.lifecycle_status === recovered",
-      "result.data.response_status",
+    ],
+    evidence: [
+      "success === true",
+      "data.inquiry_batch_id",
+      "data.inquiry_ids",
+      "data.snapshot_id",
+      "data.lifecycle_status",
+      "data.response_status",
     ],
     nextPhase: "recovered",
   },
@@ -267,9 +323,9 @@ const WORKFLOW_TRANSITIONS = [
     trigger: { type: "tool", name: "rank_creators" },
     guards: ["latest-authoritative-sync-lifecycle-status === recovered"],
     evidence: [
-      "result.success === true",
-      "result.data.run_id",
-      "result.data.ranked_count",
+      "success === true",
+      "data.run_id",
+      "data.ranked_count",
     ],
     nextPhase: "recommendation_ready",
   },
@@ -279,10 +335,10 @@ const WORKFLOW_TRANSITIONS = [
     trigger: { type: "tool", name: "create_submission_batch" },
     guards: ["params.run_id === state.run_id"],
     evidence: [
-      "result.success === true",
-      "result.data.batch_id",
-      "result.data.batch_no",
-      "result.data.submitted_count",
+      "success === true",
+      "data.batch_id",
+      "data.batch_no",
+      "data.submitted_count",
     ],
     nextPhase: "submission_batch_ready",
   },
@@ -292,9 +348,9 @@ const WORKFLOW_TRANSITIONS = [
     trigger: { type: "tool", name: "record_client_feedback" },
     guards: ["params.run_id === state.run_id"],
     evidence: [
-      "result.success === true",
-      "result.data.updated_count",
-      "result.data.next_action",
+      "success === true",
+      "data.updated_count",
+      "data.next_action",
     ],
     nextPhase: "feedback_routing",
   },
@@ -329,7 +385,7 @@ const DATABASE_WRITER_OWNERSHIP = [
   {
     tool: "sync_mcn_inquiry_status",
     always: ["mcn_inquiries"],
-    conditional: [],
+    conditional: ["mcn_inquiry_field_snapshots"],
   },
   {
     tool: "ingest_mcn_submissions",
@@ -960,7 +1016,10 @@ const TOOL_EXPECTATIONS = {
     },
     required: ["mcn_recommendation_id", "requirement_id"],
     sideEffects: "business-write",
-    writers: { always: ["mcn_inquiries"], conditional: [] },
+    writers: {
+      always: ["mcn_inquiries"],
+      conditional: ["mcn_inquiry_field_snapshots"],
+    },
     retry: {
       policy: "idempotent-business-key",
       blindRetry: false,
@@ -1262,6 +1321,84 @@ function assertWorkflowContract(workflow) {
     },
     "workflow contract drifted",
   );
+}
+
+function transitionAllowsLifecycleStatus(transition, lifecycleStatus) {
+  const guards = new Set(transition.guards);
+  const terminalGuard =
+    "result.data.lifecycle_status in [recovered, closed]";
+  const nonterminalGuard =
+    "result.data.lifecycle_status not in [recovered, closed]";
+  const isTerminal = ["recovered", "closed"].includes(lifecycleStatus);
+
+  if (guards.has(terminalGuard)) return isTerminal;
+  if (guards.has(nonterminalGuard)) return !isTerminal;
+  return true;
+}
+
+function reachableWorkflowTransitions(workflow, startPhase, lifecycleStatus) {
+  const pendingPhases = [startPhase];
+  const visitedPhases = new Set();
+  const traversed = [];
+
+  while (pendingPhases.length > 0) {
+    const phase = pendingPhases.shift();
+    if (visitedPhases.has(phase)) continue;
+    visitedPhases.add(phase);
+
+    for (const transition of workflow.transitions.filter(
+      ({ from }) => from === phase,
+    )) {
+      if (!transitionAllowsLifecycleStatus(transition, lifecycleStatus)) {
+        continue;
+      }
+      traversed.push(transition);
+      if (!visitedPhases.has(transition.nextPhase)) {
+        pendingPhases.push(transition.nextPhase);
+      }
+    }
+  }
+
+  return traversed;
+}
+
+function assertTerminalRecoveryIsolation(workflow) {
+  for (const lifecycleStatus of ["recovered", "closed"]) {
+    const traversed = reachableWorkflowTransitions(
+      workflow,
+      "waiting_return",
+      lifecycleStatus,
+    );
+    const reconciliationIds = traversed
+      .filter(
+        ({ from, trigger, nextPhase }) =>
+          from === "waiting_return" &&
+          trigger.name === "sync_mcn_inquiry_status" &&
+          nextPhase === "recovered",
+      )
+      .map(({ id }) => id);
+
+    assert.deepEqual(
+      reconciliationIds,
+      [
+        "manual-terminal-reconciliation",
+        "scheduled-terminal-reconciliation",
+      ],
+      `${lifecycleStatus} lacks a disjoint terminal reconciliation path`,
+    );
+    assert.equal(
+      traversed.some(({ nextPhase }) => nextPhase === "recovering"),
+      false,
+      `${lifecycleStatus} can transition to recovering`,
+    );
+    assert.equal(
+      traversed.some(
+        ({ trigger }) => trigger.name === "ingest_mcn_submissions",
+      ),
+      false,
+      `${lifecycleStatus} can reach submission ingest`,
+    );
+  }
 }
 
 function assertDatabaseContract(database) {
@@ -1780,6 +1917,31 @@ describe("workflow contract", () => {
     assertWorkflowContract(workflow);
   });
 
+  it("uses every tool profile's complete success evidence exactly", async () => {
+    const [workflow, profile] = await Promise.all([
+      loadSpec(WORKFLOW_SPEC),
+      loadSpec(V2_PROFILE),
+    ]);
+
+    for (const transition of workflow.transitions.filter(
+      ({ trigger }) => trigger.type === "tool",
+    )) {
+      const tool = profile.tools[transition.trigger.name];
+      assert.ok(tool, `${transition.id} references an unknown tool`);
+      assert.deepEqual(
+        transition.evidence,
+        tool.successEvidence,
+        `${transition.id} evidence drifted from ${tool.name}`,
+      );
+    }
+  });
+
+  it("reconciles terminal pre-sync state without reaching recovery ingest", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+
+    assertTerminalRecoveryIsolation(workflow);
+  });
+
   it("detects a mutation to a workflow transition", async () => {
     const workflow = await loadSpec(WORKFLOW_SPEC);
     const mutated = structuredClone(workflow);
@@ -1790,6 +1952,34 @@ describe("workflow contract", () => {
     assert.throws(
       () => assertWorkflowContract(mutated),
       /workflow contract drifted/,
+    );
+  });
+
+  it("detects mutations to terminal recovery guards and paths", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+    assertTerminalRecoveryIsolation(workflow);
+
+    const guardMutation = structuredClone(workflow);
+    const manualRecovery = guardMutation.transitions.find(
+      ({ id }) => id === "manual-recovery-sync",
+    );
+    manualRecovery.guards = manualRecovery.guards.filter(
+      (guard) =>
+        guard !==
+        "result.data.lifecycle_status not in [recovered, closed]",
+    );
+    assert.throws(
+      () => assertTerminalRecoveryIsolation(guardMutation),
+      /can transition to recovering/,
+    );
+
+    const pathMutation = structuredClone(workflow);
+    pathMutation.transitions.find(
+      ({ id }) => id === "manual-terminal-reconciliation",
+    ).nextPhase = "recovering";
+    assert.throws(
+      () => assertTerminalRecoveryIsolation(pathMutation),
+      /lacks a disjoint terminal reconciliation path/,
     );
   });
 });
@@ -1805,6 +1995,31 @@ describe("database boundary contract", () => {
       )
       .map(({ tool }) => tool);
     assert.deepEqual(inquiryWriters, ["sync_mcn_inquiry_status"]);
+    assert.deepEqual(
+      database.writerOwnership.find(
+        ({ tool }) => tool === "sync_mcn_inquiry_status",
+      ),
+      {
+        tool: "sync_mcn_inquiry_status",
+        always: ["mcn_inquiries"],
+        conditional: ["mcn_inquiry_field_snapshots"],
+      },
+    );
+  });
+
+  it("keeps sync writer ownership aligned with the writable profile", async () => {
+    const [database, profile] = await Promise.all([
+      loadSpec(DATABASE_SPEC),
+      loadSpec(V2_PROFILE),
+    ]);
+    const databaseOwnership = database.writerOwnership.find(
+      ({ tool }) => tool === "sync_mcn_inquiry_status",
+    );
+
+    assert.deepEqual(profile.tools.sync_mcn_inquiry_status.writers, {
+      always: databaseOwnership.always,
+      conditional: databaseOwnership.conditional,
+    });
   });
 
   it("declares every external invariant without claiming deployment proof", async () => {
@@ -1829,6 +2044,20 @@ describe("database boundary contract", () => {
       ({ id }) => id === "single-recovery-owner",
     ).status = "verified";
 
+    assert.throws(
+      () => assertDatabaseContract(mutated),
+      /database contract drifted/,
+    );
+  });
+
+  it("detects removal of the sync-owned field snapshot writer", async () => {
+    const database = await loadSpec(DATABASE_SPEC);
+    assertDatabaseContract(database);
+
+    const mutated = structuredClone(database);
+    mutated.writerOwnership.find(
+      ({ tool }) => tool === "sync_mcn_inquiry_status",
+    ).conditional = [];
     assert.throws(
       () => assertDatabaseContract(mutated),
       /database contract drifted/,
