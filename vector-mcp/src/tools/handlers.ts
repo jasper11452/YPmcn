@@ -514,9 +514,38 @@ const FAKE_ROWS = [
         display_name: "深圳厨房测评官",
     },
 ];
-// ── Singleton fake infrastructure ───────────────────────────────────────────
-let _fakeQdrant = null;
-let _seeded = false;
+// ── Shared initialization ───────────────────────────────────────────────────
+export function createSharedInitializer(loader) {
+    let value;
+    let pending = null;
+    let generation = 0;
+    return {
+        async get() {
+            if (value !== undefined)
+                return value;
+            if (pending)
+                return pending;
+            const currentGeneration = generation;
+            pending = Promise.resolve()
+                .then(loader)
+                .then((loaded) => {
+                if (generation === currentGeneration)
+                    value = loaded;
+                return loaded;
+            })
+                .finally(() => {
+                if (generation === currentGeneration)
+                    pending = null;
+            });
+            return pending;
+        },
+        reset() {
+            generation += 1;
+            value = undefined;
+            pending = null;
+        },
+    };
+}
 const FAKE_QDRANT_CONFIG = {
     url: "fake://localhost",
     collectionName: "creator_tags",
@@ -524,13 +553,9 @@ const FAKE_QDRANT_CONFIG = {
     distance: "Cosine",
 };
 
-async function getSeededQdrant() {
-    if (_fakeQdrant && _seeded)
-        return _fakeQdrant;
+async function loadSeededQdrant() {
     const qdrant = new FakeQdrantClient();
     if (qdrant.loadFromFile(FAKE_PERSIST_PATH)) {
-        _fakeQdrant = qdrant;
-        _seeded = true;
         return qdrant;
     }
     const embeddingProvider = createFakeEmbeddingProvider(FAKE_DIM);
@@ -539,13 +564,13 @@ async function getSeededQdrant() {
     await qdrant.ensureCollection(schema);
     qdrant.setPersistencePath(FAKE_PERSIST_PATH);
     await qdrant.upsert(points);
-    _fakeQdrant = qdrant;
-    _seeded = true;
     return qdrant;
 }
+const fakeQdrantInitializer = createSharedInitializer(loadSeededQdrant);
+async function getSeededQdrant() {
+    return fakeQdrantInitializer.get();
+}
 // ── Real-mode infrastructure ────────────────────────────────────────────────
-let _realQdrant = null;
-let _realSeeded = false;
 let _realEmbeddingProvider = null;
 let _realRerankProvider = null;
 const REAL_VECTOR_VERSION = "v1";
@@ -575,16 +600,11 @@ function forceResync(): boolean {
     return FORCE_RESYNC;
 }
 
-async function getRealSeededQdrant() {
-    if (_realQdrant && _realSeeded)
-        return _realQdrant;
-
+async function loadRealSeededQdrant() {
     const qdrant = new FakeQdrantClient();
 
     if (!forceResync() && qdrant.loadFromFile(REAL_PERSIST_PATH)) {
         process.stderr.write(`[vector-mcp] loaded ${qdrant.pointCount} points from ${REAL_PERSIST_PATH}\n`);
-        _realQdrant = qdrant;
-        _realSeeded = true;
         return qdrant;
     }
 
@@ -626,9 +646,16 @@ async function getRealSeededQdrant() {
     qdrant.setPersistencePath(REAL_PERSIST_PATH);
     await qdrant.upsert(points);
     process.stderr.write(`[vector-mcp] synced ${points.length} points, persisted to ${REAL_PERSIST_PATH}\n`);
-    _realQdrant = qdrant;
-    _realSeeded = true;
     return qdrant;
+}
+const realQdrantInitializer = createSharedInitializer(loadRealSeededQdrant);
+async function getRealSeededQdrant() {
+    return realQdrantInitializer.get();
+}
+
+export function resetVectorStateForTests() {
+    fakeQdrantInitializer.reset();
+    realQdrantInitializer.reset();
 }
 function deduplicateByAccountId(candidates) {
     const groups = new Map();
@@ -731,6 +758,27 @@ function buildQueryInput(args) {
     }
     return input;
 }
+
+export async function searchVectorCandidates(qdrant, options) {
+    const hasGeoMatch = options.geoTerm && Array.isArray(qdrant.points)
+        ? qdrant.points.some((point) => point.payload.raw_tags.some((tag) => tag.includes(options.geoTerm)))
+        : false;
+    const filter = hasGeoMatch ? { raw_tags_contains: options.geoTerm } : undefined;
+    const [dense, sparse] = await Promise.all([
+        qdrant.search({
+            vector: options.vector,
+            limit: options.limit,
+            filter,
+            score_threshold: -1,
+        }),
+        Promise.resolve(qdrant.bm25Search({
+            query: options.query,
+            limit: options.limit,
+            filter,
+        })),
+    ]);
+    return { dense, sparse };
+}
 // ── Main handler ────────────────────────────────────────────────────────────
 async function handleSearch(params, traceId) {
     const args = (params ?? {});
@@ -764,40 +812,14 @@ async function handleSearch(params, traceId) {
         ? getRealEmbeddingProvider()
         : createFakeEmbeddingProvider(FAKE_DIM);
     const [queryVec] = await embeddingProvider.embed([positiveQuery]);
-    // Geo pre-filter: restrict search pool to creators with geo in raw_tags
-    let geoPreFiltered = false;
-    let geoFilteredCount = 0;
-    if (geoTerm) {
-        const geoFiltered = qdrant.points.filter((p: Record<string, unknown>) =>
-            (p.payload as Record<string, unknown>).raw_tags.some((tag: string) => tag.includes(geoTerm))
-        );
-        geoFilteredCount = geoFiltered.length;
-        if (geoFiltered.length === 0) {
-        } else {
-            qdrant.points = geoFiltered;
-            geoPreFiltered = true;
-        }
-    }
     // Dense search — fetch all candidates
     const searchLimit = 1000;
-    const [denseResults, sparseResults] = await Promise.all([
-        qdrant.search({
-            vector: Array.from(queryVec),
-            limit: searchLimit,
-            score_threshold: -1,
-        }),
-        qdrant.bm25Search({ query: basePositiveQuery, limit: searchLimit }),
-    ]);
-    // Restore original points if geo pre-filter was applied
-    if (geoPreFiltered) {
-        if (isRealMode) {
-            _realQdrant = null;
-            _realSeeded = false;
-        } else {
-            _fakeQdrant = null;
-            _seeded = false;
-        }
-    }
+    const { dense: denseResults, sparse: sparseResults } = await searchVectorCandidates(qdrant, {
+        vector: Array.from(queryVec),
+        query: basePositiveQuery,
+        geoTerm,
+        limit: searchLimit,
+    });
     // RRF fusion
     const denseScored = denseResults.map((r: { id: string; score: number; payload: Record<string, unknown> }) => ({
         id: r.id,
@@ -978,17 +1000,31 @@ export async function handleToolCall(name, params) {
                     trace_id: traceId,
                 };
             }
-            return {
-                success: true,
-                data: {
-                    mode: "fake",
-                    qdrant: "in_memory",
-                    mysql: "not_used",
-                    embedding: "fake",
-                    reranker: "fake",
-                },
-                trace_id: traceId,
-            };
+            try {
+                const qdrant = await getSeededQdrant();
+                return {
+                    success: true,
+                    data: {
+                        mode: "fake",
+                        qdrant: "in_memory",
+                        point_count: qdrant.pointCount,
+                        mysql: "not_used",
+                        embedding: "fake",
+                        reranker: "fake",
+                    },
+                    trace_id: traceId,
+                };
+            }
+            catch (error) {
+                return {
+                    success: false,
+                    error: {
+                        code: error?.code ?? "VECTOR_STORE_UNAVAILABLE",
+                        message: error instanceof Error ? error.message : String(error),
+                    },
+                    trace_id: traceId,
+                };
+            }
         }
         default:
             return {

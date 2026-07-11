@@ -15,8 +15,13 @@ function sendError(id: string | number | null, code: number, message: string): v
   sendResponse({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
-async function handleRequest(request: { id: string | number | null; method: string; params?: unknown }): Promise<void> {
+async function handleRequest(request: { id?: string | number | null; method: string; params?: unknown }): Promise<void> {
   const { id, method, params } = request;
+  if (method === "notifications/initialized") return;
+  if (id === undefined) {
+    sendError(null, -32600, "Request id is required");
+    return;
+  }
   switch (method) {
     case "initialize":
       sendResult(id, {
@@ -48,8 +53,8 @@ function startServer(): void {
     if (trimmed.length === 0) return;
     let request: { method?: string; id?: string | number; params?: unknown } | undefined;
     try { request = JSON.parse(trimmed); } catch { sendError(null, -32700, "Parse error"); return; }
-    if (!request?.method || request.id === undefined) { sendError(null, -32600, "Invalid request"); return; }
-    handleRequest(request as { id: string | number; method: string; params?: unknown }).catch((err) => {
+    if (!request?.method) { sendError(null, -32600, "Invalid request"); return; }
+    handleRequest(request as { id?: string | number; method: string; params?: unknown }).catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
       sendError(request!.id!, -32603, `Internal error: ${message}`);
     });

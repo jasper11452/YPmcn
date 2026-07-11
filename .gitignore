@@ -8,6 +8,7 @@ YPmcn/dist/
 __pycache__/
 *.pyc
 vector-mcp/.qdrant-*.json
+vector-mcp/dist/
 YPmcn/vector-mcp/
 
 .playwright-cli/
