@@ -2,20 +2,22 @@
 
 ## 何时调用
 
-需要核对单个达人账号、报价、MCN 归属、近期数据或向量文本时调用。
+需要核对单个达人事实、报价、账号或风险证据时只读调用。
 
 ## 输入
 
-必填 `platform`、`platform_account_id`。可选 include 字段按运行时 schema 传入。
+必须且只能选择一种完整标识：`creator_id`，或 `platform` + `platform_account_id`。
 
 ## 输出成功证据
 
-达人详情对象，按请求包含 offers、MCN、近期数据或向量文本。
+- success === true
+- data.creator_id
+- data.creator_detail
 
 ## 调用后必须停在哪里
 
-只读查询不推进主流程。展示核对结论后等待用户下一步，或回到当前阶段 gate。
+查询不推进主链；把已确认事实用于展示或人工决策。
 
-## 禁止
+## 错误与停止条件
 
-不得用查询结果直接改推荐、提报或需求状态。不得跨平台混查账号。
+禁止 `demand_id`、`demand_version`。不得混用两种标识，不得从昵称猜账号 ID。

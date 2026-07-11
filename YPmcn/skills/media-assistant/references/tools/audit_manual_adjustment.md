@@ -2,20 +2,23 @@
 
 ## 何时调用
 
-媒介对推荐结果进行删除、替换、强加或重排，并需要留痕时调用。
+媒介明确移除、替换、强制加入或重排达人，需要留下可审计前后排名时调用。
 
 ## 输入
 
-必填 `run_id`、`adjustments`、`operator_id`。每条调整必须有动作、对象、原因和调整前后排序证据。
+必填 `run_id`、`adjustments`、`operator_id`。每项 action、目标、原因和 before/after rank 按 schema 传。
 
 ## 输出成功证据
 
-审计记录、调整项、排序快照和写入数量。
+- success === true
+- data.audit_id
+- data.items
+- data.written_count
 
 ## 调用后必须停在哪里
 
-展示调整是否写入和调整后的可见结果；如调整影响提报名单，回到提报确认。
+展示已记录数量；如调整改变推荐结果，重新查询 run 详情再决定提报。
 
-## 禁止
+## 错误与停止条件
 
-不得直接篡改推荐结果。不得覆盖 `original_rank` 或原始推荐理由。`force_add` 不得绕过硬筛或有效 offer 要求。
+禁止 `demand_id`、`demand_version`。缺操作者、原因或前后证据时不得写审计。

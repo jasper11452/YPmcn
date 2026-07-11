@@ -1,36 +1,34 @@
-# YPmcn OpenClaw Plugin
+# YPmcn contract-first automation
 
-面向 OpenClaw 的"媒介助手"插件。Agent 只负责阶段路由、MCP 调用、人工 gate 和短回复；需求解析、筛选、排序、写入、版本校验与数据库事实查询全部由独立接入的 MCP 实现。
+本仓库把 2026-07-09 的四份业务文档固化为可验证的 `mvp-v2` 契约、OpenClaw Hook、无网络 reference MCP 和只读 provider 预检。
 
-运行包包含：
+## 当前结论
 
-- [OpenClaw 插件 manifest](YPmcn/openclaw.plugin.json)
-- [入口路由 Skill](YPmcn/skills/media-assistant/SKILL.md)
-- [需求入口](YPmcn/skills/media-assistant/references/requirement-intake.md)
-- [需求结构化解析](YPmcn/skills/media-assistant/references/requirement-parsing.md)
-- [MCP 工具路由](YPmcn/skills/media-assistant/references/mcp-tool-routing.md)
-- [工作流状态机](YPmcn/skills/media-assistant/references/workflow-state-machine.md)
-- [前端回复](YPmcn/skills/media-assistant/references/frontend-response.md)
-- [Hook 行为](YPmcn/skills/media-assistant/references/hook-behavior.md)
-- [验证手册](YPmcn/skills/media-assistant/references/validation-playbook.md)
+- 仓库目标：`mvp-v2`，语义 ID、字段选择、发送门禁、`sync → ingest → sync` 恢复链均已固化。
+- 当前生产 provider：检测为 `legacy-1.9.4`，不是 v2。
+- 明确缺口：`select_inquiry_form_fields`、`create_with_distributions`、`sync_mcn_inquiry_status`。
+- 处理原则：返回 `integration_required`，不自动切换旧参数、不把模拟结果当作生产证据。
 
-插件无绝对路径、无内置 MCP Server。运行时 hooks 已在 `YPmcn/src/index.ts` 中实现并通过 OpenClaw Plugin SDK 注册；`SKILL.md` 保留相同约束作为 Agent 自检和语义说明。
+## 目录
 
-`doc/客户原始需求列表.csv` 与 `tests/` 只用于仓库级验收，不进入安装包。
+- `YPmcn/spec/`：工具、工作流、数据库边界、错误语义的机器权威。
+- `YPmcn/src/hooks/`：fail-closed 会话门禁与可丢失状态投影。
+- `YPmcn/skills/media-assistant/`：Agent 路由和人工操作文档。
+- `reference-mcp/`：完全离线、结果带 `simulated=true` 的 v2 演练服务。
+- `vector-mcp/`：创作者向量检索服务。
+- `scripts/check-provider-contract.mjs`：只执行 MCP 初始化与 `tools/list` 的生产兼容性检查。
 
-接入要求、12 个 Agent 工具和保密边界见 [插件说明](YPmcn/README.md)。
+## 验证
 
-## 格式迁移
+```bash
+cd YPmcn && npm test
+node --test tests/reference_mcp.test.mjs tests/provider_contract.test.mjs
+PYTHONDONTWRITEBYTECODE=1 uv run --no-project python -B -m unittest -v tests/test_skill_package.py
+node scripts/check-provider-contract.mjs --url https://mcp.eshypdata.com/sse
+```
 
-WorkBuddy → OpenClaw：
+生产预检当前应以非零退出，并报告上述三个缺失工具。该失败是上线门禁，不是仓库离线测试失败。统一入口将在 `npm run verify` 与独立的 `npm run verify:provider` 中维护。
 
-| 原 WorkBuddy | OpenClaw |
-|---|---|
-| `.workbuddy-plugin/plugin.json` | `openclaw.plugin.json` |
-| `.workbuddy-plugin/hooks.json` (声明式 hooks) | `src/index.ts` 运行时 hooks：`before_tool_call`、`after_tool_call`、`tool_result_persist` |
-| `skills/` + `references/` | 保留，用于 Agent 指令和业务语义说明 |
+## 安全边界
 
-## 关联来源文档
-
-仓库级验收依赖 `doc/客户原始需求列表.csv`、`tests/goldens/requirement_cases.json` 与 `tests/goldens/requirement_regressions.json`。数据库表、MCP 接口、MCP 验收标准与业务算法规则由项目私有文档维护，不写入插件运行包。
-项目相关文档地址：/Users/jasper/Documents/YPmcn-skill/doc
+插件不内置 provider 凭据，不自动启动根目录开发服务，不记录客户 Brief 或 payload。reference MCP 不访问网络、不写生产数据库、不发送企微。

@@ -1,55 +1,47 @@
-# 流程与恢复
+# mvp-v2 状态与恢复
 
-最小会话索引（只记已确认的，数据库事实优先于本地状态）：
-```json
-{"phase": "requirement_draft|requirement_ready|candidate_pool_ready|mcn_planning|waiting_mcn_return|candidate_pool_enriched|recommendation_ready|submission_batch_ready|feedback_routing", "requirement_id": null, "candidate_pool_id": null, "mcn_recommendation_id": null, "run_id": null, "inquiry_ids": [], "last_tool": null, "last_trace_id": null, "last_error": null, "project_distribution_completed": false, "wait_gate": null}
-```
+Hook 状态只是 TTL 会话投影，数据库/provider 状态才是业务事实。
 
-`workflow_state` / `allowed_actions` 是 MCP 可选增强；当前没有 `get_workflow_state` 工具时，不伪造状态。
+## 精确阶段
 
-## 阶段
+| 阶段 | 进入证据 | 下一安全动作 |
+|---|---|---|
+| `requirement_draft` | 新会话或需求待补 | `validate_requirement` |
+| `requirement_ready` | validation 返回 ready 和需求 ID | `search_creators` |
+| `candidate_pool_ready` | 候选池写入成功 | `rank_mcns` |
+| `mcn_planning` | MCN 建议写入成功 | 人工确认并选择字段 |
+| `field_selection_ready` | 顶层字段选择结果合法 | `create_with_distributions` |
+| `distribution_sync_pending` | provider 分发成功 | 首次 `sync_mcn_inquiry_status` |
+| `waiting_return` | 首次成功 sync | 等明确 manual 或 cron |
+| `recovering` | 回收前 sync 成功且非终态 | `ingest_mcn_submissions` |
+| `recovery_sync_pending` | ingest 成功 | 最终 sync |
+| `recovered` | 最终 sync 返回 recovered | 可选补量后 `rank_creators` |
+| `recommendation_ready` | 精排返回 run_id | `create_submission_batch` |
+| `submission_batch_ready` | 提报批次写入成功 | 等客户反馈 |
+| `feedback_routing` | 客户反馈写入成功 | 按 next_action 路由 |
+| `blocked` | 契约、状态或确认不满足 | 修复证据后重入，不假成功 |
 
-| 阶段 | 下一动作 |
-|---|---|
-| requirement_draft（validate_requirement 缺字段） | 停，问缺失项 |
-| requirement_ready（validate_requirement 完成且必填项齐全） | `search_creators` |
-| candidate_pool_ready（search_creators 完成） | 用 `search_creators.data.id` 调 `rank_mcns` |
-| mcn_planning（rank_mcns 完成） | 展示供需关系、建议达人拓展比例、建议询价 MCN 列表，停等用户修改或确认 → 拟写企微消息，停等用户修改或确认 → 弹窗确认是否发送 → `create_with_distributions`（先 preview 再正式发） |
-| waiting_mcn_return（分发成功） | 停，等机构回填和达人拓展结果回收到候选池；需要达人拓展时同步启动 |
-| candidate_pool_enriched（回填/达人拓展回收到候选池） | 确认对候选池进行达人精排 → `rank_creators` |
-| recommendation_ready（`rank_creators` 返回 run_id） | 风险确认（有风险时）→ `create_submission_batch` |
-| submission_batch_ready（批次成功） | 媒介查看首批提报表 → 等客户反馈 |
-| feedback_routing（record_client_feedback 完成） | 补批/重排/需求变更 |
+## 发送到等待
 
-## 弹窗顺序（不可跳过合并）
+`create_with_distributions` 成功只能进入 `distribution_sync_pending`。只有首次成功 sync 返回 inquiry batch、inquiry IDs、snapshot、lifecycle 和 response status 后，才能进入 `waiting_return`。发送失败或 sync 失败均不进入等待。
 
-```
-mcn-wechat-send（拟好消息后弹窗确认是否发送）
-→ confirm-medium-risk（中风险时，在 rank_mcns 停等阶段确认）
-→ confirm-ranking-after-supply-ready（仅在回填/达人拓展回收到候选池后，确认对候选池精排）
-→ confirm-risky-submission（有风险账号时）
-```
+## manual 恢复
 
-弹窗写短，选项互斥且 ≤3 个。
+1. 当前会话收到明确回收意图，记录确认时间但阶段仍为 `waiting_return`。
+2. 带 `recoveryTrigger=manual` 执行 sync。
+3. 非终态成功结果进入 `recovering`。
+4. `trigger=manual` 执行 ingest。
+5. 进入 `recovery_sync_pending`，执行最终 sync。
+6. 只有最终 sync 的 lifecycle 为 `recovered` 才进入 `recovered`。
 
-## 风险确认
+## scheduled 恢复
 
-- 中风险（`pending_gate.gate = confirm_medium_risk`）：`rank_mcns` + `medium_risk_confirmed: true`
-- 风险提报（`pending_gate.gate = confirm_risky_submission`）：`create_submission_batch` + `allow_need_confirm_with_risk: true`
-- 只能用户确认后设 true，不得默认
+scheduled 路径必须有 `ctx.trigger=cron`，顺序同样是 sync、`trigger=scheduled` ingest、最终 sync。缺 cron 证据时返回 `RECOVERY_NOT_CONFIRMED`。
 
-## 恢复
+## 终态与重启
 
-1. 有 `run_id`：`get_recommendation_run_detail`
-2. 有平台账号：`get_creator_detail`
-3. 只有链式 `id`：按最近成功响应判断它属于 requirement/candidate_pool/mcn_plan；证据不足则停
-4. 写调用超时/断连：当前请求 schema 没有幂等键，不得自动重试，用 `trace_id` 让后端查
-
-风险 gate 只使用真实字段：`medium_risk_confirmed=true`、`allow_need_confirm_with_risk=true`。
-
-项目分发调用失败不进入等待锁；当前不创建 Cron。
-
-## 失败条件
-
-- 工具不存在 / schema 冲突 / ID 来源不明 / 业务证据不足 → 停
-- 不重复写、不模拟成功、不基于残缺结果推进
+- lifecycle 已是 `recovered` 或 `closed` 时，不再触发写副作用，使用 `RECOVERY_ALREADY_TERMINAL` 语义。
+- 字段选择后投影丢失：重新选择字段，不能伪造快照。
+- 发送后首次 sync 前投影丢失：可用 `requirement_id + mcn_recommendation_id` 做幂等 sync 对账。
+- ingest 前必须在当前会话先有成功 sync；rank 前最新权威 sync 必须为 recovered。
+- 普通消息不解除等待。

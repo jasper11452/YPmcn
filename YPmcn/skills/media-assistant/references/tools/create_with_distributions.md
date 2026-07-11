@@ -2,66 +2,23 @@
 
 ## 何时调用
 
-MCN 列表已确认、企微消息已确认、弹窗确认发送后调用。
+供需、目标 MCN、消息和字段均已确认，且 Hook 持有当前会话证据时调用。它是唯一 provider 项目/分发/企微写入口。
 
 ## 输入
 
-以运行时 schema 为准，必须包含 `id`（来自 `rank_mcns.data.id` 的 MCN 排序方案 ID）、未来的带时区 ISO 8601 `deadline` / `remindAt`、`supplierIds` / `supplier_ids`，以及后端要求的项目和供应商分发字段。企微发送接口字段固定，不得为了业务说明自造输入输出字段。
-
-推荐按运行时 schema 选择以下两种形态之一：
-
-```json
-{
-  "id": "mcn_plan_id",
-  "projectName": "618达人提报",
-  "description": "请在截止时间前完成达人信息填写。",
-  "deadline": "2026-07-07T18:00:00+08:00",
-  "usageScope": "project",
-  "platform": "小红书",
-  "supplierIds": ["supplier-id"],
-  "sendWechatNotification": true,
-  "prefillRowsBySupplier": {
-    "supplier-id": [
-      {"talentName": "达人A", "price": 200000}
-    ]
-  }
-}
-```
-
-或：
-
-```json
-{
-  "id": "mcn_plan_id",
-  "project": {
-    "projectName": "618达人提报",
-    "description": "请在截止时间前完成达人信息填写。",
-    "deadline": "2026-07-07T18:00:00+08:00",
-    "usageScope": "project",
-    "platform": "小红书"
-  },
-  "supplierIds": ["supplier-id"],
-  "sendWechatNotification": true,
-  "prefillRowsBySupplier": {
-    "supplier-id": [
-      {"talentName": "达人A", "price": 200000}
-    ]
-  }
-}
-```
-
-`id` 只能来自 `rank_mcns.data.id`，不得用需求表 ID 或候选池 ID 代替。`usageScope: "project"` 是首选固定写法，不要让模型选择业务枚举；接口文档里的 `项目` 会被 hook 兼容归一为 `project`，漏传时 hook 会补，其他显式值会阻断。`columns`、`templateId`、`notification_template`、`prefillRows`、`prefillRowsBySupplier` 等字段按运行时 schema 和用户确认结果传，不由 hook 强制。
-
-每个 MCN/供应商必须有唯一填报链接；链接或 token 由后端分发响应产生，Agent 不自己拼。`prefillRowsBySupplier` 只放候选池中属于当前 MCN/供应商的达人，作为机构填报表的推荐底稿。
+必填 `mcn_recommendation_id`、`projectName`、`description`、`deadline`、`remindAt`、`usageScope`、`supplierIds`、`columns`、`sendWechatNotification`、`preview_only`。固定 `usageScope=project`、`preview_only=false`；columns 必须等于字段选择 items。
 
 ## 输出成功证据
 
-项目创建、供应商分发、每个 MCN 的唯一填报链接/令牌和企微通知执行结果。成功后 Hook 进入等待锁，收到用户新消息前不得推进下一步。
+- success === true
+- data.provider_project_id
+- data.distribution_batch_ref
+- data.distributions.length > 0
 
 ## 调用后必须停在哪里
 
-发送成功后停在等待机构回填和达人拓展结果回收到候选池。发送失败时停在错误处理，不进入等待锁。
+只进入 `distribution_sync_pending`，立即用两个语义 ID 做首次 sync；不能直接宣布等待。
 
-## 禁止
+## 错误与停止条件
 
-不得通过 Bash、PowerShell、curl 或旧工具名绕过。不得让模型控制 `endpointUrl`、`execute` 或发送模式。非媒介/采购角色不得调用。除后端文档兼容的 `项目` 外，不得把 `usageScope` 写成 `campaign`、`supplier` 或其他值。不得把不属于当前 MCN/供应商的达人预填给该 MCN。
+禁止 `demand_id`、`demand_version`。缺 `sessionKey`、`toolCallId`、角色、三项确认、未来时间或字段证明时阻断。写结果未知只对账，不重复创建。
