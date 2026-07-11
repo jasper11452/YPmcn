@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "codes": [
+    "INTEGRATION_REQUIRED",
+    "SCHEMA_MISMATCH",
+    "INVALID_INPUT",
+    "INVALID_PHASE",
+    "CONFIRMATION_REQUIRED",
+    "FIELD_SELECTION_INVALID",
+    "PROVIDER_REFERENCE_MISSING",
+    "RECOVERY_NOT_CONFIRMED",
+    "RECOVERY_ALREADY_TERMINAL",
+    "STATE_CONFLICT",
+    "WRITE_RESULT_UNKNOWN"
+  ],
+  "errors": [
+    {
+      "code": "INTEGRATION_REQUIRED",
+      "retryable": false,
+      "category": "integration",
+      "message": "The required target integration is unavailable or incompatible.",
+      "recoveryAction": "Install or upgrade the target integration, then rerun read-only contract verification.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "blocked-until-corrected",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "SCHEMA_MISMATCH",
+      "retryable": false,
+      "category": "integration",
+      "message": "The runtime schema does not match the approved target contract.",
+      "recoveryAction": "Inspect the read-only schema diff and deploy a compatible provider contract.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "blocked-until-corrected",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "INVALID_INPUT",
+      "retryable": false,
+      "category": "validation",
+      "message": "The request input is invalid for the approved contract.",
+      "recoveryAction": "Correct the reported input fields and submit a new validated request.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "correct-input-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "INVALID_PHASE",
+      "retryable": false,
+      "category": "workflow",
+      "message": "The requested action is not allowed in the current workflow phase.",
+      "recoveryAction": "Refresh authoritative workflow state and continue only from an allowed transition.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "refresh-state-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "get-workflow-state-or-sync"
+      }
+    },
+    {
+      "code": "CONFIRMATION_REQUIRED",
+      "retryable": false,
+      "category": "confirmation",
+      "message": "Explicit user confirmation is required before this action.",
+      "recoveryAction": "Obtain the required current-session confirmation before making a new call.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "confirm-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "FIELD_SELECTION_INVALID",
+      "retryable": false,
+      "category": "validation",
+      "message": "The selected inquiry fields do not match the approved ordered columns.",
+      "recoveryAction": "Run field selection again and use its current ordered fields and items exactly.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "reselect-fields-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "PROVIDER_REFERENCE_MISSING",
+      "retryable": false,
+      "category": "provider",
+      "message": "A required provider distribution reference is missing or empty.",
+      "recoveryAction": "Query provider state by stable correlation key and repair the reference before continuing.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "reconcile-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "query-provider-by-stable-correlation-key"
+      }
+    },
+    {
+      "code": "RECOVERY_NOT_CONFIRMED",
+      "retryable": false,
+      "category": "recovery",
+      "message": "Manual recovery has not been explicitly confirmed in the current session.",
+      "recoveryAction": "Obtain explicit recovery confirmation, then restart the sync-ingest-sync sequence.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "confirm-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "RECOVERY_ALREADY_TERMINAL",
+      "retryable": false,
+      "category": "recovery",
+      "message": "Recovery is already terminal with lifecycle status recovered or closed.",
+      "recoveryAction": "Treat the request as a no-op and do not invoke any recovery write.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "terminal-no-op",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "STATE_CONFLICT",
+      "retryable": false,
+      "category": "concurrency",
+      "message": "Authoritative state changed while the requested transition was being applied.",
+      "recoveryAction": "Query or sync authoritative state; retry only if reconciliation shows the intended write is still valid.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "reconcile-then-conditional-retry",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": true,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "query-or-sync-authoritative-state"
+      }
+    },
+    {
+      "code": "WRITE_RESULT_UNKNOWN",
+      "retryable": false,
+      "category": "write-safety",
+      "message": "The outcome of the write is unknown and must not be retried directly.",
+      "recoveryAction": "Use the designated query or sync path to reconcile the write result before any new action.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "reconcile-only",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "query-or-sync-write-result"
+      }
+    }
+  ]
+}

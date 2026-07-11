@@ -5,6 +5,9 @@ import { describe, it } from "node:test";
 
 const V2_PROFILE = "profiles/mvp-v2.json";
 const LEGACY_PROFILE = "profiles/legacy-1.9.4.json";
+const WORKFLOW_SPEC = "workflow.json";
+const DATABASE_SPEC = "database.json";
+const ERRORS_SPEC = "errors.json";
 
 const REQUIRED_TOOLS = [
   "validate_requirement",
@@ -24,6 +27,669 @@ const REQUIRED_TOOLS = [
 ];
 
 const OPTIONAL_TOOLS = ["get_workflow_state"];
+
+const WORKFLOW_PHASES = [
+  "requirement_draft",
+  "requirement_ready",
+  "candidate_pool_ready",
+  "mcn_planning",
+  "field_selection_ready",
+  "distribution_sync_pending",
+  "waiting_return",
+  "recovering",
+  "recovery_sync_pending",
+  "recovered",
+  "recommendation_ready",
+  "submission_batch_ready",
+  "feedback_routing",
+  "blocked",
+];
+
+const LIFECYCLE_STATUSES = [
+  "sent",
+  "waiting_return",
+  "recover_requested",
+  "recovering",
+  "recover_failed",
+  "recovered",
+  "closed",
+];
+
+const RESPONSE_STATUSES = [
+  "pending",
+  "partial",
+  "completed",
+  "expired",
+  "failed",
+];
+
+const WORKFLOW_POLICIES = {
+  sendSuccessPhase: "distribution_sync_pending",
+  waitingReturnRequires: "first-successful-sync",
+  ordinaryMessageUnlocksWaiting: false,
+  manualRecoveryConfirmation: "explicit-current-session-confirmation",
+  scheduledRecoveryContext: "ctx.trigger=cron",
+  recoverySequence: [
+    "sync_mcn_inquiry_status",
+    "ingest_mcn_submissions",
+    "sync_mcn_inquiry_status",
+  ],
+  rankingAllowedAfterPhase: "recovered",
+  terminalRecovery: {
+    authoritativeLifecycleStatuses: ["recovered", "closed"],
+    behavior: "no-op",
+    sideEffectsAllowed: false,
+    evidence: [
+      "error.code === RECOVERY_ALREADY_TERMINAL",
+      "no-write-tool-invoked",
+    ],
+  },
+};
+
+const WORKFLOW_TRANSITIONS = [
+  {
+    id: "requirement-validated",
+    from: "requirement_draft",
+    trigger: { type: "tool", name: "validate_requirement" },
+    guards: ["required-demand-fields-present"],
+    evidence: [
+      "result.success === true",
+      "result.data.id",
+      "result.data.status === ready",
+    ],
+    nextPhase: "requirement_ready",
+  },
+  {
+    id: "candidate-pool-written",
+    from: "requirement_ready",
+    trigger: { type: "tool", name: "search_creators" },
+    guards: ["params.requirement_id === state.requirement_id"],
+    evidence: [
+      "result.success === true",
+      "result.data.id",
+      "result.data.candidate_pool_written",
+    ],
+    nextPhase: "candidate_pool_ready",
+  },
+  {
+    id: "mcn-plan-written",
+    from: "candidate_pool_ready",
+    trigger: { type: "tool", name: "rank_mcns" },
+    guards: ["params.candidate_pool_id === state.candidate_pool_id"],
+    evidence: [
+      "result.success === true",
+      "result.data.id",
+      "result.data.inquiry_advice",
+    ],
+    nextPhase: "mcn_planning",
+  },
+  {
+    id: "inquiry-fields-selected",
+    from: "mcn_planning",
+    trigger: { type: "tool", name: "select_inquiry_form_fields" },
+    guards: [
+      "params.mcn_recommendation_id === state.mcn_recommendation_id",
+    ],
+    evidence: [
+      "result.success === true",
+      "result.selected_count === result.items.length",
+      "result.selected_count > 0",
+    ],
+    nextPhase: "field_selection_ready",
+  },
+  {
+    id: "distribution-sent",
+    from: "field_selection_ready",
+    trigger: { type: "tool", name: "create_with_distributions" },
+    guards: [
+      "supply-mcn-message-confirmations-present",
+      "field-selection-matches-ordered-columns",
+      "params.preview_only === false",
+    ],
+    evidence: [
+      "result.success === true",
+      "result.data.provider_project_id",
+      "result.data.distributions.length > 0",
+    ],
+    nextPhase: "distribution_sync_pending",
+  },
+  {
+    id: "first-distribution-sync",
+    from: "distribution_sync_pending",
+    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
+    guards: [
+      "params.mcn_recommendation_id === state.mcn_recommendation_id",
+      "params.requirement_id === state.requirement_id",
+    ],
+    evidence: [
+      "result.success === true",
+      "result.data.snapshot_id",
+      "result.data.inquiry_batch_id",
+      "result.data.inquiry_ids.length > 0",
+    ],
+    nextPhase: "waiting_return",
+  },
+  {
+    id: "manual-recovery-confirmed",
+    from: "waiting_return",
+    trigger: { type: "event", name: "manual_recovery_confirmed" },
+    guards: ["explicit-recovery-intent-in-current-session"],
+    evidence: ["state.manual_recovery_confirmed_at"],
+    nextPhase: "waiting_return",
+  },
+  {
+    id: "manual-recovery-sync",
+    from: "waiting_return",
+    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
+    guards: [
+      "state.manual_recovery_confirmed_at-is-current",
+      "ctx.recovery_trigger === manual",
+    ],
+    evidence: [
+      "result.success === true",
+      "result.data.snapshot_id",
+      "result.data.lifecycle_status",
+      "result.data.response_status",
+    ],
+    nextPhase: "recovering",
+  },
+  {
+    id: "scheduled-recovery-sync",
+    from: "waiting_return",
+    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
+    guards: ["ctx.trigger === cron"],
+    evidence: [
+      "result.success === true",
+      "result.data.snapshot_id",
+      "result.data.lifecycle_status",
+      "result.data.response_status",
+    ],
+    nextPhase: "recovering",
+  },
+  {
+    id: "manual-submission-ingest",
+    from: "recovering",
+    trigger: { type: "tool", name: "ingest_mcn_submissions" },
+    guards: [
+      "params.trigger === manual",
+      "state.manual_recovery_confirmed_at-is-current",
+      "current-session-successful-sync-evidence-present",
+    ],
+    evidence: [
+      "result.success === true",
+      "result.data.ingest_id",
+      "result.data.ingested_count",
+    ],
+    nextPhase: "recovery_sync_pending",
+  },
+  {
+    id: "scheduled-submission-ingest",
+    from: "recovering",
+    trigger: { type: "tool", name: "ingest_mcn_submissions" },
+    guards: [
+      "params.trigger === scheduled",
+      "ctx.trigger === cron",
+      "current-session-successful-sync-evidence-present",
+    ],
+    evidence: [
+      "result.success === true",
+      "result.data.ingest_id",
+      "result.data.ingested_count",
+    ],
+    nextPhase: "recovery_sync_pending",
+  },
+  {
+    id: "recovery-final-sync",
+    from: "recovery_sync_pending",
+    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
+    guards: ["current-session-successful-ingest-evidence-present"],
+    evidence: [
+      "result.success === true",
+      "result.data.lifecycle_status === recovered",
+      "result.data.response_status",
+    ],
+    nextPhase: "recovered",
+  },
+  {
+    id: "terminal-recovery-no-op",
+    from: "recovered",
+    trigger: { type: "event", name: "recovery_requested" },
+    guards: ["authoritative-lifecycle-status in [recovered, closed]"],
+    evidence: [
+      "error.code === RECOVERY_ALREADY_TERMINAL",
+      "no-write-tool-invoked",
+    ],
+    nextPhase: "recovered",
+  },
+  {
+    id: "creators-ranked",
+    from: "recovered",
+    trigger: { type: "tool", name: "rank_creators" },
+    guards: ["latest-authoritative-sync-lifecycle-status === recovered"],
+    evidence: [
+      "result.success === true",
+      "result.data.run_id",
+      "result.data.ranked_count",
+    ],
+    nextPhase: "recommendation_ready",
+  },
+  {
+    id: "submission-batch-created",
+    from: "recommendation_ready",
+    trigger: { type: "tool", name: "create_submission_batch" },
+    guards: ["params.run_id === state.run_id"],
+    evidence: [
+      "result.success === true",
+      "result.data.batch_id",
+      "result.data.batch_no",
+      "result.data.submitted_count",
+    ],
+    nextPhase: "submission_batch_ready",
+  },
+  {
+    id: "client-feedback-recorded",
+    from: "submission_batch_ready",
+    trigger: { type: "tool", name: "record_client_feedback" },
+    guards: ["params.run_id === state.run_id"],
+    evidence: [
+      "result.success === true",
+      "result.data.updated_count",
+      "result.data.next_action",
+    ],
+    nextPhase: "feedback_routing",
+  },
+];
+
+const DATABASE_WRITER_OWNERSHIP = [
+  {
+    tool: "validate_requirement",
+    always: ["customer_demands"],
+    conditional: [],
+  },
+  {
+    tool: "search_creators",
+    always: ["creator_candidate_pool"],
+    conditional: [],
+  },
+  {
+    tool: "rank_mcns",
+    always: ["mcn_recommendation_items"],
+    conditional: [],
+  },
+  {
+    tool: "select_inquiry_form_fields",
+    always: [],
+    conditional: [],
+  },
+  {
+    tool: "create_with_distributions",
+    always: [],
+    conditional: [],
+  },
+  {
+    tool: "sync_mcn_inquiry_status",
+    always: ["mcn_inquiries"],
+    conditional: [],
+  },
+  {
+    tool: "ingest_mcn_submissions",
+    always: ["mcn_submission_items"],
+    conditional: ["creator_supply_offers"],
+  },
+  {
+    tool: "manual_source_creators",
+    always: ["manual_sourced_creators"],
+    conditional: ["creator_supply_offers"],
+  },
+  {
+    tool: "rank_creators",
+    always: ["recommendation_runs", "creator_recommendation_items"],
+    conditional: [],
+  },
+  {
+    tool: "create_submission_batch",
+    always: ["submission_batches", "creator_submissions"],
+    conditional: [],
+  },
+  {
+    tool: "record_client_feedback",
+    always: ["creator_submissions"],
+    conditional: ["customer_demands"],
+  },
+  {
+    tool: "get_recommendation_run_detail",
+    always: [],
+    conditional: [],
+  },
+  {
+    tool: "get_creator_detail",
+    always: [],
+    conditional: [],
+  },
+  {
+    tool: "audit_manual_adjustment",
+    always: ["manual_adjustment_audits"],
+    conditional: [],
+  },
+  {
+    tool: "get_workflow_state",
+    always: [],
+    conditional: [],
+  },
+];
+
+const DATABASE_INVARIANTS = [
+  {
+    id: "unique-supplier-mapping",
+    requirement:
+      "mcn_agencies.supplier_id is nonempty and unique, providing one supplier_id for each targeted mcn_id",
+    owner: "production-database",
+    evidence: [
+      "unique constraint on mcn_agencies.supplier_id",
+      "readiness query returns exactly one supplier_id for every targeted mcn_id",
+    ],
+    status: "external-unverified",
+  },
+  {
+    id: "single-send-context",
+    requirement:
+      "one send context exists per (mcn_recommendation_id, requirement_id); resend requires a new mcn_recommendation_id",
+    owner: "distribution-provider-backend",
+    evidence: [
+      "unique or transactional idempotency proof for (mcn_recommendation_id, requirement_id)",
+      "resend scenario creates a new mcn_recommendation_id",
+    ],
+    status: "external-unverified",
+  },
+  {
+    id: "stable-provider-correlation",
+    requirement:
+      "provider send uses a stable business correlation key and an unknown outcome is queried with that key before any retry",
+    owner: "distribution-provider-backend",
+    evidence: [
+      "provider contract documents the stable correlation key",
+      "timeout scenario queries provider state and does not issue a second send",
+    ],
+    status: "external-unverified",
+  },
+  {
+    id: "atomic-first-sync",
+    requirement:
+      "first sync transactionally creates or reuses one snapshot, one inquiry batch, one inquiry per supplier, and one cron",
+    owner: "sync-mcn-inquiry-status-backend",
+    evidence: [
+      "transaction and uniqueness constraints cover snapshot, inquiry batch, supplier inquiry, and cron writes",
+      "concurrent first-sync test returns the same snapshot, inquiry batch, inquiries, and cron",
+    ],
+    status: "external-unverified",
+  },
+  {
+    id: "unique-provider-references",
+    requirement:
+      "provider_distribution_id is unique and every token and fill_link is nonempty and unique",
+    owner: "production-database-and-provider",
+    evidence: [
+      "unique constraints cover provider_distribution_id, token, and fill_link",
+      "provider integration test rejects empty or duplicate references",
+    ],
+    status: "external-unverified",
+  },
+  {
+    id: "idempotent-submission-ingest",
+    requirement:
+      "submission ingest is idempotent on (provider_distribution_id, provider_row_id)",
+    owner: "ingest-mcn-submissions-backend",
+    evidence: [
+      "unique constraint on (provider_distribution_id, provider_row_id)",
+      "duplicate-row integration test preserves one logical submission item",
+    ],
+    status: "external-unverified",
+  },
+  {
+    id: "single-recovery-owner",
+    requirement:
+      "recovery uses compare-and-swap or a row lock so concurrent manual and scheduled recovery permit one ingest owner",
+    owner: "production-database-recovery-coordinator",
+    evidence: [
+      "CAS predicate or row-lock transaction is documented",
+      "manual-versus-scheduled concurrency test observes one ingest owner",
+    ],
+    status: "external-unverified",
+  },
+  {
+    id: "accepted-source-merge-priority",
+    requirement:
+      "creator merge priority is mcn_submission > manual_source > candidate_pool and automatic rank accepts only accepted records",
+    owner: "rank-creators-backend",
+    evidence: [
+      "three-source collision fixture selects the documented priority winner",
+      "ranking fixture excludes need_review and every status other than accepted",
+    ],
+    status: "external-unverified",
+  },
+  {
+    id: "submission-batch-retry",
+    requirement:
+      "retry for a run returns its current unfinished submission batch; a new batch is created only after continue_submission",
+    owner: "create-submission-batch-backend",
+    evidence: [
+      "same-run retry test returns the existing unfinished batch identifier",
+      "new-batch test succeeds only after feedback next_action is continue_submission",
+    ],
+    status: "external-unverified",
+  },
+];
+
+const DATABASE_PROOF_BOUNDARY = {
+  isMigrationProof: false,
+  isDeploymentProof: false,
+  statement:
+    "This specification declares external readiness requirements; it is not migration or deployment proof.",
+};
+
+const ERROR_CODES = [
+  "INTEGRATION_REQUIRED",
+  "SCHEMA_MISMATCH",
+  "INVALID_INPUT",
+  "INVALID_PHASE",
+  "CONFIRMATION_REQUIRED",
+  "FIELD_SELECTION_INVALID",
+  "PROVIDER_REFERENCE_MISSING",
+  "RECOVERY_NOT_CONFIRMED",
+  "RECOVERY_ALREADY_TERMINAL",
+  "STATE_CONFLICT",
+  "WRITE_RESULT_UNKNOWN",
+];
+
+const ERROR_SEMANTICS = [
+  {
+    code: "INTEGRATION_REQUIRED",
+    retryable: false,
+    category: "integration",
+    message: "The required target integration is unavailable or incompatible.",
+    recoveryAction:
+      "Install or upgrade the target integration, then rerun read-only contract verification.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "blocked-until-corrected",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: false,
+      reconcileWith: null,
+    },
+  },
+  {
+    code: "SCHEMA_MISMATCH",
+    retryable: false,
+    category: "integration",
+    message: "The runtime schema does not match the approved target contract.",
+    recoveryAction:
+      "Inspect the read-only schema diff and deploy a compatible provider contract.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "blocked-until-corrected",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: false,
+      reconcileWith: null,
+    },
+  },
+  {
+    code: "INVALID_INPUT",
+    retryable: false,
+    category: "validation",
+    message: "The request input is invalid for the approved contract.",
+    recoveryAction:
+      "Correct the reported input fields and submit a new validated request.",
+    writeRelated: false,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "correct-input-before-new-attempt",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: false,
+      reconcileWith: null,
+    },
+  },
+  {
+    code: "INVALID_PHASE",
+    retryable: false,
+    category: "workflow",
+    message: "The requested action is not allowed in the current workflow phase.",
+    recoveryAction:
+      "Refresh authoritative workflow state and continue only from an allowed transition.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "refresh-state-before-new-attempt",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: true,
+      reconcileWith: "get-workflow-state-or-sync",
+    },
+  },
+  {
+    code: "CONFIRMATION_REQUIRED",
+    retryable: false,
+    category: "confirmation",
+    message: "Explicit user confirmation is required before this action.",
+    recoveryAction:
+      "Obtain the required current-session confirmation before making a new call.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "confirm-before-new-attempt",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: false,
+      reconcileWith: null,
+    },
+  },
+  {
+    code: "FIELD_SELECTION_INVALID",
+    retryable: false,
+    category: "validation",
+    message: "The selected inquiry fields do not match the approved ordered columns.",
+    recoveryAction:
+      "Run field selection again and use its current ordered fields and items exactly.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "reselect-fields-before-new-attempt",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: false,
+      reconcileWith: null,
+    },
+  },
+  {
+    code: "PROVIDER_REFERENCE_MISSING",
+    retryable: false,
+    category: "provider",
+    message: "A required provider distribution reference is missing or empty.",
+    recoveryAction:
+      "Query provider state by stable correlation key and repair the reference before continuing.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "reconcile-before-new-attempt",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: true,
+      reconcileWith: "query-provider-by-stable-correlation-key",
+    },
+  },
+  {
+    code: "RECOVERY_NOT_CONFIRMED",
+    retryable: false,
+    category: "recovery",
+    message: "Manual recovery has not been explicitly confirmed in the current session.",
+    recoveryAction:
+      "Obtain explicit recovery confirmation, then restart the sync-ingest-sync sequence.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "confirm-before-new-attempt",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: false,
+      reconcileWith: null,
+    },
+  },
+  {
+    code: "RECOVERY_ALREADY_TERMINAL",
+    retryable: false,
+    category: "recovery",
+    message: "Recovery is already terminal with lifecycle status recovered or closed.",
+    recoveryAction:
+      "Treat the request as a no-op and do not invoke any recovery write.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "terminal-no-op",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: false,
+      reconcileWith: null,
+    },
+  },
+  {
+    code: "STATE_CONFLICT",
+    retryable: false,
+    category: "concurrency",
+    message: "Authoritative state changed while the requested transition was being applied.",
+    recoveryAction:
+      "Query or sync authoritative state; retry only if reconciliation shows the intended write is still valid.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "reconcile-then-conditional-retry",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: true,
+      authoritativeReconciliationRequired: true,
+      reconcileWith: "query-or-sync-authoritative-state",
+    },
+  },
+  {
+    code: "WRITE_RESULT_UNKNOWN",
+    retryable: false,
+    category: "write-safety",
+    message: "The outcome of the write is unknown and must not be retried directly.",
+    recoveryAction:
+      "Use the designated query or sync path to reconcile the write result before any new action.",
+    writeRelated: true,
+    blindRetry: false,
+    retryPolicy: {
+      mode: "reconcile-only",
+      directRetry: false,
+      conditionalRetryAfterReconciliation: false,
+      authoritativeReconciliationRequired: true,
+      reconcileWith: "query-or-sync-write-result",
+    },
+  },
+];
 
 const LEGACY_TOOL_NAMES = [
   "validate_requirement",
@@ -574,6 +1240,70 @@ function assertToolContract(name, tool) {
   );
 }
 
+function assertWorkflowContract(workflow) {
+  assert.deepEqual(
+    {
+      schemaVersion: workflow.schemaVersion,
+      profile: workflow.profile,
+      phases: workflow.phases,
+      lifecycleStatuses: workflow.lifecycleStatuses,
+      responseStatuses: workflow.responseStatuses,
+      policies: workflow.policies,
+      transitions: workflow.transitions,
+    },
+    {
+      schemaVersion: 1,
+      profile: "mvp-v2",
+      phases: WORKFLOW_PHASES,
+      lifecycleStatuses: LIFECYCLE_STATUSES,
+      responseStatuses: RESPONSE_STATUSES,
+      policies: WORKFLOW_POLICIES,
+      transitions: WORKFLOW_TRANSITIONS,
+    },
+    "workflow contract drifted",
+  );
+}
+
+function assertDatabaseContract(database) {
+  assert.deepEqual(
+    {
+      schemaVersion: database.schemaVersion,
+      profile: database.profile,
+      readinessStatus: database.readinessStatus,
+      proofBoundary: database.proofBoundary,
+      writerOwnership: database.writerOwnership,
+      invariants: database.invariants,
+    },
+    {
+      schemaVersion: 1,
+      profile: "mvp-v2",
+      readinessStatus: "external-unverified",
+      proofBoundary: DATABASE_PROOF_BOUNDARY,
+      writerOwnership: DATABASE_WRITER_OWNERSHIP,
+      invariants: DATABASE_INVARIANTS,
+    },
+    "database contract drifted",
+  );
+}
+
+function assertErrorsContract(errors) {
+  assert.deepEqual(
+    {
+      schemaVersion: errors.schemaVersion,
+      profile: errors.profile,
+      codes: errors.codes,
+      errors: errors.errors,
+    },
+    {
+      schemaVersion: 1,
+      profile: "mvp-v2",
+      codes: ERROR_CODES,
+      errors: ERROR_SEMANTICS,
+    },
+    "errors contract drifted",
+  );
+}
+
 describe("mvp-v2 machine-readable contract profile", () => {
   it("is writable and declares exactly the approved required and optional tools", async () => {
     const profile = await loadSpec(V2_PROFILE);
@@ -1022,5 +1752,159 @@ describe("legacy-1.9.4 detection profile", () => {
       .update(canonicalSummary, "utf8")
       .digest("hex");
     assert.equal(reproducedHash, profile.schemaHash);
+  });
+});
+
+describe("workflow contract", () => {
+  it("declares the exact approved phases and status vocabularies", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+
+    assert.equal(workflow.schemaVersion, 1);
+    assert.equal(workflow.profile, "mvp-v2");
+    assert.deepEqual(workflow.phases, WORKFLOW_PHASES);
+    assert.deepEqual(workflow.lifecycleStatuses, LIFECYCLE_STATUSES);
+    assert.deepEqual(workflow.responseStatuses, RESPONSE_STATUSES);
+  });
+
+  it("allows exactly the approved guarded and evidenced transitions", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+
+    assert.deepEqual(workflow.policies, WORKFLOW_POLICIES);
+    assert.deepEqual(workflow.transitions, WORKFLOW_TRANSITIONS);
+    assert.equal(
+      workflow.transitions.some(
+        (transition) => transition.trigger.name === "message_received",
+      ),
+      false,
+    );
+    assertWorkflowContract(workflow);
+  });
+
+  it("detects a mutation to a workflow transition", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+    const mutated = structuredClone(workflow);
+    mutated.transitions.find(
+      ({ id }) => id === "first-distribution-sync",
+    ).nextPhase = "recovered";
+
+    assert.throws(
+      () => assertWorkflowContract(mutated),
+      /workflow contract drifted/,
+    );
+  });
+});
+
+describe("database boundary contract", () => {
+  it("assigns the exact writer set for every target tool", async () => {
+    const database = await loadSpec(DATABASE_SPEC);
+
+    assert.deepEqual(database.writerOwnership, DATABASE_WRITER_OWNERSHIP);
+    const inquiryWriters = database.writerOwnership
+      .filter(({ always, conditional }) =>
+        [...always, ...conditional].includes("mcn_inquiries"),
+      )
+      .map(({ tool }) => tool);
+    assert.deepEqual(inquiryWriters, ["sync_mcn_inquiry_status"]);
+  });
+
+  it("declares every external invariant without claiming deployment proof", async () => {
+    const database = await loadSpec(DATABASE_SPEC);
+
+    assert.equal(database.readinessStatus, "external-unverified");
+    assert.deepEqual(database.proofBoundary, DATABASE_PROOF_BOUNDARY);
+    assert.deepEqual(database.invariants, DATABASE_INVARIANTS);
+    for (const invariant of database.invariants) {
+      assert.equal(invariant.status, "external-unverified");
+      assert.equal(typeof invariant.owner, "string");
+      assert.ok(invariant.owner.length > 0);
+      assert.ok(invariant.evidence.length > 0);
+    }
+    assertDatabaseContract(database);
+  });
+
+  it("detects a mutation to an external database invariant", async () => {
+    const database = await loadSpec(DATABASE_SPEC);
+    const mutated = structuredClone(database);
+    mutated.invariants.find(
+      ({ id }) => id === "single-recovery-owner",
+    ).status = "verified";
+
+    assert.throws(
+      () => assertDatabaseContract(mutated),
+      /database contract drifted/,
+    );
+  });
+});
+
+describe("error semantics contract", () => {
+  it("declares the exact unique code set and recovery semantics", async () => {
+    const errors = await loadSpec(ERRORS_SPEC);
+
+    assert.deepEqual(errors.codes, ERROR_CODES);
+    assert.deepEqual(errors.errors, ERROR_SEMANTICS);
+    assert.equal(new Set(errors.codes).size, errors.codes.length);
+    assert.deepEqual(
+      errors.errors.map(({ code }) => code),
+      ERROR_CODES,
+    );
+    assertErrorsContract(errors);
+  });
+
+  it("never blind-retries writes and distinguishes conflict reconciliation", async () => {
+    const errors = await loadSpec(ERRORS_SPEC);
+
+    for (const error of errors.errors.filter(({ writeRelated }) => writeRelated)) {
+      assert.equal(error.blindRetry, false, `${error.code} permits blind retry`);
+      assert.equal(
+        error.retryPolicy.directRetry,
+        false,
+        `${error.code} permits a direct retry`,
+      );
+    }
+
+    const stateConflict = errors.errors.find(
+      ({ code }) => code === "STATE_CONFLICT",
+    );
+    assert.equal(stateConflict.retryable, false);
+    assert.equal(
+      stateConflict.retryPolicy.mode,
+      "reconcile-then-conditional-retry",
+    );
+    assert.equal(
+      stateConflict.retryPolicy.conditionalRetryAfterReconciliation,
+      true,
+    );
+    assert.equal(
+      stateConflict.retryPolicy.authoritativeReconciliationRequired,
+      true,
+    );
+
+    const unknownWrite = errors.errors.find(
+      ({ code }) => code === "WRITE_RESULT_UNKNOWN",
+    );
+    assert.equal(unknownWrite.retryable, false);
+    assert.equal(unknownWrite.retryPolicy.mode, "reconcile-only");
+    assert.equal(unknownWrite.retryPolicy.directRetry, false);
+    assert.equal(
+      unknownWrite.retryPolicy.authoritativeReconciliationRequired,
+      true,
+    );
+    assert.equal(
+      unknownWrite.retryPolicy.reconcileWith,
+      "query-or-sync-write-result",
+    );
+  });
+
+  it("detects a mutation to an error retry policy", async () => {
+    const errors = await loadSpec(ERRORS_SPEC);
+    const mutated = structuredClone(errors);
+    mutated.errors.find(
+      ({ code }) => code === "WRITE_RESULT_UNKNOWN",
+    ).retryPolicy.directRetry = true;
+
+    assert.throws(
+      () => assertErrorsContract(mutated),
+      /errors contract drifted/,
+    );
   });
 });

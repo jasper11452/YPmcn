@@ -1,0 +1,207 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "readinessStatus": "external-unverified",
+  "proofBoundary": {
+    "isMigrationProof": false,
+    "isDeploymentProof": false,
+    "statement": "This specification declares external readiness requirements; it is not migration or deployment proof."
+  },
+  "writerOwnership": [
+    {
+      "tool": "validate_requirement",
+      "always": [
+        "customer_demands"
+      ],
+      "conditional": []
+    },
+    {
+      "tool": "search_creators",
+      "always": [
+        "creator_candidate_pool"
+      ],
+      "conditional": []
+    },
+    {
+      "tool": "rank_mcns",
+      "always": [
+        "mcn_recommendation_items"
+      ],
+      "conditional": []
+    },
+    {
+      "tool": "select_inquiry_form_fields",
+      "always": [],
+      "conditional": []
+    },
+    {
+      "tool": "create_with_distributions",
+      "always": [],
+      "conditional": []
+    },
+    {
+      "tool": "sync_mcn_inquiry_status",
+      "always": [
+        "mcn_inquiries"
+      ],
+      "conditional": []
+    },
+    {
+      "tool": "ingest_mcn_submissions",
+      "always": [
+        "mcn_submission_items"
+      ],
+      "conditional": [
+        "creator_supply_offers"
+      ]
+    },
+    {
+      "tool": "manual_source_creators",
+      "always": [
+        "manual_sourced_creators"
+      ],
+      "conditional": [
+        "creator_supply_offers"
+      ]
+    },
+    {
+      "tool": "rank_creators",
+      "always": [
+        "recommendation_runs",
+        "creator_recommendation_items"
+      ],
+      "conditional": []
+    },
+    {
+      "tool": "create_submission_batch",
+      "always": [
+        "submission_batches",
+        "creator_submissions"
+      ],
+      "conditional": []
+    },
+    {
+      "tool": "record_client_feedback",
+      "always": [
+        "creator_submissions"
+      ],
+      "conditional": [
+        "customer_demands"
+      ]
+    },
+    {
+      "tool": "get_recommendation_run_detail",
+      "always": [],
+      "conditional": []
+    },
+    {
+      "tool": "get_creator_detail",
+      "always": [],
+      "conditional": []
+    },
+    {
+      "tool": "audit_manual_adjustment",
+      "always": [
+        "manual_adjustment_audits"
+      ],
+      "conditional": []
+    },
+    {
+      "tool": "get_workflow_state",
+      "always": [],
+      "conditional": []
+    }
+  ],
+  "invariants": [
+    {
+      "id": "unique-supplier-mapping",
+      "requirement": "mcn_agencies.supplier_id is nonempty and unique, providing one supplier_id for each targeted mcn_id",
+      "owner": "production-database",
+      "evidence": [
+        "unique constraint on mcn_agencies.supplier_id",
+        "readiness query returns exactly one supplier_id for every targeted mcn_id"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "single-send-context",
+      "requirement": "one send context exists per (mcn_recommendation_id, requirement_id); resend requires a new mcn_recommendation_id",
+      "owner": "distribution-provider-backend",
+      "evidence": [
+        "unique or transactional idempotency proof for (mcn_recommendation_id, requirement_id)",
+        "resend scenario creates a new mcn_recommendation_id"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "stable-provider-correlation",
+      "requirement": "provider send uses a stable business correlation key and an unknown outcome is queried with that key before any retry",
+      "owner": "distribution-provider-backend",
+      "evidence": [
+        "provider contract documents the stable correlation key",
+        "timeout scenario queries provider state and does not issue a second send"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "atomic-first-sync",
+      "requirement": "first sync transactionally creates or reuses one snapshot, one inquiry batch, one inquiry per supplier, and one cron",
+      "owner": "sync-mcn-inquiry-status-backend",
+      "evidence": [
+        "transaction and uniqueness constraints cover snapshot, inquiry batch, supplier inquiry, and cron writes",
+        "concurrent first-sync test returns the same snapshot, inquiry batch, inquiries, and cron"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "unique-provider-references",
+      "requirement": "provider_distribution_id is unique and every token and fill_link is nonempty and unique",
+      "owner": "production-database-and-provider",
+      "evidence": [
+        "unique constraints cover provider_distribution_id, token, and fill_link",
+        "provider integration test rejects empty or duplicate references"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "idempotent-submission-ingest",
+      "requirement": "submission ingest is idempotent on (provider_distribution_id, provider_row_id)",
+      "owner": "ingest-mcn-submissions-backend",
+      "evidence": [
+        "unique constraint on (provider_distribution_id, provider_row_id)",
+        "duplicate-row integration test preserves one logical submission item"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "single-recovery-owner",
+      "requirement": "recovery uses compare-and-swap or a row lock so concurrent manual and scheduled recovery permit one ingest owner",
+      "owner": "production-database-recovery-coordinator",
+      "evidence": [
+        "CAS predicate or row-lock transaction is documented",
+        "manual-versus-scheduled concurrency test observes one ingest owner"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "accepted-source-merge-priority",
+      "requirement": "creator merge priority is mcn_submission > manual_source > candidate_pool and automatic rank accepts only accepted records",
+      "owner": "rank-creators-backend",
+      "evidence": [
+        "three-source collision fixture selects the documented priority winner",
+        "ranking fixture excludes need_review and every status other than accepted"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "submission-batch-retry",
+      "requirement": "retry for a run returns its current unfinished submission batch; a new batch is created only after continue_submission",
+      "owner": "create-submission-batch-backend",
+      "evidence": [
+        "same-run retry test returns the existing unfinished batch identifier",
+        "new-batch test succeeds only after feedback next_action is continue_submission"
+      ],
+      "status": "external-unverified"
+    }
+  ]
+}

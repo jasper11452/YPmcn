@@ -1,0 +1,344 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "phases": [
+    "requirement_draft",
+    "requirement_ready",
+    "candidate_pool_ready",
+    "mcn_planning",
+    "field_selection_ready",
+    "distribution_sync_pending",
+    "waiting_return",
+    "recovering",
+    "recovery_sync_pending",
+    "recovered",
+    "recommendation_ready",
+    "submission_batch_ready",
+    "feedback_routing",
+    "blocked"
+  ],
+  "lifecycleStatuses": [
+    "sent",
+    "waiting_return",
+    "recover_requested",
+    "recovering",
+    "recover_failed",
+    "recovered",
+    "closed"
+  ],
+  "responseStatuses": [
+    "pending",
+    "partial",
+    "completed",
+    "expired",
+    "failed"
+  ],
+  "policies": {
+    "sendSuccessPhase": "distribution_sync_pending",
+    "waitingReturnRequires": "first-successful-sync",
+    "ordinaryMessageUnlocksWaiting": false,
+    "manualRecoveryConfirmation": "explicit-current-session-confirmation",
+    "scheduledRecoveryContext": "ctx.trigger=cron",
+    "recoverySequence": [
+      "sync_mcn_inquiry_status",
+      "ingest_mcn_submissions",
+      "sync_mcn_inquiry_status"
+    ],
+    "rankingAllowedAfterPhase": "recovered",
+    "terminalRecovery": {
+      "authoritativeLifecycleStatuses": [
+        "recovered",
+        "closed"
+      ],
+      "behavior": "no-op",
+      "sideEffectsAllowed": false,
+      "evidence": [
+        "error.code === RECOVERY_ALREADY_TERMINAL",
+        "no-write-tool-invoked"
+      ]
+    }
+  },
+  "transitions": [
+    {
+      "id": "requirement-validated",
+      "from": "requirement_draft",
+      "trigger": {
+        "type": "tool",
+        "name": "validate_requirement"
+      },
+      "guards": [
+        "required-demand-fields-present"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.id",
+        "result.data.status === ready"
+      ],
+      "nextPhase": "requirement_ready"
+    },
+    {
+      "id": "candidate-pool-written",
+      "from": "requirement_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "search_creators"
+      },
+      "guards": [
+        "params.requirement_id === state.requirement_id"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.id",
+        "result.data.candidate_pool_written"
+      ],
+      "nextPhase": "candidate_pool_ready"
+    },
+    {
+      "id": "mcn-plan-written",
+      "from": "candidate_pool_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "rank_mcns"
+      },
+      "guards": [
+        "params.candidate_pool_id === state.candidate_pool_id"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.id",
+        "result.data.inquiry_advice"
+      ],
+      "nextPhase": "mcn_planning"
+    },
+    {
+      "id": "inquiry-fields-selected",
+      "from": "mcn_planning",
+      "trigger": {
+        "type": "tool",
+        "name": "select_inquiry_form_fields"
+      },
+      "guards": [
+        "params.mcn_recommendation_id === state.mcn_recommendation_id"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.selected_count === result.items.length",
+        "result.selected_count > 0"
+      ],
+      "nextPhase": "field_selection_ready"
+    },
+    {
+      "id": "distribution-sent",
+      "from": "field_selection_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "create_with_distributions"
+      },
+      "guards": [
+        "supply-mcn-message-confirmations-present",
+        "field-selection-matches-ordered-columns",
+        "params.preview_only === false"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.provider_project_id",
+        "result.data.distributions.length > 0"
+      ],
+      "nextPhase": "distribution_sync_pending"
+    },
+    {
+      "id": "first-distribution-sync",
+      "from": "distribution_sync_pending",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "params.mcn_recommendation_id === state.mcn_recommendation_id",
+        "params.requirement_id === state.requirement_id"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.snapshot_id",
+        "result.data.inquiry_batch_id",
+        "result.data.inquiry_ids.length > 0"
+      ],
+      "nextPhase": "waiting_return"
+    },
+    {
+      "id": "manual-recovery-confirmed",
+      "from": "waiting_return",
+      "trigger": {
+        "type": "event",
+        "name": "manual_recovery_confirmed"
+      },
+      "guards": [
+        "explicit-recovery-intent-in-current-session"
+      ],
+      "evidence": [
+        "state.manual_recovery_confirmed_at"
+      ],
+      "nextPhase": "waiting_return"
+    },
+    {
+      "id": "manual-recovery-sync",
+      "from": "waiting_return",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "state.manual_recovery_confirmed_at-is-current",
+        "ctx.recovery_trigger === manual"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.snapshot_id",
+        "result.data.lifecycle_status",
+        "result.data.response_status"
+      ],
+      "nextPhase": "recovering"
+    },
+    {
+      "id": "scheduled-recovery-sync",
+      "from": "waiting_return",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "ctx.trigger === cron"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.snapshot_id",
+        "result.data.lifecycle_status",
+        "result.data.response_status"
+      ],
+      "nextPhase": "recovering"
+    },
+    {
+      "id": "manual-submission-ingest",
+      "from": "recovering",
+      "trigger": {
+        "type": "tool",
+        "name": "ingest_mcn_submissions"
+      },
+      "guards": [
+        "params.trigger === manual",
+        "state.manual_recovery_confirmed_at-is-current",
+        "current-session-successful-sync-evidence-present"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.ingest_id",
+        "result.data.ingested_count"
+      ],
+      "nextPhase": "recovery_sync_pending"
+    },
+    {
+      "id": "scheduled-submission-ingest",
+      "from": "recovering",
+      "trigger": {
+        "type": "tool",
+        "name": "ingest_mcn_submissions"
+      },
+      "guards": [
+        "params.trigger === scheduled",
+        "ctx.trigger === cron",
+        "current-session-successful-sync-evidence-present"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.ingest_id",
+        "result.data.ingested_count"
+      ],
+      "nextPhase": "recovery_sync_pending"
+    },
+    {
+      "id": "recovery-final-sync",
+      "from": "recovery_sync_pending",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "current-session-successful-ingest-evidence-present"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.lifecycle_status === recovered",
+        "result.data.response_status"
+      ],
+      "nextPhase": "recovered"
+    },
+    {
+      "id": "terminal-recovery-no-op",
+      "from": "recovered",
+      "trigger": {
+        "type": "event",
+        "name": "recovery_requested"
+      },
+      "guards": [
+        "authoritative-lifecycle-status in [recovered, closed]"
+      ],
+      "evidence": [
+        "error.code === RECOVERY_ALREADY_TERMINAL",
+        "no-write-tool-invoked"
+      ],
+      "nextPhase": "recovered"
+    },
+    {
+      "id": "creators-ranked",
+      "from": "recovered",
+      "trigger": {
+        "type": "tool",
+        "name": "rank_creators"
+      },
+      "guards": [
+        "latest-authoritative-sync-lifecycle-status === recovered"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.run_id",
+        "result.data.ranked_count"
+      ],
+      "nextPhase": "recommendation_ready"
+    },
+    {
+      "id": "submission-batch-created",
+      "from": "recommendation_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "create_submission_batch"
+      },
+      "guards": [
+        "params.run_id === state.run_id"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.batch_id",
+        "result.data.batch_no",
+        "result.data.submitted_count"
+      ],
+      "nextPhase": "submission_batch_ready"
+    },
+    {
+      "id": "client-feedback-recorded",
+      "from": "submission_batch_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "record_client_feedback"
+      },
+      "guards": [
+        "params.run_id === state.run_id"
+      ],
+      "evidence": [
+        "result.success === true",
+        "result.data.updated_count",
+        "result.data.next_action"
+      ],
+      "nextPhase": "feedback_routing"
+    }
+  ]
+}
