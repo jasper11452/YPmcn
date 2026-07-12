@@ -247,6 +247,55 @@ function validateCommonTool(rawTool: unknown, name: string, label: string): Reco
   return tool;
 }
 
+function validateServerIdentity(value: unknown, toolNames: string[]): void {
+  const identity = requireRecord(value, "mvp-v2.serverIdentity");
+  const expectedKeys = new Set([
+    "canonicalNamespace",
+    "hostQualifiedToolName",
+    "providerToolsList",
+    "excludedNamespaces",
+  ]);
+  for (const key of expectedKeys) {
+    if (!hasOwn(identity, key)) throw new Error(`mvp-v2.serverIdentity.${key} is missing`);
+  }
+  for (const key of Object.keys(identity)) {
+    if (!expectedKeys.has(key)) throw new Error(`mvp-v2.serverIdentity.${key} is not declared`);
+  }
+  if (identity.canonicalNamespace !== "ypmcn") {
+    throw new Error("mvp-v2.serverIdentity.canonicalNamespace must be ypmcn");
+  }
+
+  const host = requireRecord(
+    identity.hostQualifiedToolName,
+    "mvp-v2.serverIdentity.hostQualifiedToolName",
+  );
+  if (
+    host.format !== "mcp__ypmcn__<contract-tool>" ||
+    host.pattern !== `^mcp__ypmcn__(?:${toolNames.join("|")})$` ||
+    host.businessToolIdentity !== "exact-qualified-name-and-contract-tool" ||
+    host.bareHookEvent !== "not-a-business-tool"
+  ) {
+    throw new Error("mvp-v2 server identity must use exact Host-qualified contract tool names");
+  }
+
+  const providerToolsList = requireRecord(
+    identity.providerToolsList,
+    "mvp-v2.serverIdentity.providerToolsList",
+  );
+  if (
+    providerToolsList.toolNameFormat !== "bare-contract-tool" ||
+    providerToolsList.namespace !== "not-applicable" ||
+    providerToolsList.businessToolIdentity !== "catalog-membership-only"
+  ) {
+    throw new Error("mvp-v2 provider tools/list names must remain bare contract tool names");
+  }
+  requireExactStrings(
+    identity.excludedNamespaces,
+    ["vector-mcp"],
+    "mvp-v2.serverIdentity.excludedNamespaces",
+  );
+}
+
 function validateInputModes(
   value: unknown,
   properties: Record<string, unknown>,
@@ -468,6 +517,7 @@ function validateMvpProfile(value: unknown): MvpContractProfile {
     }
   }
   const expectedNames = [...profile.requiredTools, ...profile.optionalTools];
+  validateServerIdentity(profile.serverIdentity, expectedNames);
   const tools = validateWritableToolMap(
     profile.tools,
     expectedNames,

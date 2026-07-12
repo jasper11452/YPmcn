@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | `.githooks/` | 提交前自动维护 | 只同步相关变更，不扩大部分暂存范围 |
 | `CLAUDE.md` | Claude Code 项目入口 | 每个 Session 先恢复控制面状态，不直接接管生产实现 |
-| `spec/` | 唯一正式机器契约 | 字段、Tool、阶段、错误、副作用是否一致 |
+| `spec/` | 唯一正式机器契约 | 字段、Tool、Host namespace、阶段、错误、副作用是否一致 |
 | `changes/` | 为什么改、影响什么 | 范围、风险、验证、回滚是否明确 |
 | `YPmcn/` | 可发布插件组件 | Skill/Hook 是否只执行契约允许的行为 |
 | `vector-mcp/` | 创作者向量检索 | 召回可靠性、超时、持久化和隔离 |
@@ -30,7 +30,7 @@
 <!-- human-docs:contract-map:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-Spec 摘要：`sha256:4a143891ab6136ddb7993de0606b6466d46a9bd48f29b139f4068a4086820e28`
+Spec 摘要：`sha256:1b0ab552e9a36afd268144f239412fee814c38d9c368ac2f8736050b70fff94d`
 
 | 领域 | 唯一权威 | 人类理解 |
 | --- | --- | --- |
@@ -65,4 +65,5 @@ Spec 或正式 Change Proposal 提交时会自动刷新三个事实区块；`npm
 
 - `YPmcn/` 是发布组件，不是第二个项目根。
 - `reference-mcp/` 是模拟器，不是生产 provider。
+- `mcp__ypmcn__<contract-tool>` 是 Host 的唯一业务工具身份；provider `tools/list` 使用 bare name，`vector-mcp` 不属于业务 provider。
 - 发布包中的 `spec/` 是构建快照，不是可编辑事实源。

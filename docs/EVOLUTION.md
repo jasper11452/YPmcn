@@ -12,13 +12,14 @@
 4. **一键安装**：根 npm workspace 覆盖插件与向量 MCP，一次 `npm ci` 即可验证全仓库。
 5. **人类可读**：保留极简叙事，Spec/Change 的机器事实在提交前自动同步，验证只负责检查漂移。
 6. **契约收口**：把 2026-07-12 的 P0 与首批 P1 固化为数据实体、无客户内容字典、逐工具输出、服务端权威恢复和 closed-world 业务有效性契约，同时保持生产 NO-GO。
+7. **业务命名空间**：Host 只以 `mcp__ypmcn__<contract-tool>` 识别业务工具；provider `tools/list` 继续协商 bare name，向量服务不得混入。
 
 ## 已批准变更索引
 
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:4a143891ab6136ddb7993de0606b6466d46a9bd48f29b139f4068a4086820e28`
+当前 Spec：`mvp-v2` · `sha256:1b0ab552e9a36afd268144f239412fee814c38d9c368ac2f8736050b70fff94d`
 变更记录摘要：`sha256:3fd587f23ef810c991bb6173ce986e0c720f8feace73391ab118d229f4da9a48`
 
 | 变更 | 状态 | 决策主题 |

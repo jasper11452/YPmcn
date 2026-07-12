@@ -2,6 +2,23 @@
   "schemaVersion": 1,
   "profile": "mvp-v2",
   "mode": "writable",
+  "serverIdentity": {
+    "canonicalNamespace": "ypmcn",
+    "hostQualifiedToolName": {
+      "format": "mcp__ypmcn__<contract-tool>",
+      "pattern": "^mcp__ypmcn__(?:validate_requirement|search_creators|rank_mcns|select_inquiry_form_fields|create_with_distributions|sync_mcn_inquiry_status|ingest_mcn_submissions|manual_source_creators|rank_creators|create_submission_batch|record_client_feedback|get_recommendation_run_detail|get_creator_detail|audit_manual_adjustment|get_workflow_state)$",
+      "businessToolIdentity": "exact-qualified-name-and-contract-tool",
+      "bareHookEvent": "not-a-business-tool"
+    },
+    "providerToolsList": {
+      "toolNameFormat": "bare-contract-tool",
+      "namespace": "not-applicable",
+      "businessToolIdentity": "catalog-membership-only"
+    },
+    "excludedNamespaces": [
+      "vector-mcp"
+    ]
+  },
   "requiredTools": [
     "validate_requirement",
     "search_creators",

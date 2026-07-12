@@ -114,10 +114,27 @@ export interface LegacyObservedToolContract {
   };
 }
 
+export interface McpServerIdentity {
+  canonicalNamespace: "ypmcn";
+  hostQualifiedToolName: {
+    format: "mcp__ypmcn__<contract-tool>";
+    pattern: string;
+    businessToolIdentity: "exact-qualified-name-and-contract-tool";
+    bareHookEvent: "not-a-business-tool";
+  };
+  providerToolsList: {
+    toolNameFormat: "bare-contract-tool";
+    namespace: "not-applicable";
+    businessToolIdentity: "catalog-membership-only";
+  };
+  excludedNamespaces: ["vector-mcp"];
+}
+
 export interface MvpContractProfile {
   schemaVersion: number;
   profile: "mvp-v2";
   mode: "writable";
+  serverIdentity: McpServerIdentity;
   requiredTools: string[];
   optionalTools: string[];
   outputEnvelopes: Record<string, ContractSchema>;

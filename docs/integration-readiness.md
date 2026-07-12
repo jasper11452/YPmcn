@@ -17,7 +17,7 @@
 | 生产数据库与后端不变量 | **EXTERNAL-UNVERIFIED** | Spec 已声明 14 项必须证明的不变量，但仓库测试不能代替迁移、约束、并发和部署证据。 |
 | 生产总体就绪 | **NO-GO** | 现有包只能代表旧 SHA 的离线证据；CHG-2026-007 下游实现、provider、数据库、Algorithm 与凭据门禁通过前不得开启生产新链路。 |
 
-这里的生产阻塞不是通过更多本地测试就能消除。CHG-2026-007 定义的是目标业务契约；当前差距来自生产 provider、数据库和 Hook/Skill 尚未完成对应升级。仓库刻意不把旧 provider、Hook session projection 或 reference MCP 伪装成服务端权威，也不自动降级。
+这里的生产阻塞不是通过更多本地测试就能消除。CHG-2026-007 定义的是目标业务契约；当前差距来自生产 provider、数据库和 Hook/Skill 尚未完成对应升级。Host 只以 `mcp__ypmcn__<contract-tool>` 识别业务工具，`tools/list` 仍使用 bare tool name，`vector-mcp` 不得伪装成业务 provider。仓库刻意不把旧 provider、Hook session projection 或 reference MCP 伪装成服务端权威，也不自动降级。
 
 ## 2. 仓库验收证据
 

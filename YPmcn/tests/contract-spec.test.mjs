@@ -1081,6 +1081,7 @@ describe("runtime contract loaders", () => {
     );
     assert.equal(Object.keys(database.entities).length, 10);
     assert.equal(Object.keys(profile.outputContracts).length, 15);
+    assert.equal(profile.serverIdentity.canonicalNamespace, "ypmcn");
   });
 
   it("loads every referenced generation schema", () => {
@@ -1127,6 +1128,29 @@ describe("runtime contract loaders", () => {
       /unsupported contract schema/,
     );
   });
+
+  it("rejects Host namespace aliases, bare Hook events, and provider namespace conflation", () => {
+    const foreignNamespace = structuredClone(loadContractProfile("mvp-v2"));
+    foreignNamespace.serverIdentity.canonicalNamespace = "foreign";
+    assert.throws(
+      () => validateContractProfileDocument("mvp-v2", foreignNamespace),
+      /canonicalNamespace must be ypmcn/,
+    );
+
+    const bareHookEvent = structuredClone(loadContractProfile("mvp-v2"));
+    bareHookEvent.serverIdentity.hostQualifiedToolName.bareHookEvent = "business-tool";
+    assert.throws(
+      () => validateContractProfileDocument("mvp-v2", bareHookEvent),
+      /exact Host-qualified contract tool names/,
+    );
+
+    const providerNamespace = structuredClone(loadContractProfile("mvp-v2"));
+    providerNamespace.serverIdentity.providerToolsList.toolNameFormat = "host-qualified-tool";
+    assert.throws(
+      () => validateContractProfileDocument("mvp-v2", providerNamespace),
+      /provider tools\/list names must remain bare contract tool names/,
+    );
+  });
 });
 
 describe("mvp-v2 machine-readable contract profile", () => {
@@ -1141,6 +1165,36 @@ describe("mvp-v2 machine-readable contract profile", () => {
       Object.keys(profile.tools).sort(),
       [...REQUIRED_TOOLS, ...OPTIONAL_TOOLS].sort(),
     );
+  });
+
+  it("defines the only Host business namespace without changing provider bare names", async () => {
+    const profile = await loadSpec(V2_PROFILE);
+    const toolNames = [...REQUIRED_TOOLS, ...OPTIONAL_TOOLS];
+    const identity = profile.serverIdentity;
+
+    assert.equal(identity.canonicalNamespace, "ypmcn");
+    assert.equal(identity.hostQualifiedToolName.format, "mcp__ypmcn__<contract-tool>");
+    assert.equal(
+      identity.hostQualifiedToolName.pattern,
+      `^mcp__ypmcn__(?:${toolNames.join("|")})$`,
+    );
+    assert.equal(
+      identity.hostQualifiedToolName.businessToolIdentity,
+      "exact-qualified-name-and-contract-tool",
+    );
+    assert.equal(identity.hostQualifiedToolName.bareHookEvent, "not-a-business-tool");
+    assert.deepEqual(identity.excludedNamespaces, ["vector-mcp"]);
+    assert.equal(identity.providerToolsList.toolNameFormat, "bare-contract-tool");
+    assert.equal(identity.providerToolsList.namespace, "not-applicable");
+    assert.equal(identity.providerToolsList.businessToolIdentity, "catalog-membership-only");
+
+    const hostToolPattern = new RegExp(identity.hostQualifiedToolName.pattern);
+    for (const name of toolNames) {
+      assert.match(`mcp__ypmcn__${name}`, hostToolPattern);
+      assert.doesNotMatch(name, hostToolPattern);
+      assert.doesNotMatch(`mcp__foreign__${name}`, hostToolPattern);
+      assert.doesNotMatch(`mcp__vector-mcp__${name}`, hostToolPattern);
+    }
   });
 
   it("gives every tool a complete explicit input contract", async () => {

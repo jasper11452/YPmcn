@@ -89,6 +89,31 @@ describe("Spec governance", () => {
     );
   });
 
+  it("locks mvp-v2 business tools to one Host namespace while tools/list stays bare", () => {
+    const mcp = json("mcp.json");
+    const toolNames = [...mcp.requiredTools, ...mcp.optionalTools];
+    const identity = mcp.serverIdentity;
+    const pattern = new RegExp(identity.hostQualifiedToolName.pattern);
+
+    assert.equal(identity.canonicalNamespace, "ypmcn");
+    assert.equal(identity.hostQualifiedToolName.format, "mcp__ypmcn__<contract-tool>");
+    assert.equal(
+      identity.hostQualifiedToolName.pattern,
+      `^mcp__ypmcn__(?:${toolNames.join("|")})$`,
+    );
+    assert.equal(identity.hostQualifiedToolName.bareHookEvent, "not-a-business-tool");
+    assert.deepEqual(identity.excludedNamespaces, ["vector-mcp"]);
+    assert.equal(identity.providerToolsList.toolNameFormat, "bare-contract-tool");
+    assert.equal(identity.providerToolsList.namespace, "not-applicable");
+
+    for (const name of toolNames) {
+      assert.match(`mcp__ypmcn__${name}`, pattern);
+      assert.doesNotMatch(name, pattern);
+      assert.doesNotMatch(`mcp__foreign__${name}`, pattern);
+      assert.doesNotMatch(`mcp__vector-mcp__${name}`, pattern);
+    }
+  });
+
   it("keeps Hook events aligned with the runtime registration surface", () => {
     const hooks = json("hooks.json");
     const source = readFileSync(join(repoRoot, hooks.implementation), "utf8");
