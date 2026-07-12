@@ -236,7 +236,7 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_readiness_report_matches_current_verification_inventory(self):
         text = read(ROOT / "docs" / "integration-readiness.md")
         for required in (
-            "统一验证覆盖 174 项测试",
+            "统一验证覆盖 172 项测试",
             "reference MCP 与 provider checker：8 项",
             "Skill、工具卡和文档一致性：16 项",
         ):

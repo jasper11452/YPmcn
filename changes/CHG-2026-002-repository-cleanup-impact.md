@@ -23,6 +23,7 @@
 | `scripts/test-wecom-send.mjs` | 删除 | 移除可手工产生真实企微/DB 副作用的脚本 |
 | `scripts/build-vector-index.mjs` | 删除 | 移除已废弃的 128 维假向量构建路径 |
 | `tests/secret_scan.test.mjs` | 修改 | 将旧入口的 fail-closed 检查改为不存在性回归 |
+| `tests/test_skill_package.py`、`docs/integration-readiness.md` | 修改 | 同步删除两项旧 Mock 测试后的验证计数 |
 | `doc/客户原始需求列表.csv` | 删除 | 移除完整客户 Brief/payload 数据 |
 | `doc/*的替身` | 删除七个、保留一个 | 删除无引用且不可移植的 Alias；算法来源引用不断裂 |
 | `docs/superpowers/**`、`docs/requirements/**` | 删除 | 移除历史计划与 draft 需求，避免冒充当前事实源 |
@@ -60,4 +61,3 @@
 ## Open Questions
 
 - Git 历史净化不在本次范围；当前无 remote，不阻塞工作树清理。
-

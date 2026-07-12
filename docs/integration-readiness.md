@@ -20,10 +20,10 @@
 
 ## 2. 仓库验收证据
 
-`npm run verify` 已通过，统一验证覆盖 174 项测试：
+`npm run verify` 已通过，统一验证覆盖 172 项测试：
 
 - Spec 治理与漂移门禁：6 项。
-- 密钥与发布边界：18 项。
+- 密钥与发布边界：16 项。
 - OpenClaw 插件、契约与 Hook：104 项。
 - reference MCP 与 provider checker：8 项。
 - Skill、工具卡和文档一致性：16 项。

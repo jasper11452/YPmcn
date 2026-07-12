@@ -408,54 +408,26 @@ describe("secret release scanner", () => {
 });
 
 describe("packaged plugin security boundary", () => {
-  it("does not auto-fork the root-only mock or log customer Brief previews", () => {
+  it("does not retain deprecated executables or raw customer data", () => {
     const indexSource = readFileSync(join(repoRoot, "YPmcn/src/index.ts"), "utf8");
+    const retiredPaths = [
+      "mock-mcp.mjs",
+      "src/send_wecom.mjs",
+      "YPmcn/mock-mcp.mjs",
+      "YPmcn/src/send_wecom.mjs",
+      "scripts/build-vector-index.mjs",
+      "scripts/test-wecom-send.mjs",
+      "doc/客户原始需求列表.csv",
+    ];
 
     assert.doesNotMatch(indexSource, /fork|YPMCN_START_LOCAL_MCP/);
     assert.doesNotMatch(indexSource, /startMcpServer|raw_messages_preview/);
-    assert.equal(existsSync(join(repoRoot, "YPmcn/mock-mcp.mjs")), false);
-  });
-
-  it("fails the explicit root mock closed when the DB password is missing", () => {
-    const env = { ...process.env };
-    for (const name of [
-      "MYSQL_PASSWORD",
-      "SILICONFLOW_API_KEY",
-      "YPMCN_API_KEY",
-      "YP_WECOM_API_KEY",
-    ]) {
-      delete env[name];
+    for (const relativePath of retiredPaths) {
+      assert.equal(
+        existsSync(join(repoRoot, relativePath)),
+        false,
+        `${relativePath} must stay retired`,
+      );
     }
-
-    const result = spawnSync(process.execPath, ["mock-mcp.mjs"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      env,
-      timeout: 1_000,
-    });
-
-    assert.equal(result.status, 1);
-    assert.equal(result.stderr.includes("MYSQL_PASSWORD"), true);
-  });
-
-  it("fails the explicit root mock closed when its backend API credential is missing", () => {
-    const env = {
-      ...process.env,
-      MYSQL_PASSWORD: ["synthetic", "db", "password"].join("-"),
-    };
-    delete env.YPMCN_API_KEY;
-    delete env.YP_WECOM_API_KEY;
-
-    const result = spawnSync(process.execPath, ["mock-mcp.mjs"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      env,
-      timeout: 1_000,
-    });
-    const mockSource = readFileSync(join(repoRoot, "mock-mcp.mjs"), "utf8");
-
-    assert.equal(result.status, 1);
-    assert.equal(result.stderr.includes("YPMCN_API_KEY"), true);
-    assert.doesNotMatch(mockSource, /mock_no_backend/);
   });
 });

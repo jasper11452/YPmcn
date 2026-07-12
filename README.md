@@ -10,7 +10,7 @@
 project/
 ├── spec/          # 唯一已批准机器契约
 ├── changes/       # Change Proposal、Impact Analysis、决策记录
-├── src/           # 根级生产代码
+├── src/           # 根级共享代码边界（当前无独立运行时）
 ├── tests/         # 仓库级契约、集成和发布测试
 ├── workflows/     # 任务、角色和独立验证模板
 ├── packages/      # staging 与 tgz 产物，不含源码
@@ -21,7 +21,9 @@ project/
 └── reference-mcp/ # 完全离线、simulated=true 的演练 MCP
 ```
 
-`YPmcn/` 是 npm 发布组件，不是嵌套 Git 项目。`doc/` 保存原始资料和 Finder Alias，不是正式机器契约。
+`YPmcn/` 是 npm 发布组件，不是嵌套 Git 项目。当前生产代码分别归属 `YPmcn/` 与 `vector-mcp/`；根 `src/` 不维护重复实现。
+
+`doc/` 只暂留 `spec/algorithms.json` 引用的算法来源 Alias，不是正式机器契约。完整客户 Brief、payload 和不可移植的本地资料不进入 Git。
 
 ## Spec 是唯一事实源
 

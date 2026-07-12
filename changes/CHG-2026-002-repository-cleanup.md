@@ -48,12 +48,13 @@ allowed_paths:
   - "changes/CHG-2026-002-*"
   - "README.md"
   - "src/**"
-  - "tests/secret_scan.test.mjs"
+  - "tests/**"
   - "mock-mcp.mjs"
   - "scripts/build-vector-index.mjs"
   - "scripts/test-wecom-send.mjs"
   - "YPmcn/src/send_wecom.mjs"
   - "docs/db-schema-diff-and-migration.md"
+  - "docs/integration-readiness.md"
   - "docs/rag-vector-integration-guide.md"
   - "docs/wecom-send-mcp-dev-guide.md"
   - "docs/requirements/**"
@@ -102,4 +103,3 @@ verification:
 - `node_modules`、`dist` 和发布包可通过 `npm ci`、`npm run verify`、`npm run pack:yp` 重建。
 - 五个已修改 Finder Alias 与未跟踪 draw.io 图由用户明确批准删除，不在仓库中复制或备份。
 - 客户原始需求不应重新写回 Git；若业务仍需访问，应从受控外部资料库读取。
-
