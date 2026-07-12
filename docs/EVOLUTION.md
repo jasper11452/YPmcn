@@ -18,10 +18,11 @@
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0`
-变更记录摘要：`sha256:7d1bd0b6491c68570752760755ece9f912c8971faea87d96aa5b157855dfe80f`
+变更记录摘要：`sha256:c7174446b159c9b1eadf0f2d8931857b0214c250e787a8d785b5fe27d264c10c`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-005 | `SPEC_APPROVED` | [建立跨 Session 并行 Agent 控制面](../changes/CHG-2026-005-agent-control-plane.md) |
 | CHG-2026-005 | `SPEC_APPROVED` | [将人类文档同步改为提交前自动执行](../changes/CHG-2026-005-automatic-human-docs.md) |
 | CHG-2026-004 | `SPEC_APPROVED` | [建立极简人类文档与 Spec 同步门禁](../changes/CHG-2026-004-human-documentation.md) |
 | CHG-2026-003 | `SPEC_APPROVED` | [修复根目录干净安装入口](../changes/CHG-2026-003-root-workspace-install.md) |
