@@ -18,10 +18,11 @@
 <!-- 由 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0`
-变更记录摘要：`sha256:994f1d53597afb5c678f837dd66471911609fd0d40cf453045dba8ee357130a0`
+变更记录摘要：`sha256:a4a4ec20cfb11ee7fce1bdd669429831a6883338d1f41754858d3739369c98bb`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-005 | `SPEC_APPROVED` | [将人类文档同步改为提交前自动执行](../changes/CHG-2026-005-automatic-human-docs.md) |
 | CHG-2026-004 | `SPEC_APPROVED` | [建立极简人类文档与 Spec 同步门禁](../changes/CHG-2026-004-human-documentation.md) |
 | CHG-2026-003 | `SPEC_APPROVED` | [修复根目录干净安装入口](../changes/CHG-2026-003-root-workspace-install.md) |
 | CHG-2026-002 | `SPEC_APPROVED` | [退役旧链路并清理仓库](../changes/CHG-2026-002-repository-cleanup.md) |
