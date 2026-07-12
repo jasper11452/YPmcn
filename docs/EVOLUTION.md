@@ -18,10 +18,11 @@
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0`
-变更记录摘要：`sha256:a12d5de2f3f48507e45ae40c45801a43a5caa788c422f6706e8238d0abde8326`
+变更记录摘要：`sha256:28d1d51cb049389e7b0a9fcd63509660c09f414add632518a101a9e64391369b`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-007 | `SPEC_APPROVED` | [固化 P0 与首批 P1 正式契约](../changes/CHG-2026-007-contract-closure.md) |
 | CHG-2026-006 | `SPEC_APPROVED` | [修正 Terra Medium Profile 模型大小写](../changes/CHG-2026-006-terra-case-correction.md) |
 | CHG-2026-005 | `SPEC_APPROVED` | [建立跨 Session 并行 Agent 控制面](../changes/CHG-2026-005-agent-control-plane.md) |
 | CHG-2026-005 | `SPEC_APPROVED` | [将人类文档同步改为提交前自动执行](../changes/CHG-2026-005-automatic-human-docs.md) |
