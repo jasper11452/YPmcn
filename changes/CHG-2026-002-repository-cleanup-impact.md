@@ -4,7 +4,7 @@
 
 - 变更内容：删除旧 DB-backed MockMCP、直接企微发送代码、假向量索引、敏感来源资料、历史文档、生成物和旧分支。
 - 变更原因：这些内容已被 v3 Spec/provider/reference MCP/vector MCP 取代，继续保留会造成双入口、误操作风险和维护噪声。
-- 风险等级：Medium。正式契约与当前运行时不变，但删除了可手工执行真实副作用的旧工具和本地未跟踪资料。
+- 风险等级：High。正式契约与当前运行时不变，但会删除真实副作用旧工具、用户本地资料并改写全部保留分支的提交 SHA。
 
 ## Contract Changes
 
@@ -30,6 +30,7 @@
 | 三份旧实现/迁移文档 | 删除 | 移除过时 MockMCP、假向量和未批准数据库操作指引 |
 | `src/README.md`、根 `README.md` | 新增/修改 | 明确根源码目录当前不承载独立运行时 |
 | ignored 生成物与 Git refs | 删除 | 不影响可复现源码；降低磁盘和导航噪声 |
+| 保留分支 Git 历史 | 定向改写 | 仅移除完整客户需求 CSV；全部提交 ID 随之变化 |
 
 ## Dependency and Runtime Impact
 
@@ -41,7 +42,8 @@
 ## Data and Security Impact
 
 - 不读取、复制或输出 CSV 中的客户内容；只删除文件。
-- 当前提交删除文件不会自动从既有 Git 对象抹除。仓库暂无 remote，后续如需首次推送，应另行评估历史净化。
+- 仓库暂无 remote；对 `main` 与 portable archive 的全部可达历史定向移除客户 CSV，再删除 backup refs、过期 reflog 和不可达对象。
+- 不创建包含客户 CSV 的 bundle、tag 或备份分支。净化前后的当前树摘要必须一致；portable 分支除该 CSV 外的清单摘要必须一致。
 - 删除直发企微和 DB-backed Mock 后，误执行真实副作用的本地入口减少。
 
 ## Validation
@@ -51,13 +53,15 @@
 - `npm run pack:yp` 证明删除项不属于当前发布运行时。
 - OpenCode 基于冻结提交执行不同上下文的只读验证。
 - 最终检查 Git worktree、branch、ignored 目录和发布目录状态。
+- Git 对象清单中不得再出现客户 CSV 路径，且净化前记录的 blob 必须不可读取。
 
 ## Rollback
 
 - tracked 变更可整体 revert。
 - 生成物按锁文件重建，不作为回滚资产保存。
 - 不通过回滚恢复客户完整需求 CSV、旧直发脚本或过期本地凭据入口；确有业务需求时需发起新的安全评审。
+- 历史 SHA 改写不可通过保留旧 ref 回滚，否则会重新暴露客户数据；外部引用应以净化后的 SHA 为准。
 
 ## Open Questions
 
-- Git 历史净化不在本次范围；当前无 remote，不阻塞工作树清理。
+- 无。仓库无 remote，用户已批准删除清单，历史净化在本地完成。
