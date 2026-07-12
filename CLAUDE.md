@@ -20,7 +20,7 @@ Claude Code 是唯一 Orchestrator：冻结 `goal`、依赖、`allowed_paths`、
 
 每个 Task 必须从以下精确、大小写敏感的 Profile 选择一个，并填写 `profile_reason`：
 
-- `executor-terra-medium-fast`：`gpt-5.6-Terra` / `medium` / `fast`，仅在该精确目录项可用时用于局部低风险任务。
+- `executor-terra-medium-fast`：`gpt-5.6-terra` / `medium` / `fast`，用于局部低风险任务。
 - `executor-terra-max-fast`：`gpt-5.6-terra` / `max` / `fast`，跨文件、并发、状态或高风险实现。
 - `executor-sol-max-fast`：`gpt-5.6-sol` / `max` / `fast`，架构/诊断占比高或需要另一条 max 模型路径。
 

@@ -95,7 +95,7 @@ npm run agent-flow -- dispatch <task-id> --json
 
 终端或 Claude Session 中断后，不重新猜任务上下文；先读 `status`，确认旧 Codex 子进程已退出，再用 `resume <task-id>` 续跑。Executor 完成后依次 `verify`、`integrate`、`cleanup`。高频状态保存在 Git common dir，不污染任一 worktree；任务和最终验证证据仍在 Git 中审计。
 
-Claude 按任务路由：精确目录项可用时，局部低风险任务可用 `executor-terra-medium-fast`；跨文件、并发、状态或高风险实现用 `executor-terra-max-fast`；架构/诊断占比高或需要另一条 max 模型路径时用 `executor-sol-max-fast`。三者都固定 `fast`，禁止大小写归一化和自动 fallback；模板不预选 Profile，必须逐任务明确填写。完整约束见 `workflows/README.md`。
+Claude 按任务路由：局部低风险任务可用 `executor-terra-medium-fast`；跨文件、并发、状态或高风险实现用 `executor-terra-max-fast`；架构/诊断占比高或需要另一条 max 模型路径时用 `executor-sol-max-fast`。两档 Terra 都使用小写 `gpt-5.6-terra`，仅 reasoning 不同；三档都固定 `fast`，禁止自动 fallback，模板不预选 Profile，必须逐任务明确填写。完整约束见 `workflows/README.md`。
 
 ## 6. 测试门禁
 

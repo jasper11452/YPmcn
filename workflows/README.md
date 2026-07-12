@@ -18,7 +18,7 @@ Claude 必须显式选择下列大小写敏感 Profile，并写 `profile_reason`
 
 | Profile | 精确模型 | Reasoning | Tier | 建议路由 |
 | --- | --- | --- | --- | --- |
-| `executor-terra-medium-fast` | `gpt-5.6-Terra` | `medium` | `fast` | 精确目录项可用时的低风险、局部、验收明确实现 |
+| `executor-terra-medium-fast` | `gpt-5.6-terra` | `medium` | `fast` | 低风险、局部、验收明确的常规实现 |
 | `executor-terra-max-fast` | `gpt-5.6-terra` | `max` | `fast` | 跨文件、并发、状态或高风险实现的默认 max 通道 |
 | `executor-sol-max-fast` | `gpt-5.6-sol` | `max` | `fast` | 架构/诊断占比高，或需要另一条 max 模型路径时 |
 

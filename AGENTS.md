@@ -53,7 +53,7 @@ Spec 或正式 Change Proposal 必须完整暂存；pre-commit hook 会自动同
 
 - `executor-sol-max-fast` → `gpt-5.6-sol` / `max` / `fast`。
 - `executor-terra-max-fast` → `gpt-5.6-terra` / `max` / `fast`。
-- `executor-terra-medium-fast` → `gpt-5.6-Terra` / `medium` / `fast`。
+- `executor-terra-medium-fast` → `gpt-5.6-terra` / `medium` / `fast`。
 
 高频状态、JSONL、session ID 和锁只写 Git common dir 的 `agent-flow/`，不提交到工作树。Codex 非交互执行期间不依赖面向用户的周期进度消息；Orchestrator 只在状态转换、阻塞或最终验收时汇总。
 

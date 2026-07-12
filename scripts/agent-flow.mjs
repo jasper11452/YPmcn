@@ -71,7 +71,7 @@ export const pinnedCodexProfiles = Object.freeze({
     approval_policy: "never",
   }),
   "executor-terra-medium-fast": Object.freeze({
-    model: "gpt-5.6-Terra",
+    model: "gpt-5.6-terra",
     model_reasoning_effort: "medium",
     service_tier: "fast",
     sandbox_mode: "workspace-write",

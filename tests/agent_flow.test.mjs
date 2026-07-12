@@ -95,17 +95,17 @@ describe("cross-session agent control plane", () => {
         approval_policy: "never",
       },
       "executor-terra-medium-fast": {
-        model: "gpt-5.6-Terra",
+        model: "gpt-5.6-terra",
         model_reasoning_effort: "medium",
         service_tier: "fast",
         sandbox_mode: "workspace-write",
         approval_policy: "never",
       },
     });
-    assert.notEqual(
+    assert.equal(
       source.profiles["executor-terra-max-fast"].model,
       source.profiles["executor-terra-medium-fast"].model,
-      "model case must not be normalized",
+      "Terra max and medium must use the same lowercase model slug",
     );
     for (const [name, profile] of Object.entries(source.profiles)) {
       assert.match(claudeInstructions, new RegExp(`${name}.*${profile.model}`));
@@ -172,7 +172,8 @@ describe("cross-session agent control plane", () => {
     ], whitelist);
     assert.equal(catalogStatus["executor-sol-max-fast"].reasoning_supported, true);
     assert.equal(catalogStatus["executor-terra-max-fast"].reasoning_supported, true);
-    assert.equal(catalogStatus["executor-terra-medium-fast"].listed_exactly, false);
+    assert.equal(catalogStatus["executor-terra-medium-fast"].listed_exactly, true);
+    assert.equal(catalogStatus["executor-terra-medium-fast"].reasoning_supported, true);
   });
 
   it("validates task definitions and rejects unknown profiles or unsafe states", async (t) => {
