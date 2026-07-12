@@ -4,6 +4,14 @@
 
 仓库把业务来源资料固化为可验证的 `mvp-v2` 契约、OpenClaw Skill/Hook、无网络 reference MCP、向量 MCP 和只读 provider 预检。
 
+## 人类阅读入口
+
+- [1 分钟总览](docs/README.md)：项目是什么、当前能不能上线、先读什么。
+- [项目地图](docs/PROJECT_MAP.md)：每个目录负责什么、不同变更去哪里改。
+- [演进历程](docs/EVOLUTION.md)：为什么从旧 Mock/多入口演进到当前结构。
+
+这三份文档用于理解和导航；正式契约仍只在根 `spec/`。
+
 ## 目录
 
 ```text
@@ -47,6 +55,7 @@ project/
 
 ```bash
 npm ci
+npm run docs:sync
 npm run verify
 npm run pack:yp
 ```

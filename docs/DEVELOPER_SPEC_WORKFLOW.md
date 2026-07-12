@@ -1,5 +1,7 @@
 # 人类开发者 Spec-Driven Development 使用手册
 
+第一次了解项目先读 `docs/README.md`、`docs/PROJECT_MAP.md` 和 `docs/EVOLUTION.md`；本手册只说明如何安全修改。
+
 ## 1. 从哪里打开项目
 
 只把 Git 主工作树当作长期项目。`../YPmcn-worktrees/` 是临时隔离空间，里面每个目录对应某个任务分支；它们不是第二个项目，也不应成为发布或日常编辑入口。
@@ -12,7 +14,7 @@
 project/
 ├── spec/          # 唯一已批准机器契约
 ├── changes/       # 需求、提案、影响分析和决策
-├── src/           # 根级生产代码
+├── src/           # 根级共享边界，当前无独立运行时
 ├── tests/         # 仓库级契约、集成和发布测试
 ├── workflows/     # 任务、角色和验证模板
 ├── packages/      # staging 与 tgz 构建产物
@@ -33,7 +35,7 @@ project/
 | `packages/` | 自动生成，不手工编辑 |
 | `fix-logs/` | 重要问题闭环后追加 |
 
-`doc/` 保存原始来源资料和 Finder Alias；它不是机器事实源。来源资料与 Spec 冲突时，先走 Change Proposal 更新 Spec，不让实现自行裁决。
+`doc/` 只暂留 Algorithm Spec 引用的来源 Alias；它不是机器事实源。来源资料与 Spec 冲突时，先走 Change Proposal 更新 Spec，不让实现自行裁决。
 
 ## 3. 关键概念
 
@@ -58,6 +60,15 @@ project/
 ```
 
 涉及字段、Tool、错误码、权限、Hook 阻断、阶段或算法输入输出时，Change Proposal 未批准前不启动正式实现。内部重构、日志、测试补充或文档错字通常不改对外 Spec，但仍需有界任务和验证。
+
+Spec 或 Change Proposal 修改完成后固定执行：
+
+```bash
+npm run docs:sync
+npm run verify:docs
+```
+
+同步脚本只更新三份人类文档中的机器事实区块。随后仍要人工检查结构解释、原则和演进原因是否需要调整，再进入完整验证。
 
 ## 5. 任务与并行
 

@@ -9,7 +9,9 @@
   ],
   "scripts": {
     "test": "npm run verify",
+    "docs:sync": "node scripts/sync-human-docs.mjs",
     "verify": "node scripts/verify.mjs",
+    "verify:docs": "node scripts/sync-human-docs.mjs --check",
     "verify:spec": "node --test tests/spec_governance.test.mjs",
     "verify:provider": "node scripts/check-provider-contract.mjs --url https://mcp.eshypdata.com/sse",
     "pack:yp": "node scripts/prepare-package.mjs"
