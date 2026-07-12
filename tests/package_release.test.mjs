@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
@@ -35,6 +35,7 @@ function dryRunFiles() {
 }
 
 before(stageIfImplemented);
+after(() => rmSync(stagedPluginRoot, { recursive: true, force: true }));
 
 describe("3.0.0 release metadata", () => {
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
