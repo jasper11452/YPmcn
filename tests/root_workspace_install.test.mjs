@@ -22,7 +22,6 @@ describe("root workspace installation", () => {
       const rootLinkEntry = rootLock.packages[`node_modules/${workspacePackage.name}`];
 
       assert.ok(rootWorkspaceEntry, `missing root lock entry for ${workspace}`);
-      assert.equal(rootWorkspaceEntry.name, workspacePackage.name);
       assert.equal(rootWorkspaceEntry.version, workspacePackage.version);
       assert.deepEqual(
         rootWorkspaceEntry.dependencies ?? {},

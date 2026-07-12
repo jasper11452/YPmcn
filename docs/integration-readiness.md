@@ -1,6 +1,6 @@
 # YPmcn v3 集成与上线就绪报告
 
-日期：2026-07-11
+日期：2026-07-12
 
 目标契约：`mvp-v2`
 
@@ -20,9 +20,10 @@
 
 ## 2. 仓库验收证据
 
-`npm run verify` 已通过，统一验证覆盖 172 项测试：
+`npm run verify` 已通过，统一验证覆盖 173 项测试：
 
 - Spec 治理与漂移门禁：6 项。
+- 根 workspace 安装图：1 项。
 - 密钥与发布边界：16 项。
 - OpenClaw 插件、契约与 Hook：104 项。
 - reference MCP 与 provider checker：8 项。

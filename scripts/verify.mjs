@@ -28,6 +28,11 @@ export function verifyRepository() {
       args: ["--test", "tests/spec_governance.test.mjs"],
     },
     {
+      name: "root workspace installation",
+      command: process.execPath,
+      args: ["--test", "tests/root_workspace_install.test.mjs"],
+    },
+    {
       name: "secret scanner tests",
       command: process.execPath,
       args: ["--test", "tests/secret_scan.test.mjs"],

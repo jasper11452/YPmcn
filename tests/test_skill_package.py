@@ -236,12 +236,13 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_readiness_report_matches_current_verification_inventory(self):
         text = read(ROOT / "docs" / "integration-readiness.md")
         for required in (
-            "统一验证覆盖 172 项测试",
+            "统一验证覆盖 173 项测试",
+            "根 workspace 安装图：1 项",
             "reference MCP 与 provider checker：8 项",
             "Skill、工具卡和文档一致性：16 项",
         ):
             self.assertIn(required, text)
-        self.assertNotIn("统一验证覆盖 166 项测试", text)
+        self.assertNotIn("统一验证覆盖 172 项测试", text)
 
     def test_agent_instructions_keep_specs_authoritative_and_production_separate(self):
         text = read(ROOT / "AGENTS.md")

@@ -51,7 +51,9 @@ npm run verify
 npm run pack:yp
 ```
 
-`npm run verify` 执行 Spec 漂移门禁、密钥扫描、插件契约与 Hook、reference MCP、文档、向量 MCP 和发布包验证。`npm run pack:yp` 在 `packages/.staging/` 组装，并把扫描后的包输出到 `packages/releases/`。
+根 `package.json` 统一管理 `YPmcn` 与 `vector-mcp` 两个 npm workspace；一次根 `npm ci` 会安装全部构建和测试依赖，无需分别进入组件安装。
+
+`npm run verify` 执行 Spec 漂移门禁、根安装图检查、密钥扫描、插件契约与 Hook、reference MCP、文档、向量 MCP 和发布包验证。`npm run pack:yp` 在 `packages/.staging/` 组装，并把扫描后的包输出到 `packages/releases/`。
 
 生产 provider 只读门禁单独执行：
 
