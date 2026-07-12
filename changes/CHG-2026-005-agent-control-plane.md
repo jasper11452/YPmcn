@@ -117,3 +117,20 @@ rollback: "revert 本变更提交并删除三个新增用户级 Codex profile；
 ## Implementation Note — Codex CLI 0.144.1
 
 当前 CLI 的 `features`、`mcp` 和 `debug` 离线子命令会明确拒绝 `--strict-config`，只有 `exec/review` 等模型运行命令接受该开关。为避免为了配置检查发起三次真实模型任务，安装阶段使用 `codex --profile <name> mcp list` 验证三份 Profile 能被原生 CLI 加载，并由确定性测试逐字段校验精确白名单；控制器生成的每次真实 `codex exec` 仍强制包含 `--strict-config`。这不降低运行期门禁，也不探测或归一化模型目录。
+
+## Result — 2026-07-12
+
+```yaml
+status: VERIFIED
+implementation_sha: "83cbd3417625f8de23f3b905b14d311ea1dbe089"
+verifier: "OpenCode / yuepu/Deepseek-V4-Pro / read-only"
+verification_result: PASS
+unexpected_writes: 0
+verification_evidence: "workflows/verifications/CHG-2026-005-AGENT-FLOW.json"
+```
+
+- 13 项控制面测试与 191 项仓库离线门禁全部通过；tracked 密钥扫描与 diff 检查为零发现。
+- 三份 `0600` 用户级 opt-in Profile 已安装并被当前 Codex CLI 加载，现有 `yuepu.config.toml` 安装前后哈希不变。
+- 当前 catalog 精确列出 `gpt-5.6-sol/max` 与 `gpt-5.6-terra/max`；未列出 `gpt-5.6-Terra/medium`。第三档按用户输入保留，catalog 预检会在启动模型前返回 `BLOCKED`，不会纠正大小写或 fallback。
+- OpenCode 复跑门禁并检查冻结的 `0bec372..83cbd34`；工作树、项目 plan 目录和用户 plan 目录前后均无变化。
+- `spec/**`、业务组件、生产 provider、数据库、CI 和发布包源码零修改。
