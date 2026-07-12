@@ -18,10 +18,11 @@
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0`
-变更记录摘要：`sha256:684a6a5ec055681946d9ad8ddb18aa1c8fa3bc1e26ffbe422fa70fc25040de42`
+变更记录摘要：`sha256:cfcd069f85b187f00738c4e12491b153d2089b3b981444c7b8244887d828f27a`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-006 | `SPEC_APPROVED` | [修正 Terra Medium Profile 模型大小写](../changes/CHG-2026-006-terra-case-correction.md) |
 | CHG-2026-005 | `SPEC_APPROVED` | [建立跨 Session 并行 Agent 控制面](../changes/CHG-2026-005-agent-control-plane.md) |
 | CHG-2026-005 | `SPEC_APPROVED` | [将人类文档同步改为提交前自动执行](../changes/CHG-2026-005-automatic-human-docs.md) |
 | CHG-2026-004 | `SPEC_APPROVED` | [建立极简人类文档与 Spec 同步门禁](../changes/CHG-2026-004-human-documentation.md) |
