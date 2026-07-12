@@ -104,7 +104,7 @@ rollback: "回滚方式"
 3. 只做完成验收所需的最小修改；不顺手重构、不弱化测试、不用 Prompt 绕过服务端门禁。
 4. Bug 修复先写稳定复现测试，再修实现并跑相邻回归。
 5. 契约变化至少覆盖正常、缺失、非法、权限/副作用、错误映射、幂等或回滚场景。
-6. Spec 或 Change Proposal 改动后运行 `npm run docs:sync`，人工复核人类文档，再运行 `npm run verify:docs`。
+6. Spec 或正式 Change Proposal 完整暂存后由 pre-commit hook 自动同步人类文档；无需固定手动运行 `npm run docs:sync`。提交后人工复核叙事，再运行只读 `npm run verify:docs`。
 7. 执行任务单中的全部命令；未运行的测试必须标记 `NOT RUN` 和风险。
 
 本仓库离线总门禁：

@@ -92,7 +92,7 @@ function collectChanges(root) {
 function block(key, lines) {
   return [
     `<!-- human-docs:${key}:start -->`,
-    "<!-- 由 npm run docs:sync 生成；不要手工编辑本区块。 -->",
+    "<!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->",
     ...lines,
     `<!-- human-docs:${key}:end -->`,
   ].join("\n");

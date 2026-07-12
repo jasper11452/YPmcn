@@ -10,12 +10,12 @@
 2. **单一项目根**：正式 Spec 迁到根 `spec/`，组件、测试、产物和变更记录各归其位。
 3. **安全清理**：退役旧 Mock/直发链路，移除完整客户数据、历史包、缓存和废弃分支。
 4. **一键安装**：根 npm workspace 覆盖插件与向量 MCP，一次 `npm ci` 即可验证全仓库。
-5. **人类可读**：保留极简叙事，机器事实由 Spec/Change 自动同步并受测试约束。
+5. **人类可读**：保留极简叙事，Spec/Change 的机器事实在提交前自动同步，验证只负责检查漂移。
 
 ## 已批准变更索引
 
 <!-- human-docs:change-index:start -->
-<!-- 由 npm run docs:sync 生成；不要手工编辑本区块。 -->
+<!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0`
 变更记录摘要：`sha256:a4a4ec20cfb11ee7fce1bdd669429831a6883338d1f41754858d3739369c98bb`

@@ -21,7 +21,7 @@
 ## 当前事实
 
 <!-- human-docs:spec-summary:start -->
-<!-- 由 npm run docs:sync 生成；不要手工编辑本区块。 -->
+<!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 | 当前事实 | 值 |
 | --- | --- |
@@ -47,9 +47,8 @@
 
 ```bash
 npm ci
-npm run docs:sync
 npm run verify
 npm run pack:yp
 ```
 
-Spec 或 Change Proposal 更新完成后：先运行 `npm run docs:sync`，人工扫一遍这三份文档，再执行 `npm run verify:docs` 和完整验证。
+正常不需要手动同步：完整暂存 Spec 或正式 Change Proposal 后直接提交，pre-commit hook 会更新并纳入三份文档。`npm run docs:sync` 仅用于提交前即时预览或修复；完成前仍要人工扫一遍叙事，并执行只读 `npm run verify:docs` 和完整验证。

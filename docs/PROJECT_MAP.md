@@ -11,6 +11,7 @@
 
 | 位置 | 责任 | 人工检查重点 |
 | --- | --- | --- |
+| `.githooks/` | 提交前自动维护 | 只同步相关变更，不扩大部分暂存范围 |
 | `spec/` | 唯一正式机器契约 | 字段、Tool、阶段、错误、副作用是否一致 |
 | `changes/` | 为什么改、影响什么 | 范围、风险、验证、回滚是否明确 |
 | `YPmcn/` | 可发布插件组件 | Skill/Hook 是否只执行契约允许的行为 |
@@ -25,7 +26,7 @@
 ## 正式契约地图
 
 <!-- human-docs:contract-map:start -->
-<!-- 由 npm run docs:sync 生成；不要手工编辑本区块。 -->
+<!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 Spec 摘要：`sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0`
 
@@ -52,6 +53,8 @@ Spec 摘要：`sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b3
 | 错误与重试 | `spec/errors.json` | 写结果未知时的对账路径 |
 | 算法规则 | `spec/algorithms.json` | 未批准时保持阻断，不从代码反推 |
 | 仅内部实现或文档 | 对应组件/文档 | 仍需有界任务和验证 |
+
+Spec 或正式 Change Proposal 提交时会自动刷新三个事实区块；`npm run docs:sync` 只是即时预览/修复入口，`npm run verify:docs` 始终只读。
 
 ## 三个不要混淆
 

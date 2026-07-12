@@ -11,11 +11,13 @@
 - [演进历程](docs/EVOLUTION.md)：为什么从旧 Mock/多入口演进到当前结构。
 
 这三份文档用于理解和导航；正式契约仍只在根 `spec/`。
+`spec/**` 或正式 Change Proposal 提交时，版本化 pre-commit hook 会自动同步机器事实；正常流程不需要手动维护生成区块。
 
 ## 目录
 
 ```text
 project/
+├── .githooks/     # 提交前自动同步与安全检查
 ├── spec/          # 唯一已批准机器契约
 ├── changes/       # Change Proposal、Impact Analysis、决策记录
 ├── src/           # 根级共享代码边界（当前无独立运行时）
@@ -55,12 +57,11 @@ project/
 
 ```bash
 npm ci
-npm run docs:sync
 npm run verify
 npm run pack:yp
 ```
 
-根 `package.json` 统一管理 `YPmcn` 与 `vector-mcp` 两个 npm workspace；一次根 `npm ci` 会安装全部构建和测试依赖，无需分别进入组件安装。
+根 `package.json` 统一管理 `YPmcn` 与 `vector-mcp` 两个 npm workspace；一次根 `npm ci` 会安装全部构建和测试依赖，并自动启用仓库 hook，无需分别进入组件安装。`npm run docs:sync` 只在需要提交前即时预览或修复时使用。
 
 `npm run verify` 执行 Spec 漂移门禁、根安装图检查、密钥扫描、插件契约与 Hook、reference MCP、文档、向量 MCP 和发布包验证。`npm run pack:yp` 在 `packages/.staging/` 组装，并把扫描后的包输出到 `packages/releases/`。
 

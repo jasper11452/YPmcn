@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
@@ -20,6 +30,34 @@ function localMarkdownLinks(source) {
   return [...source.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)]
     .map((match) => match[1])
     .filter((target) => !target.startsWith("#") && !/^[a-z]+:/i.test(target));
+}
+
+function run(command, args, cwd, expectedStatus = 0) {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8" });
+  assert.equal(
+    result.status,
+    expectedStatus,
+    `${command} ${args.join(" ")}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+  );
+  return result;
+}
+
+function git(cwd, ...args) {
+  return run("git", args, cwd).stdout.trim();
+}
+
+function createGitFixture(t) {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "ypmcn-human-docs-git-"));
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+  for (const directory of ["spec", "changes", "docs", "scripts", ".githooks"]) {
+    cpSync(join(repoRoot, directory), join(fixtureRoot, directory), { recursive: true });
+  }
+  git(fixtureRoot, "init", "-q");
+  git(fixtureRoot, "config", "user.name", "Human Docs Test");
+  git(fixtureRoot, "config", "user.email", "human-docs@example.invalid");
+  git(fixtureRoot, "add", ".");
+  git(fixtureRoot, "commit", "-q", "--no-verify", "-m", "baseline");
+  return fixtureRoot;
 }
 
 describe("human documentation", () => {
@@ -71,8 +109,88 @@ describe("human documentation", () => {
     for (const source of [agentRules, developerWorkflow, agentWorkflow]) {
       assert.match(source, /npm run docs:sync/);
       assert.match(source, /npm run verify:docs/);
+      assert.match(source, /pre-commit/);
     }
     assert.equal(rootPackage.scripts["docs:sync"], "node scripts/sync-human-docs.mjs");
     assert.equal(rootPackage.scripts["verify:docs"], "node scripts/sync-human-docs.mjs --check");
+    assert.equal(rootPackage.scripts.prepare, "node scripts/install-git-hooks.mjs");
+  });
+
+  it("installs the versioned pre-commit hook from the root npm lifecycle", (t) => {
+    for (const relativePath of [
+      ".githooks/pre-commit",
+      "scripts/install-git-hooks.mjs",
+      "scripts/pre-commit-human-docs.mjs",
+    ]) {
+      assert.equal(existsSync(join(repoRoot, relativePath)), true, relativePath);
+    }
+    assert.ok((statSync(join(repoRoot, ".githooks/pre-commit")).mode & 0o111) !== 0, "hook must be executable");
+
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "ypmcn-hook-install-"));
+    t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+    mkdirSync(join(fixtureRoot, "scripts"));
+    mkdirSync(join(fixtureRoot, ".githooks"));
+    cpSync(join(repoRoot, "scripts/install-git-hooks.mjs"), join(fixtureRoot, "scripts/install-git-hooks.mjs"));
+    cpSync(join(repoRoot, ".githooks/pre-commit"), join(fixtureRoot, ".githooks/pre-commit"));
+    git(fixtureRoot, "init", "-q");
+
+    run(process.execPath, ["scripts/install-git-hooks.mjs"], fixtureRoot);
+    assert.equal(git(fixtureRoot, "config", "--local", "--get", "core.hooksPath"), ".githooks");
+
+    const nonGitRoot = mkdtempSync(join(tmpdir(), "ypmcn-hook-no-git-"));
+    t.after(() => rmSync(nonGitRoot, { recursive: true, force: true }));
+    mkdirSync(join(nonGitRoot, "scripts"));
+    mkdirSync(join(nonGitRoot, ".githooks"));
+    cpSync(join(repoRoot, "scripts/install-git-hooks.mjs"), join(nonGitRoot, "scripts/install-git-hooks.mjs"));
+    cpSync(join(repoRoot, ".githooks/pre-commit"), join(nonGitRoot, ".githooks/pre-commit"));
+    const skipped = run(process.execPath, ["scripts/install-git-hooks.mjs"], nonGitRoot);
+    assert.match(skipped.stdout, /skipped: not a Git working tree/);
+  });
+
+  it("automatically synchronizes and stages human docs for a relevant commit", async (t) => {
+    const fixtureRoot = createGitFixture(t);
+    run(process.execPath, ["scripts/install-git-hooks.mjs"], fixtureRoot);
+    const errorSpec = join(fixtureRoot, "spec/errors.json");
+    writeFileSync(errorSpec, `${readFileSync(errorSpec, "utf8").trimEnd()}\n\n`);
+    git(fixtureRoot, "add", "spec/errors.json");
+
+    git(fixtureRoot, "commit", "-q", "-m", "change spec");
+    const committed = git(fixtureRoot, "show", "--pretty=format:", "--name-only", "HEAD")
+      .split("\n")
+      .filter(Boolean)
+      .sort();
+    assert.deepEqual(committed, [
+      "docs/EVOLUTION.md",
+      "docs/PROJECT_MAP.md",
+      "docs/README.md",
+      "spec/errors.json",
+    ]);
+    assert.equal(git(fixtureRoot, "status", "--short"), "");
+    const { collectHumanDocDrift } = await import("../scripts/sync-human-docs.mjs");
+    assert.deepEqual(collectHumanDocDrift(fixtureRoot), []);
+  });
+
+  it("skips unrelated commits and fails closed around unstaged relevant content", (t) => {
+    const fixtureRoot = createGitFixture(t);
+    run(process.execPath, ["scripts/install-git-hooks.mjs"], fixtureRoot);
+    const originalDocs = humanDocs.map(({ path }) => [path, readFileSync(join(fixtureRoot, path), "utf8")]);
+
+    writeFileSync(join(fixtureRoot, "notes.txt"), "unrelated\n");
+    git(fixtureRoot, "add", "notes.txt");
+    git(fixtureRoot, "commit", "-q", "-m", "unrelated");
+    for (const [path, source] of originalDocs) assert.equal(readFileSync(join(fixtureRoot, path), "utf8"), source);
+
+    const errorSpec = join(fixtureRoot, "spec/errors.json");
+    writeFileSync(errorSpec, `${readFileSync(errorSpec, "utf8").trimEnd()}\n\n`);
+    git(fixtureRoot, "add", "spec/errors.json");
+    writeFileSync(errorSpec, `${readFileSync(errorSpec, "utf8")}\n`);
+    const untrackedProposal = "changes/CHG-2099-999-untracked.md";
+    writeFileSync(join(fixtureRoot, untrackedProposal), "# untracked proposal\n");
+
+    const commit = run("git", ["commit", "-m", "unsafe partial change"], fixtureRoot, 1);
+    assert.match(commit.stderr, /unsafe human-doc source state/);
+    assert.match(commit.stderr, /spec\/errors\.json/);
+    assert.match(commit.stderr, /CHG-2099-999-untracked\.md/);
+    for (const [path, source] of originalDocs) assert.equal(readFileSync(join(fixtureRoot, path), "utf8"), source);
   });
 });
