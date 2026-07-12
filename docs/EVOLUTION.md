@@ -19,10 +19,11 @@
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:4a143891ab6136ddb7993de0606b6466d46a9bd48f29b139f4068a4086820e28`
-变更记录摘要：`sha256:28d1d51cb049389e7b0a9fcd63509660c09f414add632518a101a9e64391369b`
+变更记录摘要：`sha256:3fd587f23ef810c991bb6173ce986e0c720f8feace73391ab118d229f4da9a48`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-008 | `SPEC_APPROVED` | [锁定业务 MCP canonical namespace](../changes/CHG-2026-008-mcp-namespace.md) |
 | CHG-2026-007 | `SPEC_APPROVED` | [固化 P0 与首批 P1 正式契约](../changes/CHG-2026-007-contract-closure.md) |
 | CHG-2026-006 | `SPEC_APPROVED` | [修正 Terra Medium Profile 模型大小写](../changes/CHG-2026-006-terra-case-correction.md) |
 | CHG-2026-005 | `SPEC_APPROVED` | [建立跨 Session 并行 Agent 控制面](../changes/CHG-2026-005-agent-control-plane.md) |
