@@ -47,4 +47,3 @@ approved_spec_version: "mvp-v2 / schemaVersion 1"
 ## Open Questions
 
 无。文档默认使用中文，机器标识、路径和命令保持原文以便精确定位。
-

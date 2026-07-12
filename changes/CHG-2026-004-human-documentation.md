@@ -98,4 +98,3 @@ rollback: "revert 本变更；现有 Agent/Spec/运行时不受影响"
 4. 接入根脚本、统一验证和 Agent/开发者规则。
 5. 同步事实区块，运行全量验证和打包。
 6. 冻结提交，由 OpenCode 只读验证后快进 `main`。
-

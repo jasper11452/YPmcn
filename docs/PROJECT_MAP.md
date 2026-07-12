@@ -58,4 +58,3 @@ Spec 摘要：`sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b3
 - `YPmcn/` 是发布组件，不是第二个项目根。
 - `reference-mcp/` 是模拟器，不是生产 provider。
 - 发布包中的 `spec/` 是构建快照，不是可编辑事实源。
-

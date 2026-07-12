@@ -53,4 +53,3 @@ npm run pack:yp
 ```
 
 Spec 或 Change Proposal 更新完成后：先运行 `npm run docs:sync`，人工扫一遍这三份文档，再执行 `npm run verify:docs` 和完整验证。
-

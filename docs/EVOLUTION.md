@@ -18,7 +18,7 @@
 <!-- 由 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0`
-变更记录摘要：`sha256:ae52d9ca3d1f60c67763f2fa4828afd5a9ac2af3b9e0a099c5eddad76791b1f4`
+变更记录摘要：`sha256:994f1d53597afb5c678f837dd66471911609fd0d40cf453045dba8ee357130a0`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
@@ -33,4 +33,3 @@
 - 仓库治理和离线发布链路已经稳定，新增功能继续走 Change Proposal → Spec → 实现 → 独立验证。
 - 下一阶段重点不在恢复旧本地实现，而在升级生产 provider、补数据库部署证明并导入获批算法定义。
 - 历史细节需要时看 `changes/` 和 Git；活跃 `docs/` 只保留当前人类需要的信息。
-
