@@ -20,10 +20,11 @@
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:1b0ab552e9a36afd268144f239412fee814c38d9c368ac2f8736050b70fff94d`
-变更记录摘要：`sha256:ff3a42902bc9252d97667dabe5a643b596cf0ceb42cd121fd8e9784859863c0b`
+变更记录摘要：`sha256:cf7a5e4fc5e745771f9d1dff95c8e14803153d365702b0ab07cca7ea8a915a03`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-011 | `SPEC_APPROVED` | [修正 Hook 与 OpenClaw 宿主接口对接](../changes/CHG-2026-011-hook-host-integration.md) |
 | CHG-2026-010 | `SPEC_APPROVED` | [Reference MCP 实现正式输出与恢复契约](../changes/CHG-2026-010-reference-mcp-runtime.md) |
 | CHG-2026-009 | `SPEC_APPROVED` | [Hook / Skill 消费服务端权威状态](../changes/CHG-2026-009-hook-skill-authority.md) |
 | CHG-2026-008 | `SPEC_APPROVED` | [锁定业务 MCP canonical namespace](../changes/CHG-2026-008-mcp-namespace.md) |
