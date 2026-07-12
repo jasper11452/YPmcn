@@ -1,0 +1,52 @@
+{
+  "task_id": "CHG-2026-008-NAMESPACE",
+  "base_sha": "84e2c53cc3b318b57c62eaae8a72f66008fef252",
+  "head_sha": "af8cb501a38a27e8479a5092ef4d7c5c7fa37e50",
+  "verifier": {
+    "tool": "OpenCode",
+    "model": "yuepu/Deepseek-V4-Pro",
+    "mode": "read-only"
+  },
+  "status": "PASS",
+  "commands": [
+    {
+      "command": "git diff --check 84e2c53..af8cb50",
+      "result": "PASS",
+      "evidence": "No whitespace errors in frozen commit range."
+    },
+    {
+      "command": "npm run verify:spec",
+      "result": "PASS",
+      "evidence": "11/11 tests passed; test 4 specifically locks namespace while tools/list stays bare."
+    },
+    {
+      "command": "npm run verify:docs",
+      "result": "PASS",
+      "evidence": "Human documentation sync check reports synchronized; EVOLUTION/PROJECT_MAP/README/integration-readiness all updated with namespace facts and new Spec SHA."
+    },
+    {
+      "command": "npm run verify",
+      "result": "PASS",
+      "evidence": "Full verify suite passes: spec governance (11), human docs (5), agent control plane (13), root install (1), secret scanner (16), 118 plugin tests (including contract-spec.test.mjs namespace rejection tests), provider loopback (8), vector MCP (14), skill docs (16), release metadata (8). Total: 0 failures across all suites."
+    },
+    {
+      "command": "node scripts/scan-secrets.mjs --tracked",
+      "result": "PASS",
+      "evidence": "Returned empty array []."
+    }
+  ],
+  "findings": [],
+  "evidence": [
+    "All 5 verification commands pass identically to executor claims.",
+    "Diff scope is exactly 9 files / +171 -6 lines: spec/mcp.json adds serverIdentity with canonicalNamespace ypmcn, host qualified pattern, provider bare-name policy, and vector-mcp exclusion; YPmcn/src/contract/types.ts adds McpServerIdentity interface; YPmcn/src/contract/loader.ts adds validateServerIdentity with rejections for foreign namespace, bare Hook events mislabeled as business tools, and provider namespace conflation; 2 test files add contract-level and spec-governance-level machine tests proving these rejections; 4 docs files update Spec SHA and add namespace facts.",
+    "Machine tests explicitly reject: foreign canonicalNamespace, bareHookEvent=business-tool, and providerToolsList.toolNameFormat=host-qualified-tool.",
+    "Spec-governance test confirms every contract tool matches mcp__ypmcn__<name> and rejects bare names, foreign__ prefix, and vector-mcp prefix.",
+    "Boundaries preserved: legacy detection-only boundary intact, external-unverified status unchanged, production NO-GO unchanged, algorithm external-unverified unchanged.",
+    "Git status is clean; no unexpected writes, no forbidden paths (dist/, .staging/, packages/releases/) modified.",
+    "Single commit 'af8cb50 spec: lock canonical MCP namespace' with no unrelated changes."
+  ],
+  "unexpected_writes": [],
+  "known_risks": [
+    "Contract-only change; Hook enforcement is downstream and production remains NO-GO as executor noted."
+  ]
+}
