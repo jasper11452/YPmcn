@@ -795,8 +795,25 @@ export function renderResumePrompt(task, state) {
   }, null, 2)}`;
 }
 
-export function renderVerifierPrompt(task, state, executorEvidence) {
-  return `You are the independent OpenCode Verifier. Use a strictly read-only process. Do not fix code and do not create or update plan files.\n\nTask ID: ${task.task_id}\nGoal: ${task.goal}\nAcceptance criteria:\n${renderList(task.acceptance)}\n\nFrozen diff: ${state.base_sha}..${state.head_sha}\nExecutor evidence:\n${JSON.stringify(executorEvidence, null, 2)}\nVerification commands:\n${renderList(task.verification)}\n\nTreat executor claims as untrusted until reproduced. Check scope drift, regressions, boundaries, forbidden paths, compatibility and rollback. Output one JSON object with task_id, base_sha, head_sha, verifier, status (PASS, FAIL, or BLOCKED), commands, findings, evidence, known_risks, and unexpected_writes. Every FAIL must include reproducible evidence.`;
+export function renderVerifierPrompt(
+  task,
+  state,
+  executorEvidence,
+  model = "yuepu/Deepseek-V4-Pro",
+) {
+  const exactExample = {
+    task_id: task.task_id,
+    base_sha: state.base_sha,
+    head_sha: state.head_sha,
+    verifier: { tool: "OpenCode", model, mode: "read-only" },
+    status: "PASS",
+    commands: [{ command: "exact command", result: "PASS", evidence: "concise reproducible evidence" }],
+    findings: [],
+    evidence: ["string evidence only"],
+    known_risks: [],
+    unexpected_writes: [],
+  };
+  return `You are the independent OpenCode Verifier. Use a strictly read-only process. Do not fix code and do not create or update plan files.\n\nTask ID: ${task.task_id}\nGoal: ${task.goal}\nAcceptance criteria:\n${renderList(task.acceptance)}\n\nFrozen diff: ${state.base_sha}..${state.head_sha}\nExecutor evidence:\n${JSON.stringify(executorEvidence, null, 2)}\nVerification commands:\n${renderList(task.verification)}\n\nTreat executor claims as untrusted until reproduced. Check scope drift, regressions, boundaries, forbidden paths, compatibility and rollback. Every FAIL must include reproducible evidence.\n\nReturn exactly one JSON object and no Markdown. Use this exact field shape:\n${JSON.stringify(exactExample, null, 2)}\n\nStrict output rules:\n- status must be exactly PASS, FAIL, or BLOCKED.\n- every commands item must be an object with command (string), result exactly PASS/FAIL/NOT_RUN, and evidence (string).\n- findings, evidence, known_risks, and unexpected_writes must be arrays of strings only; never use objects.\n- verifier must remain exactly OpenCode + ${model} + read-only.\n- do not omit any field, even when its array is empty.`;
 }
 
 function parseJsonLines(source) {
@@ -1233,7 +1250,7 @@ function verifyTaskUnlocked({ repoRoot, task, dryRun = false }) {
   }
   if (!state.base_sha || !state.head_sha) throw new Error("verify requires frozen base_sha and head_sha");
   const model = process.env.OPENCODE_VERIFIER_MODEL || "yuepu/Deepseek-V4-Pro";
-  const prompt = renderVerifierPrompt(task, state, state.executor_result ?? {});
+  const prompt = renderVerifierPrompt(task, state, state.executor_result ?? {}, model);
   const invocation = buildOpenCodeInvocation({ repoRoot: task.worktree, prompt, model });
   if (dryRun) return invocation;
 

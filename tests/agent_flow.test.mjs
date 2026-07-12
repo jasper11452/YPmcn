@@ -295,7 +295,11 @@ describe("cross-session agent control plane", () => {
   });
 
   it("rejects untrusted executor and verifier PASS claims", async () => {
-    const { validateExecutorResult, validateVerificationResult } = await controller();
+    const {
+      renderVerifierPrompt,
+      validateExecutorResult,
+      validateVerificationResult,
+    } = await controller();
     const currentTask = task();
     const baseSha = "0123456789012345678901234567890123456789";
     const headSha = "abcdefabcdefabcdefabcdefabcdefabcdefabcd";
@@ -344,6 +348,15 @@ describe("cross-session agent control plane", () => {
       task: currentTask,
       state: { base_sha: baseSha, head_sha: headSha },
     }).join("\n"), /head_sha mismatch/);
+    const verifierPrompt = renderVerifierPrompt(
+      currentTask,
+      { base_sha: baseSha, head_sha: headSha },
+      executor,
+      "yuepu/Deepseek-V4-Pro",
+    );
+    assert.match(verifierPrompt, /result exactly PASS\/FAIL\/NOT_RUN/);
+    assert.match(verifierPrompt, /arrays of strings only; never use objects/);
+    assert.match(verifierPrompt, /"tool": "OpenCode"/);
   });
 
   it("stores mutable runtime state in the shared Git common dir", async (t) => {
