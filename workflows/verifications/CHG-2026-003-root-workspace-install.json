@@ -1,0 +1,97 @@
+{
+  "task": "CHG-2026-003",
+  "verifier": {
+    "owner": "opencode",
+    "role": "independent-verifier",
+    "model": "yuepu/Deepseek-V4-Pro",
+    "mode": "read-only"
+  },
+  "inputs": {
+    "goal": "Make one root npm ci install the root package and both buildable components so the unified verification runs directly from a clean worktree.",
+    "acceptance": [
+      "Change Proposal and Impact Analysis precede implementation.",
+      "The root manifest and lock contain exactly the YPmcn and vector-mcp workspaces.",
+      "One root npm ci is sufficient for npm run verify and npm run pack:yp.",
+      "All 173 offline tests, package checks, and tracked secret scan pass.",
+      "No formal Spec, component manifest/source, CI, provider, database, credential, or release archive source changes occur."
+    ],
+    "changed_files": [
+      "README.md",
+      "changes/CHG-2026-003-root-workspace-install-impact.md",
+      "changes/CHG-2026-003-root-workspace-install.md",
+      "docs/DEVELOPER_SPEC_WORKFLOW.md",
+      "docs/integration-readiness.md",
+      "fix-logs/CHG-2026-003-root-workspace-install.md",
+      "package-lock.json",
+      "package.json",
+      "scripts/verify.mjs",
+      "tests/root_workspace_install.test.mjs",
+      "tests/test_skill_package.py"
+    ],
+    "diff_ref": "fb5ac8603d1c5e26eacaaef4f99d06e6b6915b65..9ff99c92ecaed2ee372eead4677934380a90f036",
+    "executor_evidence": [
+      "The pre-fix root workspace regression test failed because package.json had no workspaces field.",
+      "A clean root npm ci installed 313 packages.",
+      "npm run verify passed 173 of 173 tests.",
+      "npm run pack:yp and the tracked secret scan passed.",
+      "The release archive SHA-256 remained b29f269d0e9229c42b7a4f2a69dead8ec23695754063fefc1a783de3112f57cc."
+    ]
+  },
+  "checks": {
+    "commands": [
+      {
+        "command": "git diff --check fb5ac8603d1c5e26eacaaef4f99d06e6b6915b65..9ff99c92ecaed2ee372eead4677934380a90f036",
+        "expected": "pass"
+      },
+      {
+        "command": "npm ci",
+        "expected": "pass from a dependency-clean detached worktree"
+      },
+      {
+        "command": "npm run verify",
+        "expected": "173 tests pass"
+      },
+      {
+        "command": "npm run pack:yp",
+        "expected": "pass and remove packages/.staging"
+      },
+      {
+        "command": "node scripts/scan-secrets.mjs --tracked",
+        "expected": "[]"
+      },
+      {
+        "command": "git status --short",
+        "expected": "empty"
+      }
+    ],
+    "adversarial": [
+      "Check scope drift against the approved Change Proposal.",
+      "Check workspace links and dependency ownership in the generated lockfile.",
+      "Check npm hoisting still lets both components build.",
+      "Check the regression test fails if either workspace is missing or stale.",
+      "Check test inventory arithmetic and documentation consistency.",
+      "Check verification leaves tracked files clean and staging absent."
+    ]
+  },
+  "result": {
+    "status": "PASS",
+    "severity": "none",
+    "findings": [],
+    "evidence": [
+      "The proposal and impact analysis were committed before the regression test and implementation commits.",
+      "A fresh detached worktree had no node_modules; one root npm ci added 313 packages and exposed TypeScript 5.9.3 to both workspaces.",
+      "The independent verifier reran the unified gate: 6 + 1 + 16 + 104 + 8 + 16 + 14 + 8 = 173 tests, all passing.",
+      "Both YPmcn and vector-mcp built successfully through the hoisted root installation.",
+      "The root lock workspace entries match both component manifests and component lockfiles.",
+      "Pack, secret scan, archive hash, staging cleanup, forbidden-path diff, and final tracked status all passed."
+    ],
+    "rerun_commands": [
+      "npm ci",
+      "npm run verify",
+      "npm run pack:yp",
+      "node scripts/scan-secrets.mjs --tracked",
+      "git diff --check fb5ac8603d1c5e26eacaaef4f99d06e6b6915b65..9ff99c92ecaed2ee372eead4677934380a90f036",
+      "git status --short"
+    ]
+  }
+}
