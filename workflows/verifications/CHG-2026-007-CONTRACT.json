@@ -1,0 +1,53 @@
+{
+  "task_id": "CHG-2026-007-CONTRACT",
+  "base_sha": "491c6f1be940a1a85afca5af65f4a976c704ce6d",
+  "head_sha": "416cb66ccd3d726cb80d1b47f5e21010658b98a8",
+  "verifier": {
+    "tool": "OpenCode",
+    "model": "yuepu/Deepseek-V4-Pro",
+    "mode": "read-only"
+  },
+  "status": "PASS",
+  "commands": [
+    {
+      "command": "npm run verify:spec",
+      "result": "PASS",
+      "evidence": "Spec governance: 10/10 tests passed (manifest coverage, package isolation, Skill-MCP alignment, Hook registration, algorithm blocking, JSON Schema resolution, dictionary hash pinning, per-tool output contracts, finding registry, plugin manifest staging)."
+    },
+    {
+      "command": "npm run verify:docs",
+      "result": "PASS",
+      "evidence": "Output: [human-docs] synchronized. Human documentation sync check confirms Spec docs are consistent with generated facts."
+    },
+    {
+      "command": "npm run verify",
+      "result": "PASS",
+      "evidence": "Complete repository gate passed. All suites: Spec governance (10/10), human docs (5/5), agent control plane (13/13), root workspace (1/1), secret scanner (16/16), OpenClaw plugin contracts (116/116 across 14 suites), reference MCP (8/8), Skill docs (16/16), vector MCP (14/14), release metadata (8/8). Final output: [verify] PASS."
+    },
+    {
+      "command": "node scripts/scan-secrets.mjs --tracked",
+      "result": "PASS",
+      "evidence": "Returned empty array [] — no secrets detected in tracked files on the frozen commit."
+    },
+    {
+      "command": "git diff --check 491c6f1..416cb66",
+      "result": "PASS",
+      "evidence": "No whitespace errors; 23 files changed, +5914/-1126 across spec/, docs/, tests/, and YPmcn/ contract modules only."
+    }
+  ],
+  "findings": [],
+  "evidence": [
+    "AC1 - Data model entities verified: requirement_headers, customer_demands, requirement_snapshots, creator_supply_offers, supplier_bindings, selection_results, send_operations, risk_audit_events, feedback_audit_events, offer_promotion_events declared in database.json with scopeFields (scope_type, scope_id) and lateDataFields (observed_at, effective_at, received_at, as_of_at, late_data_cutoff_at, is_late, late_reason) in commonFieldPolicies.",
+    "AC2 - Recovery split: workflow.json contains refresh, request, finalize phases; allowed_actions present with server-authoritative state — test 'splits recovery into refresh, request, and finalize without event authorization' and 'makes persisted server state and allowed_actions authoritative' both PASS.",
+    "AC3 - Requirement dictionary: requirement-dictionary.json declares dictionaryVersion '2026-07-12.1', dictionaryHash sha256, contentPolicy.containsCustomerContent=false, forbiddenContent includes customer-message/customer-brief/customer-content; requirements.json references dictionary.path, dictionary.version, dictionary.hash. Test 'pins the customer-content-free requirement dictionary by canonical hash' PASS.",
+    "AC4 - Value policies: requirements.json valuePolicies locks budget, rebate, three deadline types; processingPolicies defines constraint grammar, join gate, late data lifecycle, offer promotion lifecycle. Tests 'locks budget, rebate, three deadlines, and single-platform splitting', 'defines a closed constraint grammar and exact join gate', 'freezes late data and versions offer promotion' all PASS.",
+    "AC5 - Output contracts: mcp.json has output contracts for all 15 tools. Workflow state matrix in workflow.json declares closed state-combination matrix. Test 'gives every ordinary tool one closed output contract' and 'declares a closed state-combination matrix for every phase' PASS.",
+    "AC6 - Boundaries: database.json readinessStatus='external-unverified'; requirements.json governance sets legacyProfileCapability='detection-only', databaseDeploymentStatus='external-unverified', productionReadiness='NO-GO', algorithmReadinessRequiredForProduction=true. Test 'keeps algorithm, deployment, legacy, and production readiness boundaries closed' PASS.",
+    "Scope drift: all 23 changed files within allowed paths (spec/, docs/, tests/, YPmcn/src/contract/, YPmcn/tests/); no changes outside these directories. Worktree remained clean before and after verification.",
+    "Commit range: single commit 416cb66 'spec: close MVP business contract gaps' in frozen range 491c6f1..416cb66."
+  ],
+  "unexpected_writes": [],
+  "known_risks": [
+    "Contract-only change: production database/provider deployment, Hook/Skill alignment, and algorithm runtime remain external-unverified; production remains NO-GO until separate tasks provide deployment evidence."
+  ]
+}
