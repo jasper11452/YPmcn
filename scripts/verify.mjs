@@ -33,6 +33,11 @@ export function verifyRepository() {
       args: ["--test", "tests/human_docs.test.mjs"],
     },
     {
+      name: "cross-session agent control plane",
+      command: process.execPath,
+      args: ["--test", "tests/agent_flow.test.mjs"],
+    },
+    {
       name: "root workspace installation",
       command: process.execPath,
       args: ["--test", "tests/root_workspace_install.test.mjs"],

@@ -41,7 +41,7 @@ approved_spec_version: "mvp-v2 / schemaVersion 1"
 
 | Risk | Level | Mitigation |
 | --- | --- | --- |
-| 大小写不同的 Terra 模型实际指向无效目录项 | Medium | 严格保留；真实派发失败时 `BLOCKED`，不自动归一化或降级。 |
+| 大小写不同的 Terra 模型实际指向无效目录项 | Medium | 2026-07-12 当前 catalog 只列出 `gpt-5.6-terra`，未列 `gpt-5.6-Terra`；按用户白名单严格保留，真实派发失败时 `BLOCKED`，不自动归一化或降级。 |
 | `max` reasoning 不被目标模型接受 | Medium | Profile 安装只验证配置结构；真实目录/模型拒绝时保留原错误并 `BLOCKED`。 |
 | 自动控制器越权执行 | High | 固定 `workspace-write + never`、路径白名单、无 full access、外部写/生产动作禁止。 |
 | 并行任务修改重叠文件 | High | 派发前做 glob 保守交集检测；共享 Spec/锁/Manifest 默认串行。 |
@@ -61,4 +61,4 @@ approved_spec_version: "mvp-v2 / schemaVersion 1"
 
 ## Open Questions
 
-- `gpt-5.6-terra` 与 `gpt-5.6-Terra` 是否都被当前 Codex 目录接受只能在真实派发时由服务端确认；用户要求禁止预先归一化，因此该不确定性按 fail-closed 保留。
+- 当前 `codex debug models` 精确匹配到 `gpt-5.6-sol`、`gpt-5.6-terra`，二者均声明支持 `max`；未匹配到大小写不同的 `gpt-5.6-Terra`。用户要求禁止归一化，因此第三档继续原样安装，并在真实派发时按 fail-closed 处理。

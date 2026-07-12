@@ -17,6 +17,7 @@
 | 当前能否上线 | [集成与上线就绪](integration-readiness.md) |
 | 人工如何改项目 | [开发流程](DEVELOPER_SPEC_WORKFLOW.md) |
 | Agent 如何执行 | [Agent 流程](AGENT_SPEC_WORKFLOW.md) |
+| 跨 Session 如何并行 | [控制面命令与状态](../workflows/README.md) |
 
 ## 当前事实
 

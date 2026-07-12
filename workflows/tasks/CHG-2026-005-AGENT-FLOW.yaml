@@ -1,0 +1,61 @@
+task_id: CHG-2026-005-AGENT-FLOW
+change_id: CHG-2026-005
+change_type: developer-tooling
+change_status: SPEC_APPROVED
+run_status: READY
+goal: 把已批准的三工具方案实现为可落盘、可恢复、双 Codex Worktree 并行、OpenCode 只读验证和串行集成的确定性控制面
+approved_spec_version: mvp-v2 / schemaVersion 1
+change_proposal: changes/CHG-2026-005-agent-control-plane.md
+impact_analysis: changes/CHG-2026-005-agent-control-plane-impact.md
+risk_level: medium
+execution_profile: executor-terra-max-fast
+profile_reason: 控制器涉及跨 Session 状态、并行、外部 CLI 与 Git 集成，需要 max reasoning；不涉及业务 Spec 或生产写入
+depends_on: []
+conflicts_with: []
+allowed_paths:
+  - changes/CHG-2026-005-agent-control-plane.md
+  - changes/CHG-2026-005-agent-control-plane-impact.md
+  - workflows/**
+  - scripts/agent-flow.mjs
+  - scripts/verify.mjs
+  - tests/agent_flow.test.mjs
+  - package.json
+  - package-lock.json
+  - AGENTS.md
+  - CLAUDE.md
+  - README.md
+  - docs/README.md
+  - docs/PROJECT_MAP.md
+  - docs/EVOLUTION.md
+  - docs/AGENT_SPEC_WORKFLOW.md
+  - docs/DEVELOPER_SPEC_WORKFLOW.md
+  - docs/integration-readiness.md
+  - tests/test_skill_package.py
+forbidden_paths:
+  - spec/**
+  - YPmcn/**
+  - vector-mcp/**
+  - reference-mcp/**
+  - packages/releases/**
+  - .github/workflows/**
+  - .env*
+acceptance:
+  - 三个大小写敏感 Codex Profile 精确匹配用户指定模型、reasoning、fast tier 和 fail-closed 权限
+  - Task 定义、运行状态、Executor 输出和 Verification 结果均可机器检查
+  - 控制器校验依赖、Profile、路径冲突和最多两个 Writer
+  - 控制器生成受控 codex exec、resume 和 OpenCode 原生只读命令
+  - 运行状态跨 Worktree/Session 持久化且不污染 main
+  - 串行集成只接受 Executor/Verifier PASS 并要求全量 verify
+verification:
+  - node --test tests/agent_flow.test.mjs
+  - npm run verify:agent-flow
+  - npm run verify
+  - node scripts/scan-secrets.mjs --tracked
+  - git diff --check
+  - OpenCode read-only verification
+rollback: revert 本变更并删除三个新增用户级 Codex profile；运行态可安全删除
+attempt: 1
+branch: codex/chg-2026-005-agent-control-plane
+worktree: /Users/jasper/Documents/YPmcn-worktrees/chg-2026-005-agent-control-plane
+base_sha: 0bec372a24f76dbe24f5bae3103b07bf788e4eee
+next_action: implement

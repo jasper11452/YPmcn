@@ -43,11 +43,19 @@ Spec 或正式 Change Proposal 必须完整暂存；pre-commit hook 会自动同
 
 ## 三工具职责
 
-- Claude Code：Orchestrator，只产出目标、文件边界、验收、验证和回滚。
-- Codex：主 Executor，在独立 worktree 内实施、自测并提交 `diff + test results + known risks`。
-- OpenCode：不同模型/上下文的只读 Verifier，基于冻结 SHA 输出 `PASS / FAIL / BLOCKED + evidence`。
+- Claude Code：唯一 Orchestrator，产出目标、文件边界、依赖、验收、验证和回滚；从三档白名单选 Codex Profile，管理 Session/Worktree，最后串行集成。
+- Codex：主 Executor，在独立 worktree 内用 `workspace-write + approval_policy=never` 非交互实施、自测并提交 `diff + test results + known risks`。范围内任务已预批准，不重复向用户确认；越界或外部写必须 `BLOCKED`。
+- OpenCode：不同模型/上下文的只读 Verifier，固定原生 `--pure --agent plan`、`yuepu/*`、禁用外部 Skills，基于冻结 SHA 输出 `PASS / FAIL / BLOCKED + evidence`。Git 或 plan 目录出现写入直接 `FAIL`。
 
 不要让同一推理链自证正确；Verifier 默认不修改生产代码。
+
+项目控制器是 `scripts/agent-flow.mjs`，完整协议见 `workflows/README.md`。每个 Claude Session 先运行 `status/plan` 恢复共享运行态；最多派发两个无依赖、无路径冲突的 Codex Writer。模型名保持精确大小写且禁止 fallback：
+
+- `executor-sol-max-fast` → `gpt-5.6-sol` / `max` / `fast`。
+- `executor-terra-max-fast` → `gpt-5.6-terra` / `max` / `fast`。
+- `executor-terra-medium-fast` → `gpt-5.6-Terra` / `medium` / `fast`。
+
+高频状态、JSONL、session ID 和锁只写 Git common dir 的 `agent-flow/`，不提交到工作树。Codex 非交互执行期间不依赖面向用户的周期进度消息；Orchestrator 只在状态转换、阻塞或最终验收时汇总。
 
 ## 项目安全边界
 
@@ -61,6 +69,7 @@ Spec 或正式 Change Proposal 必须完整暂存；pre-commit hook 会自动同
 - Spec 门禁：`npm run verify:spec`。
 - 人类文档同步：提交前自动；即时预览/修复：`npm run docs:sync`；只读门禁：`npm run verify:docs`。
 - 仓库离线验收：`npm run verify`。
+- Agent 控制面：`npm run verify:agent-flow`；状态入口：`npm run agent-flow -- status --json`。
 - 发布包：`npm run pack:yp`，产物只能进入 `packages/releases/`。
 - 生产 provider 独立只读门禁：`npm run verify:provider`。
 

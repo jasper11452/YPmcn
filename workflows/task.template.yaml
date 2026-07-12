@@ -1,10 +1,17 @@
 task_id: CHG-YYYY-NNN-DOMAIN
+change_id: CHG-YYYY-NNN
 change_type: feature
-status: SPEC_APPROVED
+change_status: SPEC_APPROVED
+run_status: READY
 goal: "一句话描述可验证目标"
 approved_spec_version: "mvp-v2 / schemaVersion 1"
 change_proposal: "changes/CHG-YYYY-NNN-slug.md"
 impact_analysis: "changes/CHG-YYYY-NNN-slug-impact.md"
+risk_level: medium
+execution_profile: CHOOSE_ONE_EXACT_PROFILE
+profile_reason: "说明为什么选择该白名单 Profile"
+depends_on: []
+conflicts_with: []
 allowed_paths:
   - "具体路径/**"
 forbidden_paths:
@@ -14,8 +21,8 @@ acceptance:
 verification:
   - "npm run verify"
 rollback: "明确的代码和数据回滚方式"
-deliverables:
-  - "diff"
-  - "test results"
-  - "known risks"
-  - "commit hash"
+attempt: 1
+branch: "codex/CHG-YYYY-NNN-domain"
+worktree: "/absolute/path/to/task-worktree"
+base_sha: null
+next_action: "dispatch"

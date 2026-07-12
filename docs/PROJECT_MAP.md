@@ -12,11 +12,13 @@
 | 位置 | 责任 | 人工检查重点 |
 | --- | --- | --- |
 | `.githooks/` | 提交前自动维护 | 只同步相关变更，不扩大部分暂存范围 |
+| `CLAUDE.md` | Claude Code 项目入口 | 每个 Session 先恢复控制面状态，不直接接管生产实现 |
 | `spec/` | 唯一正式机器契约 | 字段、Tool、阶段、错误、副作用是否一致 |
 | `changes/` | 为什么改、影响什么 | 范围、风险、验证、回滚是否明确 |
 | `YPmcn/` | 可发布插件组件 | Skill/Hook 是否只执行契约允许的行为 |
 | `vector-mcp/` | 创作者向量检索 | 召回可靠性、超时、持久化和隔离 |
 | `reference-mcp/` | 无网络参考实现 | 只用于回归，必须标记 simulated |
+| `workflows/` | Claude/Codex/OpenCode 控制面 | Task 边界、Profile、状态机和独立证据 |
 | `tests/` | 仓库总门禁 | 是否锁定契约而不是迁就实现 |
 | `scripts/` | 验证、同步、打包 | 是否确定性、无隐式安装或生产写入 |
 | `docs/` | 人类说明 | 是否短、当前、只解释不复制 Spec |
@@ -52,6 +54,7 @@ Spec 摘要：`sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b3
 | Hook 事件和守卫 | `spec/hooks.json` | `YPmcn/src/hooks/` 与回归测试 |
 | 错误与重试 | `spec/errors.json` | 写结果未知时的对账路径 |
 | 算法规则 | `spec/algorithms.json` | 未批准时保持阻断，不从代码反推 |
+| Agent 编排与模型路由 | `workflows/` | 不改业务 Spec；检查并行路径和 fail-closed 权限 |
 | 仅内部实现或文档 | 对应组件/文档 | 仍需有界任务和验证 |
 
 Spec 或正式 Change Proposal 提交时会自动刷新三个事实区块；`npm run docs:sync` 只是即时预览/修复入口，`npm run verify:docs` 始终只读。

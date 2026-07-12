@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "executor-sol-max-fast": {
+      "model": "gpt-5.6-sol",
+      "model_reasoning_effort": "max",
+      "service_tier": "fast",
+      "sandbox_mode": "workspace-write",
+      "approval_policy": "never"
+    },
+    "executor-terra-max-fast": {
+      "model": "gpt-5.6-terra",
+      "model_reasoning_effort": "max",
+      "service_tier": "fast",
+      "sandbox_mode": "workspace-write",
+      "approval_policy": "never"
+    },
+    "executor-terra-medium-fast": {
+      "model": "gpt-5.6-Terra",
+      "model_reasoning_effort": "medium",
+      "service_tier": "fast",
+      "sandbox_mode": "workspace-write",
+      "approval_policy": "never"
+    }
+  }
+}

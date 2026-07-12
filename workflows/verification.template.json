@@ -16,5 +16,7 @@
     }
   ],
   "findings": [],
+  "evidence": [],
+  "unexpected_writes": [],
   "known_risks": []
 }

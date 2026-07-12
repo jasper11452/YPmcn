@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ypmcn.local/schemas/executor-result.schema.json",
+  "title": "YPmcn Codex Executor Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "status",
+    "session_id",
+    "base_sha",
+    "head_sha",
+    "commit",
+    "changed_files",
+    "tests",
+    "known_risks",
+    "blocked_reason"
+  ],
+  "properties": {
+    "task_id": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["PASS", "BLOCKED"] },
+    "session_id": { "type": ["string", "null"] },
+    "base_sha": { "$ref": "#/$defs/shaOrNull" },
+    "head_sha": { "$ref": "#/$defs/shaOrNull" },
+    "commit": { "$ref": "#/$defs/shaOrNull" },
+    "changed_files": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "result", "evidence"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "result": { "enum": ["PASS", "FAIL", "NOT_RUN"] },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "known_risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "blocked_reason": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "shaOrNull": {
+      "anyOf": [
+        { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

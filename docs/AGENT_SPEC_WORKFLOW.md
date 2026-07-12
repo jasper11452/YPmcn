@@ -131,6 +131,19 @@ npm run verify:provider
 
 默认链路：Claude Code 定义边界，Codex 在独立 worktree 实施，OpenCode 用不同模型或上下文只读验证。Verifier 必须检查冻结的 `base_sha..head_sha`，输出 `PASS / FAIL / BLOCKED + evidence`，不直接修生产代码。
 
+项目内通过 `scripts/agent-flow.mjs` 落实该链路：
+
+1. Claude 从 `workflows/task.template.yaml` 创建已批准 Task，并为每项任务填写一个精确、大小写敏感的 `execution_profile` 和选择理由。
+2. 新 Session 先读 `status --json` 和 `plan --json`；运行态来自 Git common dir，不以聊天记录为恢复权威。
+3. 控制器最多选择两个无依赖、无显式冲突、无路径交集的 Writer。共享 Spec、锁、Manifest/Schema、Migration、Package 与 main 集成继续串行。
+4. `dispatch` 使用非交互 `codex exec`、`workspace-write`、`approval_policy=never` 和结构化输出；实时保存 JSONL、session ID、PID 和 checkpoint。旧进程仍存活时拒绝重复 `resume`。
+5. OpenCode 只允许 `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`、`--pure --agent plan` 和 `yuepu/*`。调用前后 Git 状态或任一 plan 目录变化时，无论模型声明什么都判 `FAIL`。
+6. 只有 Executor 证据、Verifier 证据、路径边界和仓库全量 `npm run verify` 全部通过，控制器才允许串行集成。
+
+三档 Codex Profile 与命令见 `workflows/README.md`。模型/Reasoning 不可用时保持 `BLOCKED`，不得改大小写、自动降级或扩大 sandbox。范围内无须用户逐项确认；需要 Spec、禁区、外部写或不可逆决定时才阻断。
+
+Codex 作为后台 Executor 时，系统要求的交互式进度说明不属于任务完成协议。控制器消费事件流，Claude 只在状态转换、阻塞和最终结果时汇总，因此跨 Session 恢复不依赖聊天界面的报告频率。
+
 ## 10. 失败与阻塞
 
 失败分类：`SPEC_DEFECT`、`IMPLEMENTATION`、`CONTRACT_DRIFT`、`TEST_DEFECT`、`ENVIRONMENT`、`DATA_MIGRATION`。

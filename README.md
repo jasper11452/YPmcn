@@ -22,7 +22,7 @@ project/
 ├── changes/       # Change Proposal、Impact Analysis、决策记录
 ├── src/           # 根级共享代码边界（当前无独立运行时）
 ├── tests/         # 仓库级契约、集成和发布测试
-├── workflows/     # 任务、角色和独立验证模板
+├── workflows/     # 跨 Session 任务、Profile、状态契约和验证证据
 ├── packages/      # staging 与 tgz 产物，不含源码
 ├── docs/          # 使用、设计和流程文档
 ├── fix-logs/      # 重要故障根因与预防经验
@@ -63,7 +63,17 @@ npm run pack:yp
 
 根 `package.json` 统一管理 `YPmcn` 与 `vector-mcp` 两个 npm workspace；一次根 `npm ci` 会安装全部构建和测试依赖，并自动启用仓库 hook，无需分别进入组件安装。`npm run docs:sync` 只在需要提交前即时预览或修复时使用。
 
-`npm run verify` 执行 Spec 漂移门禁、根安装图检查、密钥扫描、插件契约与 Hook、reference MCP、文档、向量 MCP 和发布包验证。`npm run pack:yp` 在 `packages/.staging/` 组装，并把扫描后的包输出到 `packages/releases/`。
+`npm run verify` 执行 Spec 漂移门禁、Agent 控制面、根安装图检查、密钥扫描、插件契约与 Hook、reference MCP、文档、向量 MCP 和发布包验证。`npm run pack:yp` 在 `packages/.staging/` 组装，并把扫描后的包输出到 `packages/releases/`。
+
+多 Agent 开发固定为 Claude Code 编排、最多两个 Codex 独立 worktree 执行、OpenCode 不同模型只读验证，再由 Claude 串行集成。任务和 Profile 在 `workflows/`，跨 Session 状态在 Git common dir；基础入口：
+
+```bash
+npm run agent-flow -- status --json
+npm run agent-flow -- plan --json
+npm run verify:agent-flow
+```
+
+三档 Codex 配置均为 opt-in、`fast` 且 fail closed；控制器不会修改现有默认 Profile，也不会把 YPmcn 的角色规则扩散到其他仓库。完整用法见 `workflows/README.md`。
 
 生产 provider 只读门禁单独执行：
 
