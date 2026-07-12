@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ypmcn.local/schemas/requirement-snapshot.schema.json",
+  "title": "YPmcn Immutable Requirement Snapshot",
+  "type": "object",
+  "required": [
+    "snapshot_id",
+    "requirement_id",
+    "requirement_version",
+    "dictionary_version",
+    "dictionary_hash",
+    "snapshot_kind",
+    "as_of_at",
+    "late_data_cutoff_at",
+    "scope_type",
+    "scope_id",
+    "raw_messages_hash",
+    "payload_hash",
+    "created_at"
+  ],
+  "properties": {
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requirement_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requirement_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "dictionary_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dictionary_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "snapshot_kind": {
+      "enum": [
+        "validated-requirement",
+        "candidate-search",
+        "field-selection",
+        "ranking",
+        "submission"
+      ]
+    },
+    "as_of_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "late_data_cutoff_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scope_type": {
+      "enum": [
+        "tenant",
+        "project"
+      ]
+    },
+    "scope_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raw_messages_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "payload_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "x-immutable": true
+}

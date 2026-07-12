@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ypmcn.local/schemas/requirement-record.schema.json",
+  "title": "YPmcn Executable Single-Platform Requirement",
+  "type": "object",
+  "required": [
+    "requirement_id",
+    "requirement_head_id",
+    "requirement_version",
+    "platform",
+    "dictionary_version",
+    "dictionary_hash",
+    "raw_messages_json",
+    "budget_min_cents",
+    "budget_max_cents",
+    "rebate_min_rate",
+    "rebate_max_rate",
+    "supplier_response_deadline_at",
+    "client_submission_deadline_at",
+    "content_publish_deadline_at",
+    "constraints",
+    "scope_type",
+    "scope_id",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "requirement_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requirement_head_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requirement_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "platform": {
+      "enum": [
+        "xhs",
+        "dy"
+      ]
+    },
+    "dictionary_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dictionary_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "raw_messages_json": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sent_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "budget_min_cents": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "budget_max_cents": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rebate_min_rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rebate_max_rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "supplier_response_deadline_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "client_submission_deadline_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "content_publish_deadline_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "$ref": "constraint-expression.schema.json"
+      }
+    },
+    "scope_type": {
+      "enum": [
+        "tenant",
+        "project"
+      ]
+    },
+    "scope_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "x-constraints": [
+    "budget_min_cents <= budget_max_cents",
+    "rebate_min_rate <= rebate_max_rate",
+    "supplier_response_deadline_at <= client_submission_deadline_at",
+    "client_submission_deadline_at <= content_publish_deadline_at"
+  ]
+}

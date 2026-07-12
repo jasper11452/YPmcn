@@ -16,7 +16,7 @@
       "mayBlock": false
     },
     "message_received": {
-      "responsibility": "explicit_manual_recovery_confirmation",
+      "responsibility": "capture_manual_recovery_intent_as_non_authoritative_audit_signal",
       "mayBlock": false
     },
     "agent_turn_prepare": {
@@ -39,8 +39,17 @@
     "doesNotOwn": [
       "database_schema",
       "mcp_tool_schema",
+      "workflow_state_authority",
+      "allowed_actions",
+      "recovery_ownership_or_authorization",
       "business_ranking_algorithm",
       "provider_evidence_rewrite"
-    ]
+    ],
+    "sessionProjection": {
+      "authoritative": false,
+      "mayGrantServerAction": false,
+      "mayDenyForAdditionalSafety": true,
+      "authoritativeContract": "workflow.json#stateAuthority"
+    }
   }
 }

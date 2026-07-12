@@ -9,6 +9,7 @@
     "skills": "skills.json",
     "workflow": "workflow.json",
     "errors": "errors.json",
+    "requirements": "requirements.json",
     "algorithms": "algorithms.json"
   },
   "compatibilityProfiles": {

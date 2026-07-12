@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ypmcn.local/schemas/constraint-expression.schema.json",
+  "title": "YPmcn Closed-World Constraint Expression",
+  "$ref": "#/$defs/expression",
+  "$defs": {
+    "field": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+    },
+    "missingPolicy": {
+      "enum": [
+        "reject",
+        "need_review",
+        "ignore-soft-only"
+      ]
+    },
+    "comparison": {
+      "type": "object",
+      "required": [
+        "kind",
+        "field",
+        "operator",
+        "value",
+        "severity",
+        "missingPolicy"
+      ],
+      "properties": {
+        "kind": {
+          "const": "comparison"
+        },
+        "field": {
+          "$ref": "#/$defs/field"
+        },
+        "operator": {
+          "enum": [
+            "eq",
+            "neq",
+            "gt",
+            "gte",
+            "lt",
+            "lte"
+          ]
+        },
+        "value": {
+          "type": [
+            "boolean",
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "hard",
+            "soft"
+          ]
+        },
+        "missingPolicy": {
+          "$ref": "#/$defs/missingPolicy"
+        }
+      },
+      "additionalProperties": false
+    },
+    "range": {
+      "type": "object",
+      "required": [
+        "kind",
+        "field",
+        "lower",
+        "upper",
+        "lowerInclusive",
+        "upperInclusive",
+        "severity",
+        "missingPolicy"
+      ],
+      "properties": {
+        "kind": {
+          "const": "range"
+        },
+        "field": {
+          "$ref": "#/$defs/field"
+        },
+        "lower": {
+          "type": "number"
+        },
+        "upper": {
+          "type": "number"
+        },
+        "lowerInclusive": {
+          "type": "boolean"
+        },
+        "upperInclusive": {
+          "type": "boolean"
+        },
+        "severity": {
+          "enum": [
+            "hard",
+            "soft"
+          ]
+        },
+        "missingPolicy": {
+          "$ref": "#/$defs/missingPolicy"
+        }
+      },
+      "additionalProperties": false
+    },
+    "set": {
+      "type": "object",
+      "required": [
+        "kind",
+        "field",
+        "operator",
+        "values",
+        "severity",
+        "missingPolicy"
+      ],
+      "properties": {
+        "kind": {
+          "const": "set"
+        },
+        "field": {
+          "$ref": "#/$defs/field"
+        },
+        "operator": {
+          "enum": [
+            "in",
+            "not_in",
+            "contains_any",
+            "contains_all"
+          ]
+        },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": [
+              "boolean",
+              "number",
+              "string"
+            ]
+          }
+        },
+        "severity": {
+          "enum": [
+            "hard",
+            "soft"
+          ]
+        },
+        "missingPolicy": {
+          "$ref": "#/$defs/missingPolicy"
+        }
+      },
+      "additionalProperties": false
+    },
+    "all": {
+      "type": "object",
+      "required": [
+        "kind",
+        "expressions"
+      ],
+      "properties": {
+        "kind": {
+          "const": "all"
+        },
+        "expressions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/expression"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "any": {
+      "type": "object",
+      "required": [
+        "kind",
+        "expressions"
+      ],
+      "properties": {
+        "kind": {
+          "const": "any"
+        },
+        "expressions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/expression"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "not": {
+      "type": "object",
+      "required": [
+        "kind",
+        "expression"
+      ],
+      "properties": {
+        "kind": {
+          "const": "not"
+        },
+        "expression": {
+          "$ref": "#/$defs/expression"
+        }
+      },
+      "additionalProperties": false
+    },
+    "expression": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/comparison"
+        },
+        {
+          "$ref": "#/$defs/range"
+        },
+        {
+          "$ref": "#/$defs/set"
+        },
+        {
+          "$ref": "#/$defs/all"
+        },
+        {
+          "$ref": "#/$defs/any"
+        },
+        {
+          "$ref": "#/$defs/not"
+        }
+      ]
+    }
+  }
+}

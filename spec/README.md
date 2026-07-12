@@ -23,7 +23,10 @@
 | Skill | `skills.json` | 可用 Tool、调用前置条件和错误/工作流引用 |
 | Workflow | `workflow.json` | 阶段、转换、恢复和响应状态 |
 | Errors | `errors.json` | 全局错误语义与重试边界 |
+| Requirements | `requirements.json` | canonical 输入、字典引用、金额/deadline、约束、Join Gate、迟到数据与 offer promotion |
 | Algorithms | `algorithms.json` | 算法契约就绪状态；未批准时保持阻断 |
+
+`requirement-dictionary.json` 是 `requirements.json` 引用的无客户内容字段字典；`spec/schemas/` 提供生成与实例校验用 JSON Schema，并随 Spec 构建快照发布。它们不构成 Migration 或部署证明。
 
 `profiles/legacy-1.9.4.json` 仅用于只读兼容性检测，不是可执行或可回退的生产契约。
 

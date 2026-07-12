@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "dictionaryVersion": "2026-07-12.1",
+  "dictionaryHashAlgorithm": "sha256",
+  "dictionaryHashCanonicalization": "recursive-key-sort-json-v1",
+  "dictionaryHashScope": "definitions",
+  "dictionaryHash": "35bcf309b7497eec57acb63e417f8070adb2c9e88ce409e1ea9b9fc967cf8342",
+  "contentPolicy": {
+    "containsCustomerContent": false,
+    "allowedContent": [
+      "field-definition",
+      "type-definition",
+      "unit-definition",
+      "closed-enum-definition"
+    ],
+    "forbiddenContent": [
+      "customer-message",
+      "customer-brief",
+      "customer-payload",
+      "credential",
+      "internal-unredacted-state"
+    ]
+  },
+  "definitions": {
+    "platform": {
+      "type": "string",
+      "classification": "execution-scope",
+      "enum": [
+        "xhs",
+        "dy"
+      ],
+      "description": "Exactly one platform per executable requirement."
+    },
+    "raw_messages_json": {
+      "type": "array",
+      "classification": "canonical-source",
+      "canonical": true,
+      "description": "Ordered role/content messages after canonical JSON parsing; values belong only in requirement records."
+    },
+    "budget_min_cents": {
+      "type": "integer",
+      "classification": "money-lower-bound",
+      "unit": "CNY-cent",
+      "minimum": 0,
+      "description": "Inclusive budget lower bound."
+    },
+    "budget_max_cents": {
+      "type": "integer",
+      "classification": "money-upper-bound",
+      "unit": "CNY-cent",
+      "minimum": 0,
+      "description": "Inclusive budget upper bound."
+    },
+    "rebate_min_rate": {
+      "type": "number",
+      "classification": "rate-lower-bound",
+      "unit": "fraction",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Inclusive rebate lower bound represented as a fraction."
+    },
+    "rebate_max_rate": {
+      "type": "number",
+      "classification": "rate-upper-bound",
+      "unit": "fraction",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Inclusive rebate upper bound represented as a fraction."
+    },
+    "supplier_response_deadline_at": {
+      "type": "string",
+      "classification": "deadline",
+      "format": "date-time",
+      "description": "Deadline for supplier or MCN response."
+    },
+    "client_submission_deadline_at": {
+      "type": "string",
+      "classification": "deadline",
+      "format": "date-time",
+      "description": "Deadline for submitting the selected creator plan to the client."
+    },
+    "content_publish_deadline_at": {
+      "type": "string",
+      "classification": "deadline",
+      "format": "date-time",
+      "description": "Latest approved content publication time."
+    },
+    "constraints": {
+      "type": "array",
+      "classification": "constraint-ast",
+      "description": "Closed-world constraint expressions defined by the approved grammar."
+    }
+  }
+}

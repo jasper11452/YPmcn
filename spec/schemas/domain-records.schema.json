@@ -1,0 +1,554 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ypmcn.local/schemas/domain-records.schema.json",
+  "title": "YPmcn Contract Closure Domain Records",
+  "$defs": {
+    "scope_type": {
+      "enum": [
+        "tenant",
+        "project"
+      ]
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "date_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "requirement_header": {
+      "type": "object",
+      "required": [
+        "requirement_head_id",
+        "raw_messages_json",
+        "dictionary_version",
+        "dictionary_hash",
+        "requested_platforms",
+        "scope_type",
+        "scope_id",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "requirement_head_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "raw_messages_json": {
+          "type": "array",
+          "minItems": 1
+        },
+        "dictionary_version": {
+          "$ref": "#/$defs/identifier"
+        },
+        "dictionary_hash": {
+          "$ref": "#/$defs/hash"
+        },
+        "requested_platforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "xhs",
+              "dy"
+            ]
+          }
+        },
+        "scope_type": {
+          "$ref": "#/$defs/scope_type"
+        },
+        "scope_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "created_at": {
+          "$ref": "#/$defs/date_time"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/date_time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "supplier_binding": {
+      "type": "object",
+      "required": [
+        "supplier_binding_id",
+        "provider",
+        "supplier_id",
+        "mcn_id",
+        "valid_from",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "properties": {
+        "supplier_binding_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "provider": {
+          "$ref": "#/$defs/identifier"
+        },
+        "supplier_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "mcn_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "valid_from": {
+          "$ref": "#/$defs/date_time"
+        },
+        "valid_to": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/date_time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope_type": {
+          "$ref": "#/$defs/scope_type"
+        },
+        "scope_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "created_at": {
+          "$ref": "#/$defs/date_time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "supply_offer": {
+      "type": "object",
+      "required": [
+        "offer_id",
+        "creator_id",
+        "supplier_binding_id",
+        "platform",
+        "offer_type",
+        "price_cents",
+        "currency",
+        "rebate_rate",
+        "revision",
+        "status",
+        "source_type",
+        "source_record_id",
+        "effective_at",
+        "observed_at",
+        "received_at",
+        "as_of_at",
+        "late_data_cutoff_at",
+        "is_late",
+        "late_reason",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "properties": {
+        "offer_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "creator_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "supplier_binding_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "platform": {
+          "enum": [
+            "xhs",
+            "dy"
+          ]
+        },
+        "offer_type": {
+          "$ref": "#/$defs/identifier"
+        },
+        "price_cents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "currency": {
+          "const": "CNY"
+        },
+        "rebate_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "candidate",
+            "validated",
+            "promoted",
+            "rejected",
+            "superseded"
+          ]
+        },
+        "source_type": {
+          "enum": [
+            "rate_card",
+            "mcn_submission",
+            "manual_source"
+          ]
+        },
+        "source_record_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "promoted_from_offer_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effective_at": {
+          "$ref": "#/$defs/date_time"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/date_time"
+        },
+        "received_at": {
+          "$ref": "#/$defs/date_time"
+        },
+        "as_of_at": {
+          "$ref": "#/$defs/date_time"
+        },
+        "late_data_cutoff_at": {
+          "$ref": "#/$defs/date_time"
+        },
+        "is_late": {
+          "type": "boolean"
+        },
+        "late_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope_type": {
+          "$ref": "#/$defs/scope_type"
+        },
+        "scope_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "created_at": {
+          "$ref": "#/$defs/date_time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "selection_result": {
+      "type": "object",
+      "required": [
+        "selection_result_id",
+        "mcn_recommendation_id",
+        "requirement_snapshot_id",
+        "dictionary_version",
+        "dictionary_hash",
+        "ordered_columns_json",
+        "selection_hash",
+        "state_version",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "properties": {
+        "selection_result_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "mcn_recommendation_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "requirement_snapshot_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "dictionary_version": {
+          "$ref": "#/$defs/identifier"
+        },
+        "dictionary_hash": {
+          "$ref": "#/$defs/hash"
+        },
+        "ordered_columns_json": {
+          "type": "array",
+          "minItems": 1
+        },
+        "selection_hash": {
+          "$ref": "#/$defs/hash"
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope_type": {
+          "$ref": "#/$defs/scope_type"
+        },
+        "scope_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "created_at": {
+          "$ref": "#/$defs/date_time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "send_operation": {
+      "type": "object",
+      "required": [
+        "send_operation_id",
+        "mcn_recommendation_id",
+        "requirement_id",
+        "selection_result_id",
+        "idempotency_key",
+        "provider",
+        "provider_correlation_key",
+        "status",
+        "state_version",
+        "scope_type",
+        "scope_id",
+        "requested_at"
+      ],
+      "properties": {
+        "send_operation_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "mcn_recommendation_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "requirement_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "selection_result_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/identifier"
+        },
+        "provider": {
+          "$ref": "#/$defs/identifier"
+        },
+        "provider_correlation_key": {
+          "$ref": "#/$defs/identifier"
+        },
+        "status": {
+          "enum": [
+            "requested",
+            "succeeded",
+            "failed",
+            "unknown",
+            "reconciled"
+          ]
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope_type": {
+          "$ref": "#/$defs/scope_type"
+        },
+        "scope_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "requested_at": {
+          "$ref": "#/$defs/date_time"
+        },
+        "completed_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/date_time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "risk_audit_event": {
+      "type": "object",
+      "required": [
+        "risk_audit_id",
+        "run_id",
+        "subject_type",
+        "subject_id",
+        "decision",
+        "reason_codes",
+        "actor_id",
+        "state_version",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "properties": {
+        "risk_audit_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "subject_type": {
+          "$ref": "#/$defs/identifier"
+        },
+        "subject_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "decision": {
+          "enum": [
+            "accept",
+            "reject",
+            "need_review",
+            "override"
+          ]
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "actor_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope_type": {
+          "$ref": "#/$defs/scope_type"
+        },
+        "scope_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "created_at": {
+          "$ref": "#/$defs/date_time"
+        }
+      },
+      "additionalProperties": false,
+      "x-append-only": true
+    },
+    "feedback_audit_event": {
+      "type": "object",
+      "required": [
+        "feedback_audit_id",
+        "run_id",
+        "submission_id",
+        "before_status",
+        "after_status",
+        "reason",
+        "actor_id",
+        "state_version",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "properties": {
+        "feedback_audit_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "submission_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "before_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "after_status": {
+          "$ref": "#/$defs/identifier"
+        },
+        "reason": {
+          "$ref": "#/$defs/identifier"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope_type": {
+          "$ref": "#/$defs/scope_type"
+        },
+        "scope_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "created_at": {
+          "$ref": "#/$defs/date_time"
+        }
+      },
+      "additionalProperties": false,
+      "x-append-only": true
+    },
+    "offer_promotion_event": {
+      "type": "object",
+      "required": [
+        "promotion_event_id",
+        "source_type",
+        "source_record_id",
+        "target_offer_id",
+        "from_state",
+        "to_state",
+        "idempotency_key",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "properties": {
+        "promotion_event_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "source_type": {
+          "enum": [
+            "mcn_submission",
+            "manual_source"
+          ]
+        },
+        "source_record_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "target_offer_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "from_state": {
+          "const": "validated"
+        },
+        "to_state": {
+          "const": "promoted"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/identifier"
+        },
+        "scope_type": {
+          "$ref": "#/$defs/scope_type"
+        },
+        "scope_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "created_at": {
+          "$ref": "#/$defs/date_time"
+        }
+      },
+      "additionalProperties": false,
+      "x-append-only": true
+    }
+  }
+}

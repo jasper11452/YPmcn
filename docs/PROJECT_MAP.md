@@ -30,7 +30,7 @@
 <!-- human-docs:contract-map:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-Spec 摘要：`sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0`
+Spec 摘要：`sha256:4a143891ab6136ddb7993de0606b6466d46a9bd48f29b139f4068a4086820e28`
 
 | 领域 | 唯一权威 | 人类理解 |
 | --- | --- | --- |
@@ -40,6 +40,7 @@ Spec 摘要：`sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b3
 | skills | [`spec/skills.json`](../spec/skills.json) | Skill 可用 Tool、前置条件与禁区 |
 | workflow | [`spec/workflow.json`](../spec/workflow.json) | 阶段、转换与恢复顺序 |
 | errors | [`spec/errors.json`](../spec/errors.json) | 错误码、重试与对账语义 |
+| requirements | [`spec/requirements.json`](../spec/requirements.json) | 正式契约 |
 | algorithms | [`spec/algorithms.json`](../spec/algorithms.json) | 算法定义就绪状态 |
 <!-- human-docs:contract-map:end -->
 
@@ -50,6 +51,7 @@ Spec 摘要：`sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b3
 | Tool、字段、返回、副作用 | `spec/mcp.json` | Skill、Hook、测试、provider 差异 |
 | 阶段、等待、恢复顺序 | `spec/workflow.json` | Hook 状态投影与恢复测试 |
 | 写表、不变量、幂等 | `spec/database.json` | provider/数据库外部证明 |
+| canonical 需求、字典、金额/deadline、constraint/Join/late data | `spec/requirements.json` | `spec/requirement-dictionary.json`、`spec/schemas/` 与错误映射 |
 | Skill 可调用范围 | `spec/skills.json` | `YPmcn/skills/` 与 Tool 卡 |
 | Hook 事件和守卫 | `spec/hooks.json` | `YPmcn/src/hooks/` 与回归测试 |
 | 错误与重试 | `spec/errors.json` | 写结果未知时的对账路径 |

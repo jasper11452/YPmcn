@@ -10,6 +10,17 @@ export type ContractErrorCode =
   | "PROVIDER_REFERENCE_MISSING"
   | "RECOVERY_NOT_CONFIRMED"
   | "RECOVERY_ALREADY_TERMINAL"
+  | "CANONICAL_INPUT_CONFLICT"
+  | "DICTIONARY_REFERENCE_MISMATCH"
+  | "VALUE_RANGE_INVALID"
+  | "DEADLINE_ORDER_INVALID"
+  | "CONSTRAINT_GRAMMAR_INVALID"
+  | "JOIN_GATE_FAILED"
+  | "SCOPE_MISMATCH"
+  | "LATE_DATA_REJECTED"
+  | "OFFER_PROMOTION_CONFLICT"
+  | "SELECTION_RESULT_STALE"
+  | "STATE_COMBINATION_INVALID"
   | "STATE_CONFLICT"
   | "WRITE_RESULT_UNKNOWN";
 
@@ -33,15 +44,27 @@ export interface ContractSchema {
   const?: unknown;
   enum?: unknown[];
   minLength?: number;
+  pattern?: string;
+  format?: string;
   minimum?: number;
   maximum?: number;
   minItems?: number;
+  maxItems?: number;
   uniqueItems?: boolean;
   required?: string[];
   properties?: Record<string, ContractSchema>;
   items?: ContractSchema;
   additionalProperties?: boolean | ContractSchema;
+  oneOf?: ContractSchema[];
+  $ref?: string;
   [key: string]: unknown;
+}
+
+export interface ToolOutputContract {
+  successEnvelope: string;
+  failureEnvelope: string;
+  successSchema: ContractSchema;
+  errorCodes: ContractErrorCode[];
 }
 
 export interface ToolInputMode {
@@ -62,6 +85,19 @@ export interface ToolContract {
   inputModes?: ToolInputModes;
   properties: Record<string, ContractSchema>;
   forbidden: string[];
+  sideEffects: "read-only" | "business-write" | "provider-write";
+  writers: {
+    always: string[];
+    conditional: string[];
+  };
+  retry: {
+    policy: string;
+    blindRetry: boolean;
+    unknownOutcome: string;
+    reconcileWith: string | null;
+  };
+  outputEnvelope: string;
+  successEvidence: string[];
   [key: string]: unknown;
 }
 
@@ -84,6 +120,8 @@ export interface MvpContractProfile {
   mode: "writable";
   requiredTools: string[];
   optionalTools: string[];
+  outputEnvelopes: Record<string, ContractSchema>;
+  outputContracts: Record<string, ToolOutputContract>;
   tools: Record<string, ToolContract>;
   [key: string]: unknown;
 }
@@ -110,6 +148,10 @@ export interface WorkflowContract {
   schemaVersion: number;
   profile: "mvp-v2";
   phases: string[];
+  allowedActions: string[];
+  stateAuthority: Record<string, unknown>;
+  recoveryOperations: Array<Record<string, unknown>>;
+  stateCombinations: Array<Record<string, unknown>>;
   transitions: Array<Record<string, unknown>>;
   [key: string]: unknown;
 }
@@ -118,9 +160,64 @@ export interface DatabaseContract {
   schemaVersion: number;
   profile: "mvp-v2";
   readinessStatus: string;
+  modelVersion: string;
+  modelStatus: string;
+  entities: Record<string, DatabaseEntityContract>;
+  relationships: Array<Record<string, unknown>>;
   writerOwnership: Array<Record<string, unknown>>;
   invariants: Array<Record<string, unknown>>;
   [key: string]: unknown;
+}
+
+export interface DatabaseEntityContract {
+  role: string;
+  owner: string;
+  recordSchema: string;
+  primaryKey: string[];
+  requiredFields: string[];
+  uniqueKeys: Array<{
+    id: string;
+    columns: string[];
+    nullsAllowed: boolean;
+    status: "external-unverified";
+  }>;
+  [key: string]: unknown;
+}
+
+export interface RequirementDictionary {
+  schemaVersion: number;
+  profile: "mvp-v2";
+  dictionaryVersion: string;
+  dictionaryHashAlgorithm: "sha256";
+  dictionaryHashCanonicalization: "recursive-key-sort-json-v1";
+  dictionaryHashScope: "definitions";
+  dictionaryHash: string;
+  contentPolicy: {
+    containsCustomerContent: false;
+    allowedContent: string[];
+    forbiddenContent: string[];
+  };
+  definitions: Record<string, Record<string, unknown>>;
+}
+
+export interface RequirementsContract {
+  schemaVersion: number;
+  profile: "mvp-v2";
+  status: "approved";
+  dictionary: Record<string, unknown>;
+  schemaHashAlgorithm: "sha256";
+  schemaHashCanonicalization: "recursive-key-sort-json-v1";
+  schemas: Record<string, { path: string; hash: string }>;
+  canonicalInput: Record<string, unknown>;
+  valuePolicies: Record<string, unknown>;
+  processingPolicies: Record<string, unknown>;
+  governance: Record<string, unknown>;
+}
+
+export interface ContractSchemaDocument extends ContractSchema {
+  $schema: string;
+  $id: string;
+  title: string;
 }
 
 export interface ErrorCatalog {

@@ -11,6 +11,17 @@
     "PROVIDER_REFERENCE_MISSING",
     "RECOVERY_NOT_CONFIRMED",
     "RECOVERY_ALREADY_TERMINAL",
+    "CANONICAL_INPUT_CONFLICT",
+    "DICTIONARY_REFERENCE_MISMATCH",
+    "VALUE_RANGE_INVALID",
+    "DEADLINE_ORDER_INVALID",
+    "CONSTRAINT_GRAMMAR_INVALID",
+    "JOIN_GATE_FAILED",
+    "SCOPE_MISMATCH",
+    "LATE_DATA_REJECTED",
+    "OFFER_PROMOTION_CONFLICT",
+    "SELECTION_RESULT_STALE",
+    "STATE_COMBINATION_INVALID",
     "STATE_CONFLICT",
     "WRITE_RESULT_UNKNOWN"
   ],
@@ -131,16 +142,16 @@
       "code": "RECOVERY_NOT_CONFIRMED",
       "retryable": false,
       "category": "recovery",
-      "message": "Manual recovery has not been explicitly confirmed in the current session.",
-      "recoveryAction": "Obtain explicit recovery confirmation, then restart the sync-ingest-sync sequence.",
+      "message": "The authoritative server state does not allow request_recovery for this state version.",
+      "recoveryAction": "Refresh server state and create or reconcile the persisted recovery request before ingest.",
       "writeRelated": true,
       "blindRetry": false,
       "retryPolicy": {
-        "mode": "confirm-before-new-attempt",
+        "mode": "refresh-authoritative-state-before-new-request",
         "directRetry": false,
         "conditionalRetryAfterReconciliation": false,
-        "authoritativeReconciliationRequired": false,
-        "reconcileWith": null
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "get_workflow_state"
       }
     },
     {
@@ -157,6 +168,182 @@
         "conditionalRetryAfterReconciliation": false,
         "authoritativeReconciliationRequired": false,
         "reconcileWith": null
+      }
+    },
+    {
+      "code": "CANONICAL_INPUT_CONFLICT",
+      "retryable": false,
+      "category": "validation",
+      "message": "Canonical raw_messages_json conflicts with a supplied compatibility alias after normalization.",
+      "recoveryAction": "Submit one canonical raw_messages_json value or make every supplied alias normalize to the same value.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "correct-input-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "DICTIONARY_REFERENCE_MISMATCH",
+      "retryable": false,
+      "category": "contract",
+      "message": "The requirement or snapshot dictionary version and hash do not resolve to the approved dictionary.",
+      "recoveryAction": "Load the approved dictionary and rebuild the requirement or snapshot with its exact version and hash.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "blocked-until-corrected",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "approved-requirement-dictionary"
+      }
+    },
+    {
+      "code": "VALUE_RANGE_INVALID",
+      "retryable": false,
+      "category": "validation",
+      "message": "A budget or rebate bound is missing, out of range, or ordered incorrectly.",
+      "recoveryAction": "Provide both approved bounds in canonical units with lower less than or equal to upper.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "correct-input-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "DEADLINE_ORDER_INVALID",
+      "retryable": false,
+      "category": "validation",
+      "message": "One or more required deadlines are missing, timezone-ambiguous, or ordered incorrectly.",
+      "recoveryAction": "Clarify all three RFC3339 deadlines and preserve supplier response, client submission, then publication order.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "correct-input-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "CONSTRAINT_GRAMMAR_INVALID",
+      "retryable": false,
+      "category": "validation",
+      "message": "A requirement constraint does not match the approved closed-world grammar.",
+      "recoveryAction": "Replace the unknown field, operator, or expression shape with an approved constraint expression.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "correct-input-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": false,
+        "reconcileWith": null
+      }
+    },
+    {
+      "code": "JOIN_GATE_FAILED",
+      "retryable": false,
+      "category": "data-integrity",
+      "message": "A required authoritative join is missing, ambiguous, inactive, or not valid at the requested as-of time.",
+      "recoveryAction": "Reconcile the named authoritative records and retry only after every required join resolves exactly once.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "reconcile-then-conditional-retry",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": true,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "requirements.json#processingPolicies.joinGate"
+      }
+    },
+    {
+      "code": "SCOPE_MISMATCH",
+      "retryable": false,
+      "category": "data-integrity",
+      "message": "Joined records do not share the required tenant or project scope.",
+      "recoveryAction": "Use records from the same authoritative scope; do not copy identifiers across scopes.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "blocked-until-corrected",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "query-authoritative-scope"
+      }
+    },
+    {
+      "code": "LATE_DATA_REJECTED",
+      "retryable": false,
+      "category": "data-lifecycle",
+      "message": "Late-arriving data cannot mutate a frozen snapshot or downstream artifact.",
+      "recoveryAction": "Retain lineage and route the record to the next snapshot or manual review without rewriting frozen results.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "route-to-next-snapshot-or-review",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "latest-authoritative-snapshot"
+      }
+    },
+    {
+      "code": "OFFER_PROMOTION_CONFLICT",
+      "retryable": false,
+      "category": "concurrency",
+      "message": "An offer promotion conflicts with existing source lineage, scope, state, or idempotency ownership.",
+      "recoveryAction": "Query the promotion event and active offer revision; retry only if the source remains validated and unpromoted.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "reconcile-then-conditional-retry",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": true,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "query-offer-promotion-by-idempotency-key"
+      }
+    },
+    {
+      "code": "SELECTION_RESULT_STALE",
+      "retryable": false,
+      "category": "workflow",
+      "message": "The persisted field selection does not match the current requirement snapshot, dictionary, scope, or state version.",
+      "recoveryAction": "Refresh authoritative state and create a new selection result before any send operation.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "refresh-and-reselect-before-new-attempt",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "get_workflow_state"
+      }
+    },
+    {
+      "code": "STATE_COMBINATION_INVALID",
+      "retryable": false,
+      "category": "workflow",
+      "message": "The authoritative phase, lifecycle status, response status, and allowed actions are not an approved state combination.",
+      "recoveryAction": "Block writes and repair or migrate the authoritative workflow state before continuing.",
+      "writeRelated": true,
+      "blindRetry": false,
+      "retryPolicy": {
+        "mode": "blocked-until-corrected",
+        "directRetry": false,
+        "conditionalRetryAfterReconciliation": false,
+        "authoritativeReconciliationRequired": true,
+        "reconcileWith": "workflow.json#stateCombinations"
       }
     },
     {

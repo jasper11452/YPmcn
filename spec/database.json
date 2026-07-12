@@ -7,20 +7,525 @@
     "isDeploymentProof": false,
     "statement": "This specification declares external readiness requirements; it is not migration or deployment proof."
   },
+  "modelVersion": "2026-07-12.1",
+  "modelStatus": "target-contract-external-unverified",
+  "commonFieldPolicies": {
+    "scopeFields": [
+      "scope_type",
+      "scope_id"
+    ],
+    "lateDataFields": [
+      "observed_at",
+      "effective_at",
+      "received_at",
+      "as_of_at",
+      "late_data_cutoff_at",
+      "is_late",
+      "late_reason"
+    ],
+    "dictionaryReferenceFields": [
+      "dictionary_version",
+      "dictionary_hash"
+    ],
+    "physicalConstraintStatus": "external-unverified"
+  },
+  "entities": {
+    "requirement_headers": {
+      "role": "aggregate-head",
+      "owner": "requirement-service",
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/requirement_header",
+      "primaryKey": [
+        "requirement_head_id"
+      ],
+      "requiredFields": [
+        "requirement_head_id",
+        "raw_messages_json",
+        "dictionary_version",
+        "dictionary_hash",
+        "requested_platforms",
+        "scope_type",
+        "scope_id",
+        "created_at",
+        "updated_at"
+      ],
+      "uniqueKeys": [
+        {
+          "id": "pk-requirement-headers",
+          "columns": [
+            "requirement_head_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    },
+    "customer_demands": {
+      "role": "single-platform-execution-requirement",
+      "owner": "requirement-service",
+      "recordSchema": "schemas/requirement-record.schema.json",
+      "primaryKey": [
+        "requirement_id"
+      ],
+      "requiredFields": [
+        "requirement_id",
+        "requirement_head_id",
+        "requirement_version",
+        "platform",
+        "dictionary_version",
+        "dictionary_hash",
+        "raw_messages_json",
+        "budget_min_cents",
+        "budget_max_cents",
+        "rebate_min_rate",
+        "rebate_max_rate",
+        "supplier_response_deadline_at",
+        "client_submission_deadline_at",
+        "content_publish_deadline_at",
+        "constraints",
+        "scope_type",
+        "scope_id",
+        "created_at",
+        "updated_at"
+      ],
+      "uniqueKeys": [
+        {
+          "id": "pk-customer-demands",
+          "columns": [
+            "requirement_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-customer-demands-head-platform-version",
+          "columns": [
+            "requirement_head_id",
+            "platform",
+            "requirement_version"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    },
+    "requirement_snapshots": {
+      "role": "immutable-as-of-snapshot",
+      "owner": "requirement-and-ranking-services",
+      "recordSchema": "schemas/requirement-snapshot.schema.json",
+      "primaryKey": [
+        "snapshot_id"
+      ],
+      "requiredFields": [
+        "snapshot_id",
+        "requirement_id",
+        "requirement_version",
+        "dictionary_version",
+        "dictionary_hash",
+        "snapshot_kind",
+        "as_of_at",
+        "late_data_cutoff_at",
+        "scope_type",
+        "scope_id",
+        "raw_messages_hash",
+        "payload_hash",
+        "created_at"
+      ],
+      "uniqueKeys": [
+        {
+          "id": "pk-requirement-snapshots",
+          "columns": [
+            "snapshot_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-requirement-snapshots-version-kind-as-of",
+          "columns": [
+            "requirement_id",
+            "requirement_version",
+            "snapshot_kind",
+            "as_of_at"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    },
+    "creator_supply_offers": {
+      "role": "versioned-multi-offer",
+      "owner": "supply-service",
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/supply_offer",
+      "primaryKey": [
+        "offer_id"
+      ],
+      "requiredFields": [
+        "offer_id",
+        "creator_id",
+        "supplier_binding_id",
+        "platform",
+        "offer_type",
+        "price_cents",
+        "currency",
+        "rebate_rate",
+        "revision",
+        "status",
+        "source_type",
+        "source_record_id",
+        "effective_at",
+        "observed_at",
+        "received_at",
+        "as_of_at",
+        "late_data_cutoff_at",
+        "is_late",
+        "late_reason",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "cardinality": "zero-or-many-per-creator",
+      "uniqueKeys": [
+        {
+          "id": "pk-creator-supply-offers",
+          "columns": [
+            "offer_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-creator-supply-offer-revision",
+          "columns": [
+            "creator_id",
+            "supplier_binding_id",
+            "platform",
+            "offer_type",
+            "scope_type",
+            "scope_id",
+            "revision"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-creator-supply-offer-source",
+          "columns": [
+            "source_type",
+            "source_record_id",
+            "scope_type",
+            "scope_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    },
+    "supplier_bindings": {
+      "role": "provider-supplier-to-mcn-binding",
+      "owner": "supplier-integration-service",
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/supplier_binding",
+      "primaryKey": [
+        "supplier_binding_id"
+      ],
+      "requiredFields": [
+        "supplier_binding_id",
+        "provider",
+        "supplier_id",
+        "mcn_id",
+        "valid_from",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "uniqueKeys": [
+        {
+          "id": "pk-supplier-bindings",
+          "columns": [
+            "supplier_binding_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-supplier-bindings-provider-supplier",
+          "columns": [
+            "provider",
+            "supplier_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-supplier-bindings-window-start",
+          "columns": [
+            "mcn_id",
+            "provider",
+            "scope_type",
+            "scope_id",
+            "valid_from"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    },
+    "selection_results": {
+      "role": "persisted-ordered-field-selection",
+      "owner": "field-selection-service",
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/selection_result",
+      "primaryKey": [
+        "selection_result_id"
+      ],
+      "requiredFields": [
+        "selection_result_id",
+        "mcn_recommendation_id",
+        "requirement_snapshot_id",
+        "dictionary_version",
+        "dictionary_hash",
+        "ordered_columns_json",
+        "selection_hash",
+        "state_version",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "uniqueKeys": [
+        {
+          "id": "pk-selection-results",
+          "columns": [
+            "selection_result_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-selection-results-plan-snapshot-state-version",
+          "columns": [
+            "mcn_recommendation_id",
+            "requirement_snapshot_id",
+            "state_version"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    },
+    "send_operations": {
+      "role": "idempotent-provider-send-operation",
+      "owner": "distribution-provider-backend",
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/send_operation",
+      "primaryKey": [
+        "send_operation_id"
+      ],
+      "requiredFields": [
+        "send_operation_id",
+        "mcn_recommendation_id",
+        "requirement_id",
+        "selection_result_id",
+        "idempotency_key",
+        "provider",
+        "provider_correlation_key",
+        "status",
+        "state_version",
+        "scope_type",
+        "scope_id",
+        "requested_at"
+      ],
+      "uniqueKeys": [
+        {
+          "id": "pk-send-operations",
+          "columns": [
+            "send_operation_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-send-operations-idempotency-key",
+          "columns": [
+            "idempotency_key"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-send-operations-provider-correlation",
+          "columns": [
+            "provider",
+            "provider_correlation_key"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    },
+    "risk_audit_events": {
+      "role": "append-only-risk-decision-audit",
+      "owner": "recommendation-service",
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/risk_audit_event",
+      "primaryKey": [
+        "risk_audit_id"
+      ],
+      "requiredFields": [
+        "risk_audit_id",
+        "run_id",
+        "subject_type",
+        "subject_id",
+        "decision",
+        "reason_codes",
+        "actor_id",
+        "state_version",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "appendOnly": true,
+      "uniqueKeys": [
+        {
+          "id": "pk-risk-audit-events",
+          "columns": [
+            "risk_audit_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    },
+    "feedback_audit_events": {
+      "role": "append-only-client-feedback-audit",
+      "owner": "feedback-service",
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/feedback_audit_event",
+      "primaryKey": [
+        "feedback_audit_id"
+      ],
+      "requiredFields": [
+        "feedback_audit_id",
+        "run_id",
+        "submission_id",
+        "before_status",
+        "after_status",
+        "reason",
+        "actor_id",
+        "state_version",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "appendOnly": true,
+      "uniqueKeys": [
+        {
+          "id": "pk-feedback-audit-events",
+          "columns": [
+            "feedback_audit_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    },
+    "offer_promotion_events": {
+      "role": "append-only-offer-promotion-audit",
+      "owner": "supply-service",
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/offer_promotion_event",
+      "primaryKey": [
+        "promotion_event_id"
+      ],
+      "requiredFields": [
+        "promotion_event_id",
+        "source_type",
+        "source_record_id",
+        "target_offer_id",
+        "from_state",
+        "to_state",
+        "idempotency_key",
+        "scope_type",
+        "scope_id",
+        "created_at"
+      ],
+      "appendOnly": true,
+      "uniqueKeys": [
+        {
+          "id": "pk-offer-promotion-events",
+          "columns": [
+            "promotion_event_id"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        },
+        {
+          "id": "uq-offer-promotion-events-idempotency",
+          "columns": [
+            "idempotency_key"
+          ],
+          "nullsAllowed": false,
+          "status": "external-unverified"
+        }
+      ]
+    }
+  },
+  "relationships": [
+    {
+      "id": "requirement-head-children",
+      "from": "customer_demands.requirement_head_id",
+      "to": "requirement_headers.requirement_head_id",
+      "cardinality": "many-to-one",
+      "onDelete": "restrict"
+    },
+    {
+      "id": "requirement-snapshot-owner",
+      "from": "requirement_snapshots.requirement_id",
+      "to": "customer_demands.requirement_id",
+      "cardinality": "many-to-one",
+      "onDelete": "restrict"
+    },
+    {
+      "id": "offer-supplier-binding",
+      "from": "creator_supply_offers.supplier_binding_id",
+      "to": "supplier_bindings.supplier_binding_id",
+      "cardinality": "many-to-one-active-at-as-of",
+      "onDelete": "restrict"
+    },
+    {
+      "id": "selection-requirement-snapshot",
+      "from": "selection_results.requirement_snapshot_id",
+      "to": "requirement_snapshots.snapshot_id",
+      "cardinality": "many-to-one",
+      "onDelete": "restrict"
+    },
+    {
+      "id": "send-selection-result",
+      "from": "send_operations.selection_result_id",
+      "to": "selection_results.selection_result_id",
+      "cardinality": "many-to-one",
+      "onDelete": "restrict"
+    },
+    {
+      "id": "promotion-target-offer",
+      "from": "offer_promotion_events.target_offer_id",
+      "to": "creator_supply_offers.offer_id",
+      "cardinality": "many-to-one",
+      "onDelete": "restrict"
+    }
+  ],
   "writerOwnership": [
     {
       "tool": "validate_requirement",
       "always": [
+        "requirement_headers",
         "customer_demands"
       ],
-      "conditional": []
+      "conditional": [
+        "requirement_snapshots"
+      ]
     },
     {
       "tool": "search_creators",
       "always": [
         "creator_candidate_pool"
       ],
-      "conditional": []
+      "conditional": [
+        "requirement_snapshots"
+      ]
     },
     {
       "tool": "rank_mcns",
@@ -31,12 +536,16 @@
     },
     {
       "tool": "select_inquiry_form_fields",
-      "always": [],
+      "always": [
+        "selection_results"
+      ],
       "conditional": []
     },
     {
       "tool": "create_with_distributions",
-      "always": [],
+      "always": [
+        "send_operations"
+      ],
       "conditional": []
     },
     {
@@ -54,7 +563,8 @@
         "mcn_submission_items"
       ],
       "conditional": [
-        "creator_supply_offers"
+        "creator_supply_offers",
+        "offer_promotion_events"
       ]
     },
     {
@@ -63,7 +573,8 @@
         "manual_sourced_creators"
       ],
       "conditional": [
-        "creator_supply_offers"
+        "creator_supply_offers",
+        "offer_promotion_events"
       ]
     },
     {
@@ -88,7 +599,8 @@
         "creator_submissions"
       ],
       "conditional": [
-        "customer_demands"
+        "customer_demands",
+        "feedback_audit_events"
       ]
     },
     {
@@ -104,7 +616,8 @@
     {
       "tool": "audit_manual_adjustment",
       "always": [
-        "creator_recommendation_items"
+        "creator_recommendation_items",
+        "risk_audit_events"
       ],
       "conditional": [
         "creator_submissions"
@@ -119,21 +632,21 @@
   "invariants": [
     {
       "id": "unique-supplier-mapping",
-      "requirement": "mcn_agencies.supplier_id is nonempty and unique, providing one supplier_id for each targeted mcn_id",
+      "requirement": "one active supplier binding resolves each targeted (mcn_id, provider, scope) at an as-of time, and (provider, supplier_id) is physically unique",
       "owner": "production-database",
       "evidence": [
-        "unique constraint on mcn_agencies.supplier_id",
-        "readiness query returns exactly one supplier_id for every targeted mcn_id"
+        "physical unique constraints uq-supplier-bindings-provider-supplier and uq-supplier-bindings-window-start exist",
+        "transactional overlap guard plus as-of readiness query returns exactly one active supplier_binding_id for every targeted MCN and scope"
       ],
       "status": "external-unverified"
     },
     {
       "id": "single-send-context",
-      "requirement": "one send context exists per (mcn_recommendation_id, requirement_id); resend requires a new mcn_recommendation_id",
+      "requirement": "one logical provider send exists per idempotency_key and every send references one persisted selection_result; an unknown outcome is reconciled before a new operation key is allowed",
       "owner": "distribution-provider-backend",
       "evidence": [
-        "unique or transactional idempotency proof for (mcn_recommendation_id, requirement_id)",
-        "resend scenario creates a new mcn_recommendation_id"
+        "physical unique constraints cover send_operations.idempotency_key and (provider, provider_correlation_key)",
+        "timeout scenario reuses the same send operation during reconciliation and an explicit resend creates a new operation key"
       ],
       "status": "external-unverified"
     },
@@ -204,6 +717,56 @@
       "evidence": [
         "same-run retry test returns the existing unfinished batch identifier",
         "new-batch test succeeds only after feedback next_action is continue_submission"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "requirement-dictionary-snapshot-binding",
+      "requirement": "every executable requirement, immutable snapshot, and selection result stores the exact approved dictionary_version and dictionary_hash",
+      "owner": "requirement-and-field-selection-services",
+      "evidence": [
+        "non-null fields and foreign-reference checks cover dictionary_version plus dictionary_hash",
+        "mismatched version/hash fixtures fail closed without creating a snapshot or selection"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "single-platform-execution-unit",
+      "requirement": "each customer_demands row has exactly one platform and is physically unique by (requirement_head_id, platform, requirement_version)",
+      "owner": "requirement-service",
+      "evidence": [
+        "physical unique constraint uq-customer-demands-head-platform-version exists",
+        "multi-platform intake creates sibling child requirements under one requirement head"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "immutable-snapshot-and-audit-lineage",
+      "requirement": "requirement snapshots, risk audits, feedback audits, and offer promotion events are append-only and cannot be rewritten in place",
+      "owner": "production-database-and-owning-services",
+      "evidence": [
+        "database permissions or triggers reject update/delete for immutable records",
+        "correction scenarios append a new version or audit event and preserve prior hashes"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "late-data-does-not-mutate-frozen-results",
+      "requirement": "records received after late_data_cutoff_at retain lineage and are routed to a later snapshot or manual review without mutating frozen selection, ranking, or submission artifacts",
+      "owner": "supply-and-ranking-services",
+      "evidence": [
+        "late-data fixture sets is_late and preserves observed/effective/received/as-of timestamps",
+        "frozen artifact hashes remain unchanged after late data arrives"
+      ],
+      "status": "external-unverified"
+    },
+    {
+      "id": "offer-promotion-is-versioned-and-idempotent",
+      "requirement": "offer promotion creates a new offer revision and append-only promotion event exactly once per source and scope; it never overwrites an active offer",
+      "owner": "supply-service",
+      "evidence": [
+        "physical unique constraints cover offer source/scope and promotion idempotency key",
+        "duplicate promotion and overwrite attempts return the existing result or fail closed"
       ],
       "status": "external-unverified"
     }

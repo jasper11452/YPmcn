@@ -28,14 +28,17 @@
         "automaticLegacyFallback": false,
         "preconditions": {
           "create_with_distributions": [
-            "field_selection_confirmed",
+            "persisted_selection_result_current",
+            "authoritative_state_version_current",
+            "server_allowed_action_create_with_distributions",
             "supply_confirmed",
             "mcn_confirmed",
             "message_confirmed"
           ],
           "ingest_mcn_submissions": [
-            "fresh_successful_sync_evidence",
-            "manual_or_scheduled_recovery_trigger"
+            "server_allowed_action_request_recovery",
+            "authoritative_state_version_current",
+            "manual_or_scheduled_is_audit_origin_only"
           ]
         }
       },

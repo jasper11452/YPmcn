@@ -5,7 +5,8 @@
 ## 先看结论
 
 - YPmcn 是一个契约优先的媒介助手仓库：插件负责 Skill/Hook，provider 负责真实业务写入，vector MCP 负责向量检索。
-- 离线仓库和 `3.0.0` 发布包已通过验证，但生产 provider 仍是旧契约，数据库证明与算法定义尚未完成，所以当前仍是 **NO-GO**。
+- P0 与首批 P1 已收口为 Requirements、Database、MCP、Workflow、Error 和 JSON Schema 契约；这只是目标定义，不代表 provider、数据库或 Hook/Skill 已实现。
+- 离线仓库可验证，但生产 provider 仍是旧契约，数据库证明与算法定义尚未完成，所以当前仍是 **NO-GO**。
 - 唯一项目根就是当前 Git 仓库；`YPmcn/` 是组件，临时 worktree 不是第二个项目。
 
 ## 1 分钟阅读顺序
@@ -27,13 +28,13 @@
 | 当前事实 | 值 |
 | --- | --- |
 | Profile / 状态 | `mvp-v2` / `approved` |
-| 正式契约域 | 7 个 |
+| 正式契约域 | 8 个 |
 | MCP Tool | 15 个（必需 14，可选 1） |
 | Workflow / Hook | 14 个阶段 / 6 个事件 |
-| 数据库证明 | 9 项不变量，`external-unverified` |
+| 数据库证明 | 14 项不变量，`external-unverified` |
 | 算法定义 | `external-unverified` |
 | 兼容检测 | `legacy-1.9.4` |
-| Spec 摘要 | `sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0` |
+| Spec 摘要 | `sha256:4a143891ab6136ddb7993de0606b6466d46a9bd48f29b139f4068a4086820e28` |
 <!-- human-docs:spec-summary:end -->
 
 ## 五条原则

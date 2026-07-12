@@ -11,13 +11,14 @@
 3. **安全清理**：退役旧 Mock/直发链路，移除完整客户数据、历史包、缓存和废弃分支。
 4. **一键安装**：根 npm workspace 覆盖插件与向量 MCP，一次 `npm ci` 即可验证全仓库。
 5. **人类可读**：保留极简叙事，Spec/Change 的机器事实在提交前自动同步，验证只负责检查漂移。
+6. **契约收口**：把 2026-07-12 的 P0 与首批 P1 固化为数据实体、无客户内容字典、逐工具输出、服务端权威恢复和 closed-world 业务有效性契约，同时保持生产 NO-GO。
 
 ## 已批准变更索引
 
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:6c05900face6bead6897845921885f295e80ef90fae8faccd594cfe9b34ee4e0`
+当前 Spec：`mvp-v2` · `sha256:4a143891ab6136ddb7993de0606b6466d46a9bd48f29b139f4068a4086820e28`
 变更记录摘要：`sha256:28d1d51cb049389e7b0a9fcd63509660c09f414add632518a101a9e64391369b`
 
 | 变更 | 状态 | 决策主题 |
@@ -35,5 +36,5 @@
 ## 当前方向
 
 - 仓库治理和离线发布链路已经稳定，新增功能继续走 Change Proposal → Spec → 实现 → 独立验证。
-- 下一阶段重点不在恢复旧本地实现，而在升级生产 provider、补数据库部署证明并导入获批算法定义。
+- 下一阶段按 Database → MCP → Hook/Skill → Integration 顺序实现 CHG-2026-007 目标契约，再补生产迁移/并发证明；排序算法仍须独立批准和验证。
 - 历史细节需要时看 `changes/` 和 Git；活跃 `docs/` 只保留当前人类需要的信息。

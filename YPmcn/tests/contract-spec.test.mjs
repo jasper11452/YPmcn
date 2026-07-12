@@ -4,11 +4,32 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
+import {
+  loadContractProfile,
+  loadContractSchema,
+  loadDatabaseContract,
+  loadErrorCatalog,
+  loadRequirementDictionary,
+  loadRequirementsContract,
+  loadWorkflowContract,
+  validateContractProfileDocument,
+} from "../dist/contract/loader.js";
+
 const V2_PROFILE = "mcp.json";
 const LEGACY_PROFILE = "profiles/legacy-1.9.4.json";
 const WORKFLOW_SPEC = "workflow.json";
 const DATABASE_SPEC = "database.json";
 const ERRORS_SPEC = "errors.json";
+const REQUIREMENTS_SPEC = "requirements.json";
+const REQUIREMENT_DICTIONARY_SPEC = "requirement-dictionary.json";
+const WORKFLOW_CONTRACT_HASH =
+  "0c9d80c00dcecf14ce388619e5c6d247ea3e19e0bdccb108b0586876a4abbd50";
+const DATABASE_CONTRACT_HASH =
+  "4ee910376dd2110622e1275e38f0ac7ed28c8ec64cf0b4b2440caf0e5f49de11";
+const ERRORS_CONTRACT_HASH =
+  "46095e7e667f88df517eb3d04818adcc65bdb38e4ec6d68c90123f3eb78f677a";
+const REQUIREMENTS_CONTRACT_HASH =
+  "1bae2a5b31a5507fb34723054de623c4fdca89dddba124aeebcdfac930e101ff";
 const CREATOR_SCHEMA_CSV =
   "../skills/media-assistant/references/creator_candidate_pool_schema.csv";
 
@@ -120,316 +141,16 @@ const RESPONSE_STATUSES = [
   "failed",
 ];
 
-const WORKFLOW_POLICIES = {
-  sendSuccessPhase: "distribution_sync_pending",
-  waitingReturnRequires: "first-successful-sync",
-  ordinaryMessageUnlocksWaiting: false,
-  manualRecoveryConfirmation: "explicit-current-session-confirmation",
-  scheduledRecoveryContext: "ctx.trigger=cron",
-  recoverySequence: [
-    "sync_mcn_inquiry_status",
-    "ingest_mcn_submissions",
-    "sync_mcn_inquiry_status",
-  ],
-  rankingAllowedAfterPhase: "recovered",
-  terminalRecovery: {
-    authoritativeLifecycleStatuses: ["recovered", "closed"],
-    behavior: "no-op",
-    sideEffectsAllowed: false,
-    evidence: [
-      "error.code === RECOVERY_ALREADY_TERMINAL",
-      "no-write-tool-invoked",
-    ],
-  },
-};
-
-const WORKFLOW_TRANSITIONS = [
-  {
-    id: "requirement-validated",
-    from: "requirement_draft",
-    trigger: { type: "tool", name: "validate_requirement" },
-    guards: [
-      "required-demand-fields-present",
-      "result.data.status === ready",
-    ],
-    evidence: [
-      "success === true",
-      "data.id",
-      "data.status",
-    ],
-    nextPhase: "requirement_ready",
-  },
-  {
-    id: "candidate-pool-written",
-    from: "requirement_ready",
-    trigger: { type: "tool", name: "search_creators" },
-    guards: ["params.requirement_id === state.requirement_id"],
-    evidence: [
-      "success === true",
-      "data.id",
-      "data.candidate_pool_written",
-    ],
-    nextPhase: "candidate_pool_ready",
-  },
-  {
-    id: "mcn-plan-written",
-    from: "candidate_pool_ready",
-    trigger: { type: "tool", name: "rank_mcns" },
-    guards: ["params.candidate_pool_id === state.candidate_pool_id"],
-    evidence: [
-      "success === true",
-      "data.id",
-      "data.inquiry_advice",
-    ],
-    nextPhase: "mcn_planning",
-  },
-  {
-    id: "inquiry-fields-selected",
-    from: "mcn_planning",
-    trigger: { type: "tool", name: "select_inquiry_form_fields" },
-    guards: [
-      "params.mcn_recommendation_id === state.mcn_recommendation_id",
-    ],
-    evidence: [
-      "success === true",
-      "fields",
-      "items",
-      "selected_count === items.length",
-      "selected_count > 0",
-    ],
-    nextPhase: "field_selection_ready",
-  },
-  {
-    id: "distribution-sent",
-    from: "field_selection_ready",
-    trigger: { type: "tool", name: "create_with_distributions" },
-    guards: [
-      "supply-mcn-message-confirmations-present",
-      "field-selection-matches-ordered-columns",
-      "params.preview_only === false",
-    ],
-    evidence: [
-      "success === true",
-      "data.provider_project_id",
-      "data.distribution_batch_ref",
-      "data.distributions.length > 0",
-    ],
-    nextPhase: "distribution_sync_pending",
-  },
-  {
-    id: "first-distribution-sync",
-    from: "distribution_sync_pending",
-    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
-    guards: [
-      "params.mcn_recommendation_id === state.mcn_recommendation_id",
-      "params.requirement_id === state.requirement_id",
-    ],
-    evidence: [
-      "success === true",
-      "data.inquiry_batch_id",
-      "data.inquiry_ids",
-      "data.snapshot_id",
-      "data.lifecycle_status",
-      "data.response_status",
-    ],
-    nextPhase: "waiting_return",
-  },
-  {
-    id: "manual-recovery-confirmed",
-    from: "waiting_return",
-    trigger: { type: "event", name: "manual_recovery_confirmed" },
-    guards: ["explicit-recovery-intent-in-current-session"],
-    evidence: ["state.manual_recovery_confirmed_at"],
-    nextPhase: "waiting_return",
-  },
-  {
-    id: "manual-recovery-sync",
-    from: "waiting_return",
-    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
-    guards: [
-      "state.manual_recovery_confirmed_at-is-current",
-      "ctx.recovery_trigger === manual",
-      "result.data.lifecycle_status not in [recovered, closed]",
-    ],
-    evidence: [
-      "success === true",
-      "data.inquiry_batch_id",
-      "data.inquiry_ids",
-      "data.snapshot_id",
-      "data.lifecycle_status",
-      "data.response_status",
-    ],
-    nextPhase: "recovering",
-  },
-  {
-    id: "scheduled-recovery-sync",
-    from: "waiting_return",
-    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
-    guards: [
-      "ctx.trigger === cron",
-      "result.data.lifecycle_status not in [recovered, closed]",
-    ],
-    evidence: [
-      "success === true",
-      "data.inquiry_batch_id",
-      "data.inquiry_ids",
-      "data.snapshot_id",
-      "data.lifecycle_status",
-      "data.response_status",
-    ],
-    nextPhase: "recovering",
-  },
-  {
-    id: "manual-terminal-reconciliation",
-    from: "waiting_return",
-    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
-    guards: [
-      "state.manual_recovery_confirmed_at-is-current",
-      "ctx.recovery_trigger === manual",
-      "result.data.lifecycle_status in [recovered, closed]",
-    ],
-    evidence: [
-      "success === true",
-      "data.inquiry_batch_id",
-      "data.inquiry_ids",
-      "data.snapshot_id",
-      "data.lifecycle_status",
-      "data.response_status",
-    ],
-    nextPhase: "recovered",
-  },
-  {
-    id: "scheduled-terminal-reconciliation",
-    from: "waiting_return",
-    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
-    guards: [
-      "ctx.trigger === cron",
-      "result.data.lifecycle_status in [recovered, closed]",
-    ],
-    evidence: [
-      "success === true",
-      "data.inquiry_batch_id",
-      "data.inquiry_ids",
-      "data.snapshot_id",
-      "data.lifecycle_status",
-      "data.response_status",
-    ],
-    nextPhase: "recovered",
-  },
-  {
-    id: "manual-submission-ingest",
-    from: "recovering",
-    trigger: { type: "tool", name: "ingest_mcn_submissions" },
-    guards: [
-      "params.trigger === manual",
-      "state.manual_recovery_confirmed_at-is-current",
-      "current-session-successful-sync-evidence-present",
-    ],
-    evidence: [
-      "success === true",
-      "data.id",
-      "data.accepted_count",
-      "data.rejected_count",
-      "data.created_submission_item_count",
-    ],
-    nextPhase: "recovery_sync_pending",
-  },
-  {
-    id: "scheduled-submission-ingest",
-    from: "recovering",
-    trigger: { type: "tool", name: "ingest_mcn_submissions" },
-    guards: [
-      "params.trigger === scheduled",
-      "ctx.trigger === cron",
-      "current-session-successful-sync-evidence-present",
-    ],
-    evidence: [
-      "success === true",
-      "data.id",
-      "data.accepted_count",
-      "data.rejected_count",
-      "data.created_submission_item_count",
-    ],
-    nextPhase: "recovery_sync_pending",
-  },
-  {
-    id: "recovery-final-sync",
-    from: "recovery_sync_pending",
-    trigger: { type: "tool", name: "sync_mcn_inquiry_status" },
-    guards: [
-      "current-session-successful-ingest-evidence-present",
-      "result.data.lifecycle_status === recovered",
-    ],
-    evidence: [
-      "success === true",
-      "data.inquiry_batch_id",
-      "data.inquiry_ids",
-      "data.snapshot_id",
-      "data.lifecycle_status",
-      "data.response_status",
-    ],
-    nextPhase: "recovered",
-  },
-  {
-    id: "terminal-recovery-no-op",
-    from: "recovered",
-    trigger: { type: "event", name: "recovery_requested" },
-    guards: ["authoritative-lifecycle-status in [recovered, closed]"],
-    evidence: [
-      "error.code === RECOVERY_ALREADY_TERMINAL",
-      "no-write-tool-invoked",
-    ],
-    nextPhase: "recovered",
-  },
-  {
-    id: "creators-ranked",
-    from: "recovered",
-    trigger: { type: "tool", name: "rank_creators" },
-    guards: ["latest-authoritative-sync-lifecycle-status === recovered"],
-    evidence: [
-      "success === true",
-      "data.run_id",
-      "data.ranked_count",
-    ],
-    nextPhase: "recommendation_ready",
-  },
-  {
-    id: "submission-batch-created",
-    from: "recommendation_ready",
-    trigger: { type: "tool", name: "create_submission_batch" },
-    guards: ["params.run_id === state.run_id"],
-    evidence: [
-      "success === true",
-      "data.id",
-      "data.batch_no",
-      "data.submitted_count",
-    ],
-    nextPhase: "submission_batch_ready",
-  },
-  {
-    id: "client-feedback-recorded",
-    from: "submission_batch_ready",
-    trigger: { type: "tool", name: "record_client_feedback" },
-    guards: ["params.run_id === state.run_id"],
-    evidence: [
-      "success === true",
-      "data.updated_count",
-      "data.next_action",
-    ],
-    nextPhase: "feedback_routing",
-  },
-];
-
 const DATABASE_WRITER_OWNERSHIP = [
   {
     tool: "validate_requirement",
-    always: ["customer_demands"],
-    conditional: [],
+    always: ["requirement_headers", "customer_demands"],
+    conditional: ["requirement_snapshots"],
   },
   {
     tool: "search_creators",
     always: ["creator_candidate_pool"],
-    conditional: [],
+    conditional: ["requirement_snapshots"],
   },
   {
     tool: "rank_mcns",
@@ -438,12 +159,12 @@ const DATABASE_WRITER_OWNERSHIP = [
   },
   {
     tool: "select_inquiry_form_fields",
-    always: [],
+    always: ["selection_results"],
     conditional: [],
   },
   {
     tool: "create_with_distributions",
-    always: [],
+    always: ["send_operations"],
     conditional: [],
   },
   {
@@ -454,12 +175,12 @@ const DATABASE_WRITER_OWNERSHIP = [
   {
     tool: "ingest_mcn_submissions",
     always: ["mcn_submission_items"],
-    conditional: ["creator_supply_offers"],
+    conditional: ["creator_supply_offers", "offer_promotion_events"],
   },
   {
     tool: "manual_source_creators",
     always: ["manual_sourced_creators"],
-    conditional: ["creator_supply_offers"],
+    conditional: ["creator_supply_offers", "offer_promotion_events"],
   },
   {
     tool: "rank_creators",
@@ -474,7 +195,7 @@ const DATABASE_WRITER_OWNERSHIP = [
   {
     tool: "record_client_feedback",
     always: ["creator_submissions"],
-    conditional: ["customer_demands"],
+    conditional: ["customer_demands", "feedback_audit_events"],
   },
   {
     tool: "get_recommendation_run_detail",
@@ -488,115 +209,13 @@ const DATABASE_WRITER_OWNERSHIP = [
   },
   {
     tool: "audit_manual_adjustment",
-    always: ["creator_recommendation_items"],
+    always: ["creator_recommendation_items", "risk_audit_events"],
     conditional: ["creator_submissions"],
   },
   {
     tool: "get_workflow_state",
     always: [],
     conditional: [],
-  },
-];
-
-const DATABASE_INVARIANTS = [
-  {
-    id: "unique-supplier-mapping",
-    requirement:
-      "mcn_agencies.supplier_id is nonempty and unique, providing one supplier_id for each targeted mcn_id",
-    owner: "production-database",
-    evidence: [
-      "unique constraint on mcn_agencies.supplier_id",
-      "readiness query returns exactly one supplier_id for every targeted mcn_id",
-    ],
-    status: "external-unverified",
-  },
-  {
-    id: "single-send-context",
-    requirement:
-      "one send context exists per (mcn_recommendation_id, requirement_id); resend requires a new mcn_recommendation_id",
-    owner: "distribution-provider-backend",
-    evidence: [
-      "unique or transactional idempotency proof for (mcn_recommendation_id, requirement_id)",
-      "resend scenario creates a new mcn_recommendation_id",
-    ],
-    status: "external-unverified",
-  },
-  {
-    id: "stable-provider-correlation",
-    requirement:
-      "provider send uses a stable business correlation key and an unknown outcome is queried with that key before any retry",
-    owner: "distribution-provider-backend",
-    evidence: [
-      "provider contract documents the stable correlation key",
-      "timeout scenario queries provider state and does not issue a second send",
-    ],
-    status: "external-unverified",
-  },
-  {
-    id: "atomic-first-sync",
-    requirement:
-      "first sync transactionally creates or reuses one snapshot, one inquiry batch, one inquiry per supplier, and one cron",
-    owner: "sync-mcn-inquiry-status-backend",
-    evidence: [
-      "transaction and uniqueness constraints cover snapshot, inquiry batch, supplier inquiry, and cron writes",
-      "concurrent first-sync test returns the same snapshot, inquiry batch, inquiries, and cron",
-    ],
-    status: "external-unverified",
-  },
-  {
-    id: "unique-provider-references",
-    requirement:
-      "provider_distribution_id is unique and every token and fill_link is nonempty and unique",
-    owner: "production-database-and-provider",
-    evidence: [
-      "unique constraints cover provider_distribution_id, token, and fill_link",
-      "provider integration test rejects empty or duplicate references",
-    ],
-    status: "external-unverified",
-  },
-  {
-    id: "idempotent-submission-ingest",
-    requirement:
-      "submission ingest is idempotent on (provider_distribution_id, provider_row_id)",
-    owner: "ingest-mcn-submissions-backend",
-    evidence: [
-      "unique constraint on (provider_distribution_id, provider_row_id)",
-      "duplicate-row integration test preserves one logical submission item",
-    ],
-    status: "external-unverified",
-  },
-  {
-    id: "single-recovery-owner",
-    requirement:
-      "recovery uses compare-and-swap or a row lock so concurrent manual and scheduled recovery permit one ingest owner",
-    owner: "production-database-recovery-coordinator",
-    evidence: [
-      "CAS predicate or row-lock transaction is documented",
-      "manual-versus-scheduled concurrency test observes one ingest owner",
-    ],
-    status: "external-unverified",
-  },
-  {
-    id: "accepted-source-merge-priority",
-    requirement:
-      "creator merge priority is mcn_submission > manual_source > candidate_pool and automatic rank accepts only accepted records",
-    owner: "rank-creators-backend",
-    evidence: [
-      "three-source collision fixture selects the documented priority winner",
-      "ranking fixture excludes need_review and every status other than accepted",
-    ],
-    status: "external-unverified",
-  },
-  {
-    id: "submission-batch-retry",
-    requirement:
-      "retry for a run returns its current unfinished submission batch; a new batch is created only after continue_submission",
-    owner: "create-submission-batch-backend",
-    evidence: [
-      "same-run retry test returns the existing unfinished batch identifier",
-      "new-batch test succeeds only after feedback next_action is continue_submission",
-    ],
-    status: "external-unverified",
   },
 ];
 
@@ -617,198 +236,19 @@ const ERROR_CODES = [
   "PROVIDER_REFERENCE_MISSING",
   "RECOVERY_NOT_CONFIRMED",
   "RECOVERY_ALREADY_TERMINAL",
+  "CANONICAL_INPUT_CONFLICT",
+  "DICTIONARY_REFERENCE_MISMATCH",
+  "VALUE_RANGE_INVALID",
+  "DEADLINE_ORDER_INVALID",
+  "CONSTRAINT_GRAMMAR_INVALID",
+  "JOIN_GATE_FAILED",
+  "SCOPE_MISMATCH",
+  "LATE_DATA_REJECTED",
+  "OFFER_PROMOTION_CONFLICT",
+  "SELECTION_RESULT_STALE",
+  "STATE_COMBINATION_INVALID",
   "STATE_CONFLICT",
   "WRITE_RESULT_UNKNOWN",
-];
-
-const ERROR_SEMANTICS = [
-  {
-    code: "INTEGRATION_REQUIRED",
-    retryable: false,
-    category: "integration",
-    message: "The required target integration is unavailable or incompatible.",
-    recoveryAction:
-      "Install or upgrade the target integration, then rerun read-only contract verification.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "blocked-until-corrected",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: false,
-      reconcileWith: null,
-    },
-  },
-  {
-    code: "SCHEMA_MISMATCH",
-    retryable: false,
-    category: "integration",
-    message: "The runtime schema does not match the approved target contract.",
-    recoveryAction:
-      "Inspect the read-only schema diff and deploy a compatible provider contract.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "blocked-until-corrected",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: false,
-      reconcileWith: null,
-    },
-  },
-  {
-    code: "INVALID_INPUT",
-    retryable: false,
-    category: "validation",
-    message: "The request input is invalid for the approved contract.",
-    recoveryAction:
-      "Correct the reported input fields and submit a new validated request.",
-    writeRelated: false,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "correct-input-before-new-attempt",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: false,
-      reconcileWith: null,
-    },
-  },
-  {
-    code: "INVALID_PHASE",
-    retryable: false,
-    category: "workflow",
-    message: "The requested action is not allowed in the current workflow phase.",
-    recoveryAction:
-      "Refresh authoritative workflow state and continue only from an allowed transition.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "refresh-state-before-new-attempt",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: true,
-      reconcileWith: "get-workflow-state-or-sync",
-    },
-  },
-  {
-    code: "CONFIRMATION_REQUIRED",
-    retryable: false,
-    category: "confirmation",
-    message: "Explicit user confirmation is required before this action.",
-    recoveryAction:
-      "Obtain the required current-session confirmation before making a new call.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "confirm-before-new-attempt",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: false,
-      reconcileWith: null,
-    },
-  },
-  {
-    code: "FIELD_SELECTION_INVALID",
-    retryable: false,
-    category: "validation",
-    message: "The selected inquiry fields do not match the approved ordered columns.",
-    recoveryAction:
-      "Run field selection again and use its current ordered fields and items exactly.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "reselect-fields-before-new-attempt",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: false,
-      reconcileWith: null,
-    },
-  },
-  {
-    code: "PROVIDER_REFERENCE_MISSING",
-    retryable: false,
-    category: "provider",
-    message: "A required provider distribution reference is missing or empty.",
-    recoveryAction:
-      "Query provider state by stable correlation key and repair the reference before continuing.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "reconcile-before-new-attempt",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: true,
-      reconcileWith: "query-provider-by-stable-correlation-key",
-    },
-  },
-  {
-    code: "RECOVERY_NOT_CONFIRMED",
-    retryable: false,
-    category: "recovery",
-    message: "Manual recovery has not been explicitly confirmed in the current session.",
-    recoveryAction:
-      "Obtain explicit recovery confirmation, then restart the sync-ingest-sync sequence.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "confirm-before-new-attempt",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: false,
-      reconcileWith: null,
-    },
-  },
-  {
-    code: "RECOVERY_ALREADY_TERMINAL",
-    retryable: false,
-    category: "recovery",
-    message: "Recovery is already terminal with lifecycle status recovered or closed.",
-    recoveryAction:
-      "Treat the request as a no-op and do not invoke any recovery write.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "terminal-no-op",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: false,
-      reconcileWith: null,
-    },
-  },
-  {
-    code: "STATE_CONFLICT",
-    retryable: false,
-    category: "concurrency",
-    message: "Authoritative state changed while the requested transition was being applied.",
-    recoveryAction:
-      "Query or sync authoritative state; retry only if reconciliation shows the intended write is still valid.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "reconcile-then-conditional-retry",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: true,
-      authoritativeReconciliationRequired: true,
-      reconcileWith: "query-or-sync-authoritative-state",
-    },
-  },
-  {
-    code: "WRITE_RESULT_UNKNOWN",
-    retryable: false,
-    category: "write-safety",
-    message: "The outcome of the write is unknown and must not be retried directly.",
-    recoveryAction:
-      "Use the designated query or sync path to reconcile the write result before any new action.",
-    writeRelated: true,
-    blindRetry: false,
-    retryPolicy: {
-      mode: "reconcile-only",
-      directRetry: false,
-      conditionalRetryAfterReconciliation: false,
-      authoritativeReconciliationRequired: true,
-      reconcileWith: "query-or-sync-write-result",
-    },
-  },
 ];
 
 const LEGACY_TOOL_NAMES = [
@@ -959,6 +399,9 @@ const TOOL_EXPECTATIONS = {
       platform: "string",
       submission_deadline_at: "string",
       submission_deadline_raw: "string",
+      supplier_response_deadline_at: "string",
+      client_submission_deadline_at: "string",
+      content_publish_deadline_at: "string",
       raw_messages_json: "string",
       budget_min_cents: "integer",
       budget_max_cents: "integer",
@@ -973,12 +416,16 @@ const TOOL_EXPECTATIONS = {
       content_requirements: "string",
       category_requirements: "array",
       requirements_json: "object",
+      constraints: "array",
       raw_messages: "array",
       note: "string",
     },
     required: [],
     sideEffects: "business-write",
-    writers: { always: ["customer_demands"], conditional: [] },
+    writers: {
+      always: ["requirement_headers", "customer_demands"],
+      conditional: ["requirement_snapshots"],
+    },
     retry: {
       policy: "reconcile-authoritative-state",
       blindRetry: false,
@@ -992,7 +439,10 @@ const TOOL_EXPECTATIONS = {
     propertyTypes: { requirement_id: "string" },
     required: ["requirement_id"],
     sideEffects: "business-write",
-    writers: { always: ["creator_candidate_pool"], conditional: [] },
+    writers: {
+      always: ["creator_candidate_pool"],
+      conditional: ["requirement_snapshots"],
+    },
     retry: {
       policy: "reconcile-authoritative-state",
       blindRetry: false,
@@ -1027,13 +477,13 @@ const TOOL_EXPECTATIONS = {
   select_inquiry_form_fields: {
     propertyTypes: { mcn_recommendation_id: "string" },
     required: ["mcn_recommendation_id"],
-    sideEffects: "read-only",
-    writers: { always: [], conditional: [] },
+    sideEffects: "business-write",
+    writers: { always: ["selection_results"], conditional: [] },
     retry: {
-      policy: "query-safe",
-      blindRetry: true,
-      unknownOutcome: "not-applicable",
-      reconcileWith: null,
+      policy: "reconcile-authoritative-selection",
+      blindRetry: false,
+      unknownOutcome: "reconcile-before-retry",
+      reconcileWith: "get_workflow_state",
     },
     outputEnvelope: "top-level-field-selection",
     successEvidence: [
@@ -1071,7 +521,7 @@ const TOOL_EXPECTATIONS = {
       "preview_only",
     ],
     sideEffects: "provider-write",
-    writers: { always: [], conditional: [] },
+    writers: { always: ["send_operations"], conditional: [] },
     retry: {
       policy: "reconcile-provider-reference",
       blindRetry: false,
@@ -1123,7 +573,7 @@ const TOOL_EXPECTATIONS = {
     sideEffects: "business-write",
     writers: {
       always: ["mcn_submission_items"],
-      conditional: ["creator_supply_offers"],
+      conditional: ["creator_supply_offers", "offer_promotion_events"],
     },
     retry: {
       policy: "reconcile-provider-rows",
@@ -1149,7 +599,7 @@ const TOOL_EXPECTATIONS = {
     sideEffects: "business-write",
     writers: {
       always: ["manual_sourced_creators"],
-      conditional: ["creator_supply_offers"],
+      conditional: ["creator_supply_offers", "offer_promotion_events"],
     },
     retry: {
       policy: "reconcile-authoritative-state",
@@ -1220,7 +670,7 @@ const TOOL_EXPECTATIONS = {
     sideEffects: "business-write",
     writers: {
       always: ["creator_submissions"],
-      conditional: ["customer_demands"],
+      conditional: ["customer_demands", "feedback_audit_events"],
     },
     retry: {
       policy: "reconcile-authoritative-state",
@@ -1293,7 +743,7 @@ const TOOL_EXPECTATIONS = {
     required: ["run_id", "adjustments", "operator_id"],
     sideEffects: "business-write",
     writers: {
-      always: ["creator_recommendation_items"],
+      always: ["creator_recommendation_items", "risk_audit_events"],
       conditional: ["creator_submissions"],
     },
     retry: {
@@ -1343,6 +793,14 @@ async function loadSpec(relativePath) {
   return JSON.parse(source);
 }
 
+async function loadSchema(relativePath) {
+  const source = await readFile(
+    new URL(`../../spec/schemas/${relativePath}`, import.meta.url),
+    "utf8",
+  );
+  return JSON.parse(source);
+}
+
 function parseCreatorSchemaFields(source) {
   const [header, ...rows] = source
     .replace(/^\uFEFF/, "")
@@ -1376,6 +834,10 @@ function canonicalizeJson(value) {
   return JSON.stringify(value);
 }
 
+function canonicalDigest(value) {
+  return createHash("sha256").update(canonicalizeJson(value), "utf8").digest("hex");
+}
+
 function allWriters(tool) {
   return [...tool.writers.always, ...tool.writers.conditional];
 }
@@ -1402,32 +864,18 @@ function assertToolContract(name, tool) {
 }
 
 function assertWorkflowContract(workflow) {
-  assert.deepEqual(
-    {
-      schemaVersion: workflow.schemaVersion,
-      profile: workflow.profile,
-      phases: workflow.phases,
-      lifecycleStatuses: workflow.lifecycleStatuses,
-      responseStatuses: workflow.responseStatuses,
-      policies: workflow.policies,
-      transitions: workflow.transitions,
-    },
-    {
-      schemaVersion: 1,
-      profile: "mvp-v2",
-      phases: WORKFLOW_PHASES,
-      lifecycleStatuses: LIFECYCLE_STATUSES,
-      responseStatuses: RESPONSE_STATUSES,
-      policies: WORKFLOW_POLICIES,
-      transitions: WORKFLOW_TRANSITIONS,
-    },
+  assert.equal(workflow.schemaVersion, 1, "workflow contract drifted");
+  assert.equal(workflow.profile, "mvp-v2", "workflow contract drifted");
+  assert.equal(
+    canonicalDigest(workflow),
+    WORKFLOW_CONTRACT_HASH,
     "workflow contract drifted",
   );
 }
 
 function evaluateWorkflowGuard(guard, context) {
   const lifecycleSubject =
-    "(?:result\\.data\\.lifecycle_status|authoritative-lifecycle-status|latest-authoritative-sync-lifecycle-status)";
+    "(?:result\\.data\\.lifecycle_status|authoritative\\.lifecycle_status|authoritative-lifecycle-status|latest-authoritative-sync-lifecycle-status)";
   const membership = guard.match(
     new RegExp(`^(${lifecycleSubject}) (in|not in) \\[([^\\]]+)\\]$`),
   );
@@ -1480,170 +928,206 @@ function transitionApplies(transition, context) {
   );
 }
 
-function traverseWorkflow(
-  workflow,
-  { startPhase, context, allowedTriggerNames },
-) {
-  const pendingPhases = [startPhase];
-  const visitedPhases = new Set();
-  const traversed = [];
-
-  while (pendingPhases.length > 0) {
-    const phase = pendingPhases.shift();
-    if (visitedPhases.has(phase)) continue;
-    visitedPhases.add(phase);
-
-    for (const transition of workflow.transitions.filter(
-      ({ from, trigger }) =>
-        from === phase && allowedTriggerNames.has(trigger.name),
-    )) {
-      if (!transitionApplies(transition, context)) continue;
-      traversed.push(transition);
-      if (!visitedPhases.has(transition.nextPhase)) {
-        pendingPhases.push(transition.nextPhase);
-      }
-    }
-  }
-
-  return { phases: visitedPhases, transitions: traversed };
-}
-
-const RECOVERY_TRIGGER_NAMES = new Set([
-  "manual_recovery_confirmed",
-  "sync_mcn_inquiry_status",
-  "ingest_mcn_submissions",
-  "recovery_requested",
-]);
-
-function recoveryContext(mode, lifecycleStatus) {
-  return {
-    mode,
-    lifecycleStatus,
-    manualConfirmed: mode === "manual",
-    successfulSync: true,
-    successfulIngest: false,
-  };
-}
-
 function assertRecoveryGraphSemantics(workflow) {
-  for (const mode of ["manual", "scheduled"]) {
-    for (const lifecycleStatus of ["recovered", "closed"]) {
-      const result = traverseWorkflow(workflow, {
-        startPhase: "waiting_return",
-        context: recoveryContext(mode, lifecycleStatus),
-        allowedTriggerNames: RECOVERY_TRIGGER_NAMES,
-      });
-      const expectedTerminalTransition =
-        mode === "manual"
-          ? "manual-terminal-reconciliation"
-          : "scheduled-terminal-reconciliation";
+  assert.deepEqual(
+    workflow.recoveryOperations.map(
+      ({ name, action, tool, order, sessionContextRequired, nextOperations }) => ({
+        name,
+        action,
+        tool,
+        order,
+        sessionContextRequired,
+        nextOperations,
+      }),
+    ),
+    [
+      {
+        name: "refresh",
+        action: "refresh_recovery",
+        tool: "sync_mcn_inquiry_status",
+        order: 1,
+        sessionContextRequired: false,
+        nextOperations: ["request", "finalize"],
+      },
+      {
+        name: "request",
+        action: "request_recovery",
+        tool: "ingest_mcn_submissions",
+        order: 2,
+        sessionContextRequired: false,
+        nextOperations: ["finalize"],
+      },
+      {
+        name: "finalize",
+        action: "finalize_recovery",
+        tool: "sync_mcn_inquiry_status",
+        order: 3,
+        sessionContextRequired: false,
+        nextOperations: [],
+      },
+    ],
+  );
 
-      assert.ok(
-        result.transitions.some(({ id }) => id === expectedTerminalTransition),
-        `${mode} ${lifecycleStatus} lacks its terminal reconciliation`,
-      );
-      assert.ok(
-        result.phases.has("recovered"),
-        `${mode} ${lifecycleStatus} does not reach recovered`,
-      );
-      assert.equal(
-        result.phases.has("recovering"),
-        false,
-        `${mode} ${lifecycleStatus} visits recovering`,
-      );
-      assert.equal(
-        result.transitions.some(
-          ({ trigger }) => trigger.name === "ingest_mcn_submissions",
-        ),
-        false,
-        `${mode} ${lifecycleStatus} reaches submission ingest`,
-      );
-    }
-  }
-
-  const nonterminalCases = [
+  const expectedTransitions = [
     {
-      mode: "manual",
-      lifecycleStatus: "recover_requested",
-      syncTransition: "manual-recovery-sync",
-      ingestTransition: "manual-submission-ingest",
-      wrongIngestTransition: "scheduled-submission-ingest",
+      id: "recovery-refreshed-requestable",
+      from: "waiting_return",
+      tool: "sync_mcn_inquiry_status",
+      nextPhase: "recovering",
+      requiredGuards: [
+        "authoritative.allowed_actions includes refresh_recovery",
+        "result.data.allowed_actions includes request_recovery",
+        "result.data.lifecycle_status not in [recovered, closed]",
+      ],
     },
     {
-      mode: "scheduled",
-      lifecycleStatus: "waiting_return",
-      syncTransition: "scheduled-recovery-sync",
-      ingestTransition: "scheduled-submission-ingest",
-      wrongIngestTransition: "manual-submission-ingest",
+      id: "recovery-requested",
+      from: "recovering",
+      tool: "ingest_mcn_submissions",
+      nextPhase: "recovery_sync_pending",
+      requiredGuards: [
+        "authoritative.allowed_actions includes request_recovery",
+        "compare-and-swap authoritative.state_version succeeds",
+        "params.trigger is audit-only-not-authorization",
+      ],
+    },
+    {
+      id: "recovery-finalized",
+      from: "recovery_sync_pending",
+      tool: "sync_mcn_inquiry_status",
+      nextPhase: "recovered",
+      requiredGuards: [
+        "authoritative.allowed_actions includes finalize_recovery",
+        "authoritative.recovery_operation_id is present",
+        "result.data.lifecycle_status in [recovered, closed]",
+      ],
     },
   ];
-  for (const testCase of nonterminalCases) {
-    const result = traverseWorkflow(workflow, {
-      startPhase: "waiting_return",
-      context: recoveryContext(testCase.mode, testCase.lifecycleStatus),
-      allowedTriggerNames: RECOVERY_TRIGGER_NAMES,
-    });
-    const transitionIds = result.transitions.map(({ id }) => id);
-
-    assert.ok(
-      result.phases.has("recovering"),
-      `${testCase.mode} nonterminal status cannot reach recovering`,
-    );
-    assert.ok(
-      transitionIds.includes(testCase.syncTransition),
-      `${testCase.mode} recovery uses the wrong sync path`,
-    );
-    assert.ok(
-      transitionIds.includes(testCase.ingestTransition),
-      `${testCase.mode} recovery cannot reach its ingest path`,
-    );
-    assert.equal(
-      transitionIds.includes(testCase.wrongIngestTransition),
-      false,
-      `${testCase.mode} recovery reaches the other mode's ingest`,
-    );
+  for (const expected of expectedTransitions) {
+    const transition = workflow.transitions.find(({ id }) => id === expected.id);
+    assert.ok(transition, `missing ${expected.id}`);
+    assert.equal(transition.from, expected.from);
+    assert.equal(transition.trigger.type, "tool");
+    assert.equal(transition.trigger.name, expected.tool);
+    assert.equal(transition.nextPhase, expected.nextPhase);
+    assert.deepEqual(transition.guards, expected.requiredGuards);
   }
+
+  const sessionAuthorityPatterns =
+    /current-session|manual_recovery_confirmed_at|ctx\.(?:trigger|recovery_trigger)/;
+  for (const transition of workflow.transitions) {
+    for (const guard of transition.guards) {
+      assert.doesNotMatch(guard, sessionAuthorityPatterns);
+    }
+  }
+  assert.equal(
+    workflow.transitions.some(({ trigger }) => trigger.type === "event"),
+    false,
+  );
+
+  const terminal = workflow.transitions.find(
+    ({ id }) => id === "terminal-recovery-refresh-no-op",
+  );
+  assert.equal(terminal.from, "recovered");
+  assert.equal(terminal.trigger.name, "sync_mcn_inquiry_status");
+  assert.equal(terminal.nextPhase, "recovered");
+  assert.deepEqual(terminal.guards, [
+    "authoritative.lifecycle_status in [recovered, closed]",
+    "authoritative.allowed_actions includes refresh_recovery",
+    "authoritative.allowed_actions excludes request_recovery",
+    "authoritative.allowed_actions excludes finalize_recovery",
+  ]);
 }
 
 function assertDatabaseContract(database) {
-  assert.deepEqual(
-    {
-      schemaVersion: database.schemaVersion,
-      profile: database.profile,
-      readinessStatus: database.readinessStatus,
-      proofBoundary: database.proofBoundary,
-      writerOwnership: database.writerOwnership,
-      invariants: database.invariants,
-    },
-    {
-      schemaVersion: 1,
-      profile: "mvp-v2",
-      readinessStatus: "external-unverified",
-      proofBoundary: DATABASE_PROOF_BOUNDARY,
-      writerOwnership: DATABASE_WRITER_OWNERSHIP,
-      invariants: DATABASE_INVARIANTS,
-    },
+  assert.equal(database.schemaVersion, 1, "database contract drifted");
+  assert.equal(database.profile, "mvp-v2", "database contract drifted");
+  assert.equal(
+    canonicalDigest(database),
+    DATABASE_CONTRACT_HASH,
     "database contract drifted",
   );
 }
 
 function assertErrorsContract(errors) {
-  assert.deepEqual(
-    {
-      schemaVersion: errors.schemaVersion,
-      profile: errors.profile,
-      codes: errors.codes,
-      errors: errors.errors,
-    },
-    {
-      schemaVersion: 1,
-      profile: "mvp-v2",
-      codes: ERROR_CODES,
-      errors: ERROR_SEMANTICS,
-    },
+  assert.equal(errors.schemaVersion, 1, "errors contract drifted");
+  assert.equal(errors.profile, "mvp-v2", "errors contract drifted");
+  assert.equal(
+    canonicalDigest(errors),
+    ERRORS_CONTRACT_HASH,
     "errors contract drifted",
   );
 }
+
+describe("runtime contract loaders", () => {
+  it("loads and freezes every approved contract-closure document", () => {
+    const profile = loadContractProfile("mvp-v2");
+    const workflow = loadWorkflowContract();
+    const database = loadDatabaseContract();
+    const errors = loadErrorCatalog();
+    const dictionary = loadRequirementDictionary();
+    const requirements = loadRequirementsContract();
+
+    for (const value of [profile, workflow, database, errors, dictionary, requirements]) {
+      assert.equal(Object.isFrozen(value), true);
+    }
+    assert.equal(
+      requirements.dictionary.hash,
+      dictionary.dictionaryHash,
+    );
+    assert.deepEqual(
+      workflow.recoveryOperations.map(({ name }) => name),
+      ["refresh", "request", "finalize"],
+    );
+    assert.equal(Object.keys(database.entities).length, 10);
+    assert.equal(Object.keys(profile.outputContracts).length, 15);
+  });
+
+  it("loads every referenced generation schema", () => {
+    for (const name of [
+      "constraint-expression.schema.json",
+      "domain-records.schema.json",
+      "requirement-record.schema.json",
+      "requirement-snapshot.schema.json",
+      "workflow-state.schema.json",
+    ]) {
+      const schema = loadContractSchema(name);
+      assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");
+      assert.equal(Object.isFrozen(schema), true);
+    }
+  });
+
+  it("rejects incomplete or mismatched per-tool output contracts", () => {
+    const profile = structuredClone(loadContractProfile("mvp-v2"));
+    delete profile.outputContracts.rank_creators;
+    assert.throws(
+      () => validateContractProfileDocument("mvp-v2", profile),
+      /outputContracts\.rank_creators is missing/,
+    );
+
+    const mismatched = structuredClone(loadContractProfile("mvp-v2"));
+    mismatched.outputContracts.select_inquiry_form_fields.successEnvelope = "standard";
+    assert.throws(
+      () => validateContractProfileDocument("mvp-v2", mismatched),
+      /successEnvelope must match the tool outputEnvelope/,
+    );
+
+    const nonExclusive = structuredClone(loadContractProfile("mvp-v2"));
+    nonExclusive.outputEnvelopes.standard.oneOf[0].properties.error.type = "object";
+    assert.throws(
+      () => validateContractProfileDocument("mvp-v2", nonExclusive),
+      /success\/data\/error branches are invalid/,
+    );
+
+    const unresolved = structuredClone(loadContractProfile("mvp-v2"));
+    unresolved.tools.validate_requirement.properties.constraints.items.$ref =
+      "schemas/unknown.schema.json";
+    assert.throws(
+      () => validateContractProfileDocument("mvp-v2", unresolved),
+      /unsupported contract schema/,
+    );
+  });
+});
 
 describe("mvp-v2 machine-readable contract profile", () => {
   it("is writable and declares exactly the approved required and optional tools", async () => {
@@ -1859,7 +1343,7 @@ describe("mvp-v2 machine-readable contract profile", () => {
         label: "changed side-effect class",
         name: "select_inquiry_form_fields",
         mutate: (tool) => {
-          tool.sideEffects = "business-write";
+          tool.sideEffects = "read-only";
         },
       },
       {
@@ -1885,7 +1369,7 @@ describe("mvp-v2 machine-readable contract profile", () => {
         label: "changed blind-retry flag",
         name: "select_inquiry_form_fields",
         mutate: (tool) => {
-          tool.retry.blindRetry = false;
+          tool.retry.blindRetry = true;
         },
       },
       {
@@ -2094,7 +1578,7 @@ describe("mvp-v2 machine-readable contract profile", () => {
 
     assert.deepEqual(
       allWriters(profile.tools.create_with_distributions),
-      [],
+      ["send_operations"],
     );
     assert.ok(
       !allWriters(profile.tools.ingest_mcn_submissions).includes(
@@ -2103,6 +1587,7 @@ describe("mvp-v2 machine-readable contract profile", () => {
     );
     assert.deepEqual(allWriters(profile.tools.audit_manual_adjustment), [
       "creator_recommendation_items",
+      "risk_audit_events",
       "creator_submissions",
     ]);
     assert.ok(
@@ -2120,11 +1605,15 @@ describe("mvp-v2 machine-readable contract profile", () => {
       "data",
       "error",
     ]);
-    assert.deepEqual(profile.outputEnvelopes.standard.error.required, [
+    const errorSchema = profile.outputEnvelopes.standard.properties.error.oneOf.find(
+      ({ type }) => type === "object",
+    );
+    assert.deepEqual(errorSchema.required, [
       "code",
       "message",
       "retryable",
     ]);
+    assert.equal(errorSchema.additionalProperties, false);
 
     for (const [name, tool] of Object.entries(profile.tools)) {
       assert.ok(tool.successEvidence.length > 0, `${name} has no success evidence`);
@@ -2149,6 +1638,352 @@ describe("mvp-v2 machine-readable contract profile", () => {
       .filter((tool) => tool.outputEnvelope !== "standard")
       .map((tool) => tool.name);
     assert.deepEqual(envelopeExceptions, ["select_inquiry_form_fields"]);
+  });
+
+  it("gives every ordinary tool one closed output contract", async () => {
+    const [profile, errors] = await Promise.all([
+      loadSpec(V2_PROFILE),
+      loadSpec(ERRORS_SPEC),
+    ]);
+    const toolNames = [...profile.requiredTools, ...profile.optionalTools];
+    const knownErrors = new Set(errors.codes);
+
+    assert.deepEqual(Object.keys(profile.outputContracts), toolNames);
+    assert.deepEqual(profile.outputEnvelopes.standard.constraints, [
+      "success === true -> data !== null && error === null",
+      "success === false -> data === null && error !== null",
+      "error.code in errors.json#codes",
+    ]);
+    assert.deepEqual(
+      profile.outputEnvelopes.standard.oneOf.map(({ properties }) => [
+        properties.success.const,
+        properties.data.type,
+        properties.error.type,
+      ]),
+      [[true, "object", "null"], [false, "null", "object"]],
+    );
+    for (const name of toolNames) {
+      const output = profile.outputContracts[name];
+      assert.deepEqual(Object.keys(output), [
+        "successEnvelope",
+        "failureEnvelope",
+        "successSchema",
+        "errorCodes",
+      ]);
+      assert.equal(output.successEnvelope, profile.tools[name].outputEnvelope, name);
+      assert.equal(output.failureEnvelope, "standard", name);
+      assert.equal(typeof output.successSchema, "object", name);
+      assert.ok(output.errorCodes.length > 0, name);
+      assert.equal(new Set(output.errorCodes).size, output.errorCodes.length, name);
+      for (const code of output.errorCodes) {
+        assert.equal(knownErrors.has(code), true, `${name}:${code}`);
+      }
+    }
+
+    assert.deepEqual(
+      profile.outputContracts.select_inquiry_form_fields.successSchema,
+      { $ref: "#/outputEnvelopes/top-level-field-selection" },
+    );
+    assert.deepEqual(
+      profile.outputContracts.validate_requirement.successSchema.required,
+      [
+        "id",
+        "status",
+        "requirement_head_id",
+        "requirement_ids",
+        "dictionary_version",
+        "dictionary_hash",
+      ],
+    );
+    assert.ok(
+      profile.outputContracts.create_with_distributions.successSchema.required.includes(
+        "send_operation_id",
+      ),
+    );
+    assert.ok(
+      profile.outputContracts.sync_mcn_inquiry_status.successSchema.required.includes(
+        "allowed_actions",
+      ),
+    );
+    assert.ok(
+      profile.outputContracts.get_workflow_state.successSchema.required.includes(
+        "state_version",
+      ),
+    );
+  });
+});
+
+describe("requirement validity contract", () => {
+  it("pins a customer-content-free dictionary by reproducible version and hash", async () => {
+    const [requirements, dictionary] = await Promise.all([
+      loadSpec(REQUIREMENTS_SPEC),
+      loadSpec(REQUIREMENT_DICTIONARY_SPEC),
+    ]);
+
+    assert.equal(dictionary.contentPolicy.containsCustomerContent, false);
+    assert.deepEqual(dictionary.contentPolicy.forbiddenContent, [
+      "customer-message",
+      "customer-brief",
+      "customer-payload",
+      "credential",
+      "internal-unredacted-state",
+    ]);
+    assert.equal(dictionary.dictionaryHashAlgorithm, "sha256");
+    assert.equal(dictionary.dictionaryHashScope, "definitions");
+    assert.equal(canonicalDigest(dictionary.definitions), dictionary.dictionaryHash);
+    assert.deepEqual(
+      {
+        path: requirements.dictionary.path,
+        version: requirements.dictionary.version,
+        hash: requirements.dictionary.hash,
+        hashAlgorithm: requirements.dictionary.hashAlgorithm,
+        hashCanonicalization: requirements.dictionary.hashCanonicalization,
+        hashScope: requirements.dictionary.hashScope,
+      },
+      {
+        path: "requirement-dictionary.json",
+        version: dictionary.dictionaryVersion,
+        hash: dictionary.dictionaryHash,
+        hashAlgorithm: dictionary.dictionaryHashAlgorithm,
+        hashCanonicalization: dictionary.dictionaryHashCanonicalization,
+        hashScope: dictionary.dictionaryHashScope,
+      },
+    );
+    assert.equal(requirements.dictionary.customerContentAllowed, false);
+    assert.deepEqual(requirements.dictionary.referencedBy, [
+      "requirement_headers",
+      "customer_demands",
+      "requirement_snapshots",
+      "selection_results",
+    ]);
+
+    const forbiddenDefinitionKeys = new Set([
+      "value",
+      "default",
+      "example",
+      "customer_content",
+      "brief",
+      "payload",
+      "messages",
+    ]);
+    for (const [name, definition] of Object.entries(dictionary.definitions)) {
+      for (const key of Object.keys(definition)) {
+        assert.equal(forbiddenDefinitionKeys.has(key), false, `${name}.${key}`);
+      }
+    }
+  });
+
+  it("makes raw_messages_json canonical and fails closed on aliases", async () => {
+    const [requirements, profile] = await Promise.all([
+      loadSpec(REQUIREMENTS_SPEC),
+      loadSpec(V2_PROFILE),
+    ]);
+
+    assert.deepEqual(requirements.canonicalInput, {
+      field: "raw_messages_json",
+      transportType: "canonical-json-text",
+      storedType: "json-array",
+      canonicalization: "recursive-key-sort-json-v1-preserve-array-order",
+      compatibilityAliases: ["raw_messages"],
+      whenCanonicalAndAliasPresent: "parse-normalize-and-require-deep-equality",
+      onConflict: "fail-closed",
+      conflictError: "CANONICAL_INPUT_CONFLICT",
+      dictionaryMayContainValues: false,
+    });
+    assert.deepEqual(
+      profile.tools.validate_requirement.properties.raw_messages_json,
+      {
+        type: "string",
+        minLength: 1,
+        contentMediaType: "application/json",
+        contentSchema: {
+          $ref: "schemas/requirement-record.schema.json#/properties/raw_messages_json",
+        },
+      },
+    );
+    assert.equal(canonicalDigest(requirements), REQUIREMENTS_CONTRACT_HASH);
+  });
+
+  it("locks budget, rebate, three deadlines, and single-platform splitting", async () => {
+    const [requirements, profile] = await Promise.all([
+      loadSpec(REQUIREMENTS_SPEC),
+      loadSpec(V2_PROFILE),
+    ]);
+    const { budget, rebate, deadlines, platformSplit } = requirements.valuePolicies;
+
+    assert.deepEqual(
+      [budget.lowerBoundField, budget.upperBoundField, budget.type, budget.unit],
+      ["budget_min_cents", "budget_max_cents", "integer", "CNY-cent"],
+    );
+    assert.equal(budget.minimum, 0);
+    assert.equal(budget.boundsRequired, true);
+    assert.equal(budget.ordering, "lower <= upper");
+    assert.equal(budget.onViolation, "VALUE_RANGE_INVALID");
+
+    assert.deepEqual(
+      [rebate.lowerBoundField, rebate.upperBoundField, rebate.type, rebate.unit],
+      ["rebate_min_rate", "rebate_max_rate", "number", "fraction"],
+    );
+    assert.equal(rebate.minimum, 0);
+    assert.equal(rebate.maximum, 1);
+    assert.equal(rebate.boundsRequired, true);
+    assert.equal(rebate.ordering, "lower <= upper");
+
+    assert.equal(deadlines.timezoneRequired, true);
+    assert.equal(deadlines.types.length, 3);
+    assert.deepEqual(
+      deadlines.types.map(({ name }) => name),
+      [
+        "supplier_response_deadline_at",
+        "client_submission_deadline_at",
+        "content_publish_deadline_at",
+      ],
+    );
+    assert.deepEqual(deadlines.ordering, [
+      "supplier_response_deadline_at <= client_submission_deadline_at",
+      "client_submission_deadline_at <= content_publish_deadline_at",
+    ]);
+    assert.deepEqual(
+      deadlines.compatibilityInputs.map(({ field, mapsTo }) => ({ field, mapsTo })),
+      [
+        {
+          field: "submission_deadline_at",
+          mapsTo: "client_submission_deadline_at",
+        },
+        {
+          field: "submission_deadline_raw",
+          mapsTo: "client_submission_deadline_at",
+        },
+      ],
+    );
+    assert.equal(deadlines.compatibilityConflictBehavior, "fail-closed");
+    assert.equal(deadlines.compatibilityConflictError, "DEADLINE_ORDER_INVALID");
+    for (const { name } of deadlines.types) {
+      assert.equal(profile.tools.validate_requirement.properties[name].format, "date-time");
+    }
+    assert.equal(deadlines.onViolation, "DEADLINE_ORDER_INVALID");
+
+    assert.equal(platformSplit.headEntity, "requirement_headers");
+    assert.equal(platformSplit.executionEntity, "customer_demands");
+    assert.equal(platformSplit.executionUnitPlatformCardinality, 1);
+    assert.equal(
+      platformSplit.multiPlatformBehavior,
+      "one-child-requirement-per-platform-under-one-head",
+    );
+    assert.equal(platformSplit.crossPlatformExecutionAllowed, false);
+  });
+
+  it("defines a closed constraint grammar and exact join gate", async () => {
+    const [requirements, dictionary, constraintSchema, profile] = await Promise.all([
+      loadSpec(REQUIREMENTS_SPEC),
+      loadSpec(REQUIREMENT_DICTIONARY_SPEC),
+      loadSchema("constraint-expression.schema.json"),
+      loadSpec(V2_PROFILE),
+    ]);
+    const grammar = requirements.processingPolicies.constraintGrammar;
+    const joinGate = requirements.processingPolicies.joinGate;
+
+    assert.deepEqual(grammar.rootKinds, [
+      "all",
+      "any",
+      "not",
+      "comparison",
+      "range",
+      "set",
+    ]);
+    assert.equal(grammar.unknownOperatorBehavior, "fail-closed");
+    assert.equal(grammar.unknownFieldBehavior, "fail-closed");
+    assert.equal(grammar.onViolation, "CONSTRAINT_GRAMMAR_INVALID");
+    assert.equal(
+      grammar.fieldVocabulary.source,
+      "requirement-dictionary.json#definitions",
+    );
+    assert.equal(grammar.fieldVocabulary.membership, "exact-key-match");
+    const resolvedFields = Object.entries(dictionary.definitions)
+      .filter(([, definition]) =>
+        grammar.fieldVocabulary.allowedClassifications.includes(
+          definition.classification,
+        )
+      )
+      .map(([name]) => name);
+    assert.ok(resolvedFields.length > 0);
+    assert.deepEqual(profile.tools.validate_requirement.properties.constraints, {
+      type: "array",
+      items: { $ref: "schemas/constraint-expression.schema.json" },
+    });
+    assert.deepEqual(
+      constraintSchema.$defs.expression.oneOf
+        .map(({ $ref }) => $ref.split("/").at(-1))
+        .sort(),
+      [...grammar.rootKinds].sort(),
+    );
+
+    assert.deepEqual(joinGate.joins.map(({ id }) => id), [
+      "requirement-dictionary",
+      "selection-snapshot",
+      "offer-supplier-binding",
+      "send-selection",
+    ]);
+    assert.equal(joinGate.missingBehavior, "fail-closed");
+    assert.equal(joinGate.ambiguousBehavior, "fail-closed");
+    assert.equal(joinGate.missingOrAmbiguousError, "JOIN_GATE_FAILED");
+    assert.equal(joinGate.scopeError, "SCOPE_MISMATCH");
+  });
+
+  it("freezes late data and versions offer promotion", async () => {
+    const requirements = await loadSpec(REQUIREMENTS_SPEC);
+    const { lateData, offerPromotion } = requirements.processingPolicies;
+
+    assert.deepEqual(lateData.requiredLineageFields, [
+      "observed_at",
+      "effective_at",
+      "received_at",
+      "as_of_at",
+      "late_data_cutoff_at",
+      "is_late",
+      "late_reason",
+    ]);
+    assert.equal(lateData.classification, "received_at > late_data_cutoff_at");
+    assert.equal(lateData.mutationOfFrozenArtifactAllowed, false);
+    assert.equal(lateData.onForbiddenMutation, "LATE_DATA_REJECTED");
+
+    assert.deepEqual(offerPromotion.states, [
+      "candidate",
+      "validated",
+      "promoted",
+      "rejected",
+      "superseded",
+    ]);
+    assert.equal(offerPromotion.promotionFrom, "validated");
+    assert.equal(offerPromotion.promotionTo, "promoted");
+    assert.equal(
+      offerPromotion.writeMode,
+      "append-new-offer-revision-and-audit-event",
+    );
+    assert.equal(offerPromotion.overwriteActiveOfferAllowed, false);
+    assert.deepEqual(offerPromotion.idempotencyKey, [
+      "source_type",
+      "source_record_id",
+      "scope_type",
+      "scope_id",
+    ]);
+    assert.equal(offerPromotion.onConflict, "OFFER_PROMOTION_CONFLICT");
+  });
+
+  it("keeps algorithm, deployment, legacy, and production readiness boundaries closed", async () => {
+    const requirements = await loadSpec(REQUIREMENTS_SPEC);
+
+    assert.equal(requirements.governance.algorithmContract, "algorithms.json");
+    assert.equal(requirements.governance.algorithmReadinessRequiredForProduction, true);
+    assert.equal(requirements.governance.databaseDeploymentStatus, "external-unverified");
+    assert.equal(requirements.governance.legacyProfileCapability, "detection-only");
+    assert.equal(requirements.governance.productionReadiness, "NO-GO");
+    assert.deepEqual(requirements.governance.doesNotDefine, [
+      "creator-ranking-weight",
+      "mcn-ranking-weight",
+      "recall-formula",
+      "scoring-threshold",
+    ]);
   });
 });
 
@@ -2272,7 +2107,7 @@ describe("legacy-1.9.4 detection profile", () => {
 });
 
 describe("workflow contract", () => {
-  it("declares the exact approved phases and status vocabularies", async () => {
+  it("declares the exact approved phases, statuses, actions, and digest", async () => {
     const workflow = await loadSpec(WORKFLOW_SPEC);
 
     assert.equal(workflow.schemaVersion, 1);
@@ -2280,20 +2115,49 @@ describe("workflow contract", () => {
     assert.deepEqual(workflow.phases, WORKFLOW_PHASES);
     assert.deepEqual(workflow.lifecycleStatuses, LIFECYCLE_STATUSES);
     assert.deepEqual(workflow.responseStatuses, RESPONSE_STATUSES);
+    assert.deepEqual(workflow.allowedActions, [
+      "validate_requirement",
+      "search_creators",
+      "rank_mcns",
+      "select_inquiry_form_fields",
+      "create_with_distributions",
+      "refresh_recovery",
+      "request_recovery",
+      "finalize_recovery",
+      "rank_creators",
+      "create_submission_batch",
+      "record_client_feedback",
+    ]);
+    assertWorkflowContract(workflow);
   });
 
-  it("allows exactly the approved guarded and evidenced transitions", async () => {
+  it("makes persisted server state and allowed_actions authoritative", async () => {
     const workflow = await loadSpec(WORKFLOW_SPEC);
 
-    assert.deepEqual(workflow.policies, WORKFLOW_POLICIES);
-    assert.deepEqual(workflow.transitions, WORKFLOW_TRANSITIONS);
+    assert.deepEqual(workflow.stateAuthority, {
+      source: "provider-persisted-workflow-state",
+      schema: "schemas/workflow-state.schema.json",
+      stateVersionRequired: true,
+      allowedActionsRequired: true,
+      allowedActionsAreClosedWorld: true,
+      readActionsAlwaysAllowed: ["get_workflow_state"],
+      hookSessionContextAuthoritative: false,
+      hookSessionContextMayGrantActions: false,
+      hookSessionContextMayDenyForAdditionalSafety: true,
+      missingOrUnknownCombinationBehavior: "fail-closed",
+      missingOrUnknownCombinationError: "STATE_COMBINATION_INVALID",
+      staleStateVersionError: "STATE_CONFLICT",
+    });
+    assert.equal(workflow.policies.ordinaryMessageUnlocksWaiting, false);
     assert.equal(
-      workflow.transitions.some(
-        (transition) => transition.trigger.name === "message_received",
-      ),
-      false,
+      workflow.policies.manualRecoveryConfirmation,
+      "recorded-by-server-before-action-is-allowed",
     );
-    assertWorkflowContract(workflow);
+    assert.equal(
+      workflow.policies.scheduledRecoveryContext,
+      "audit-origin-only-not-authorization",
+    );
+    assertRecoveryGraphSemantics(workflow);
   });
 
   it("uses every tool profile's complete success evidence exactly", async () => {
@@ -2302,9 +2166,7 @@ describe("workflow contract", () => {
       loadSpec(V2_PROFILE),
     ]);
 
-    for (const transition of workflow.transitions.filter(
-      ({ trigger }) => trigger.type === "tool",
-    )) {
+    for (const transition of workflow.transitions) {
       const tool = profile.tools[transition.trigger.name];
       assert.ok(tool, `${transition.id} references an unknown tool`);
       assert.deepEqual(
@@ -2315,164 +2177,141 @@ describe("workflow contract", () => {
     }
   });
 
-  it("advances a requirement draft only when validation status is ready", async () => {
+  it("advances a requirement draft only when validation is ready and server-authorized", async () => {
     const workflow = await loadSpec(WORKFLOW_SPEC);
     const transition = workflow.transitions.find(
       ({ id }) => id === "requirement-validated",
     );
-    const context = { requiredDemandFieldsPresent: true };
+    const context = {
+      requiredDemandFieldsPresent: true,
+      allowedGuards: new Set([
+        "authoritative.allowed_actions includes validate_requirement",
+      ]),
+    };
 
     assert.equal(
-      transitionApplies(transition, {
-        ...context,
-        requirementStatus: "draft",
-      }),
+      transitionApplies(transition, { ...context, requirementStatus: "draft" }),
       false,
     );
     assert.equal(
-      transitionApplies(transition, {
-        ...context,
-        requirementStatus: "ready",
-      }),
+      transitionApplies(transition, { ...context, requirementStatus: "ready" }),
       true,
     );
-  });
-
-  it("enforces terminal and nonterminal recovery graph semantics for both modes", async () => {
-    const workflow = await loadSpec(WORKFLOW_SPEC);
-
-    assertRecoveryGraphSemantics(workflow);
-  });
-
-  it("keeps recovery_requested as a terminal event-only no-op", async () => {
-    const workflow = await loadSpec(WORKFLOW_SPEC);
-    const result = traverseWorkflow(workflow, {
-      startPhase: "recovered",
-      context: recoveryContext("manual", "recovered"),
-      allowedTriggerNames: new Set(["recovery_requested"]),
-    });
-
-    assert.deepEqual([...result.phases], ["recovered"]);
-    assert.deepEqual(
-      result.transitions.map(({ id }) => id),
-      ["terminal-recovery-no-op"],
-    );
     assert.equal(
-      result.transitions.some(({ trigger }) => trigger.type === "tool"),
+      transitionApplies(transition, {
+        requiredDemandFieldsPresent: true,
+        requirementStatus: "ready",
+        allowedGuards: new Set(),
+      }),
       false,
     );
-    assert.deepEqual(result.transitions[0].evidence, [
-      "error.code === RECOVERY_ALREADY_TERMINAL",
-      "no-write-tool-invoked",
+  });
+
+  it("splits recovery into refresh, request, and finalize without event authorization", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+
+    assert.deepEqual(workflow.policies.recoverySequence, [
+      "refresh",
+      "request",
+      "finalize",
     ]);
-  });
-
-  it("detects a mutation to a workflow transition", async () => {
-    const workflow = await loadSpec(WORKFLOW_SPEC);
-    const mutated = structuredClone(workflow);
-    mutated.transitions.find(
-      ({ id }) => id === "first-distribution-sync",
-    ).nextPhase = "recovered";
-
-    assert.throws(
-      () => assertWorkflowContract(mutated),
-      /workflow contract drifted/,
-    );
-  });
-
-  it("detects lifecycle, terminal-path, and mode-context mutations", async () => {
-    const workflow = await loadSpec(WORKFLOW_SPEC);
+    assert.deepEqual(workflow.policies.recoveryToolSequence, [
+      "sync_mcn_inquiry_status",
+      "ingest_mcn_submissions",
+      "sync_mcn_inquiry_status",
+    ]);
     assertRecoveryGraphSemantics(workflow);
+  });
 
-    const mutationCases = [
-      {
-        label: "removed closed from terminal guard",
-        mutate: (mutated) => {
-          const transition = mutated.transitions.find(
-            ({ id }) => id === "manual-terminal-reconciliation",
-          );
-          transition.guards = transition.guards.map((guard) =>
-            guard ===
-            "result.data.lifecycle_status in [recovered, closed]"
-              ? "result.data.lifecycle_status in [recovered]"
-              : guard,
-          );
-        },
-      },
-      {
-        label: "redirected terminal path",
-        mutate: (mutated) => {
-          mutated.transitions.find(
-            ({ id }) => id === "manual-terminal-reconciliation",
-          ).nextPhase = "recovering";
-        },
-      },
-      {
-        label: "weakened nonterminal guard",
-        mutate: (mutated) => {
-          const transition = mutated.transitions.find(
-            ({ id }) => id === "manual-recovery-sync",
-          );
-          transition.guards = transition.guards.map((guard) =>
-            guard ===
-            "result.data.lifecycle_status not in [recovered, closed]"
-              ? "result.data.lifecycle_status not in [recovered]"
-              : guard,
-          );
-        },
-      },
-      {
-        label: "broken manual context",
-        mutate: (mutated) => {
-          const transition = mutated.transitions.find(
-            ({ id }) => id === "manual-terminal-reconciliation",
-          );
-          transition.guards = transition.guards.map((guard) =>
-            guard === "ctx.recovery_trigger === manual"
-              ? "ctx.recovery_trigger === scheduled"
-              : guard,
-          );
-        },
-      },
-      {
-        label: "broken cron context",
-        mutate: (mutated) => {
-          const transition = mutated.transitions.find(
-            ({ id }) => id === "scheduled-terminal-reconciliation",
-          );
-          transition.guards = transition.guards.map((guard) =>
-            guard === "ctx.trigger === cron"
-              ? "ctx.trigger === timer"
-              : guard,
-          );
-        },
-      },
-    ];
+  it("keeps terminal recovery as a server-authoritative refresh no-op", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+    const transition = workflow.transitions.find(
+      ({ id }) => id === "terminal-recovery-refresh-no-op",
+    );
 
-    for (const { label, mutate } of mutationCases) {
-      const mutated = structuredClone(workflow);
-      mutate(mutated);
-      assert.throws(
-        () => assertRecoveryGraphSemantics(mutated),
-        `${label} was not detected`,
+    assert.equal(transition.trigger.type, "tool");
+    assert.equal(transition.trigger.name, "sync_mcn_inquiry_status");
+    assert.equal(transition.from, "recovered");
+    assert.equal(transition.nextPhase, "recovered");
+    for (const lifecycleStatus of ["recovered", "closed"]) {
+      assert.equal(
+        evaluateWorkflowGuard(
+          "authoritative.lifecycle_status in [recovered, closed]",
+          { lifecycleStatus },
+        ),
+        true,
       );
     }
   });
 
-  it("rejects unrecognized lifecycle predicates instead of failing open", async () => {
+  it("declares a closed state-combination matrix for every phase", async () => {
     const workflow = await loadSpec(WORKFLOW_SPEC);
-    const mutated = structuredClone(workflow);
-    const transition = mutated.transitions.find(
-      ({ id }) => id === "manual-recovery-sync",
-    );
-    transition.guards = transition.guards.map((guard) =>
-      guard === "result.data.lifecycle_status not in [recovered, closed]"
-        ? "result.data.lifecycle_status excludes [recovered, closed]"
-        : guard,
-    );
+    const actionSet = new Set(workflow.allowedActions);
 
+    assert.equal(
+      new Set(workflow.stateCombinations.map(({ id }) => id)).size,
+      workflow.stateCombinations.length,
+    );
+    assert.deepEqual(
+      [...new Set(workflow.stateCombinations.map(({ phase }) => phase))].sort(),
+      [...workflow.phases].sort(),
+    );
+    for (const combination of workflow.stateCombinations) {
+      assert.ok(combination.lifecycleStatuses.length > 0);
+      assert.ok(combination.responseStatuses.length > 0);
+      assert.equal(typeof combination.terminal, "boolean");
+      for (const action of combination.allowedActions) {
+        assert.equal(actionSet.has(action), true, `${combination.id} uses ${action}`);
+      }
+      if (combination.terminal) assert.deepEqual(combination.allowedActions, []);
+    }
+    const recovered = workflow.stateCombinations.find(
+      ({ id }) => id === "recovered-for-ranking",
+    );
+    assert.equal(recovered.terminal, false);
+    assert.deepEqual(recovered.allowedActions, ["refresh_recovery", "rank_creators"]);
+    const blocked = workflow.stateCombinations.find(({ id }) => id === "blocked");
+    assert.deepEqual(blocked.allowedActions, []);
+  });
+
+  it("detects transition, authority, operation, and state-matrix mutations", async () => {
+    const workflow = await loadSpec(WORKFLOW_SPEC);
+    const mutationCases = [
+      (mutated) => {
+        mutated.transitions.find(
+          ({ id }) => id === "first-distribution-refresh",
+        ).nextPhase = "recovered";
+      },
+      (mutated) => {
+        mutated.stateAuthority.hookSessionContextMayGrantActions = true;
+      },
+      (mutated) => {
+        mutated.recoveryOperations[1].sessionContextRequired = true;
+      },
+      (mutated) => {
+        mutated.stateCombinations.find(
+          ({ id }) => id === "recovery-requestable",
+        ).allowedActions = ["finalize_recovery"];
+      },
+    ];
+
+    for (const mutate of mutationCases) {
+      const mutated = structuredClone(workflow);
+      mutate(mutated);
+      assert.throws(
+        () => assertWorkflowContract(mutated),
+        /workflow contract drifted/,
+      );
+    }
+  });
+
+  it("rejects unrecognized lifecycle predicates instead of failing open", () => {
     assert.throws(
-      () => assertRecoveryGraphSemantics(mutated),
+      () =>
+        evaluateWorkflowGuard(
+          "result.data.lifecycle_status excludes [recovered, closed]",
+          { lifecycleStatus: "recovered" },
+        ),
       /Unrecognized lifecycle predicate/,
     );
   });
@@ -2520,13 +2359,106 @@ describe("database boundary contract", () => {
     const database = await loadSpec(DATABASE_SPEC);
 
     assert.equal(database.readinessStatus, "external-unverified");
+    assert.equal(database.modelStatus, "target-contract-external-unverified");
     assert.deepEqual(database.proofBoundary, DATABASE_PROOF_BOUNDARY);
-    assert.deepEqual(database.invariants, DATABASE_INVARIANTS);
+    assert.deepEqual(
+      database.invariants.map(({ id }) => id),
+      [
+        "unique-supplier-mapping",
+        "single-send-context",
+        "stable-provider-correlation",
+        "atomic-first-sync",
+        "unique-provider-references",
+        "idempotent-submission-ingest",
+        "single-recovery-owner",
+        "accepted-source-merge-priority",
+        "submission-batch-retry",
+        "requirement-dictionary-snapshot-binding",
+        "single-platform-execution-unit",
+        "immutable-snapshot-and-audit-lineage",
+        "late-data-does-not-mutate-frozen-results",
+        "offer-promotion-is-versioned-and-idempotent",
+      ],
+    );
     for (const invariant of database.invariants) {
       assert.equal(invariant.status, "external-unverified");
       assert.equal(typeof invariant.owner, "string");
       assert.ok(invariant.owner.length > 0);
       assert.ok(invariant.evidence.length > 0);
+    }
+    assertDatabaseContract(database);
+  });
+
+  it("declares aggregate, multi-offer, binding, send, selection, and audit entities", async () => {
+    const database = await loadSpec(DATABASE_SPEC);
+    const expectedEntities = [
+      "creator_supply_offers",
+      "customer_demands",
+      "feedback_audit_events",
+      "offer_promotion_events",
+      "requirement_headers",
+      "requirement_snapshots",
+      "risk_audit_events",
+      "selection_results",
+      "send_operations",
+      "supplier_bindings",
+    ];
+
+    assert.deepEqual(Object.keys(database.entities).sort(), expectedEntities);
+    assert.equal(database.entities.requirement_headers.role, "aggregate-head");
+    assert.equal(
+      database.entities.creator_supply_offers.cardinality,
+      "zero-or-many-per-creator",
+    );
+    assert.equal(
+      database.entities.supplier_bindings.role,
+      "provider-supplier-to-mcn-binding",
+    );
+    assert.equal(
+      database.entities.send_operations.role,
+      "idempotent-provider-send-operation",
+    );
+    assert.equal(
+      database.entities.selection_results.role,
+      "persisted-ordered-field-selection",
+    );
+    for (const name of [
+      "risk_audit_events",
+      "feedback_audit_events",
+      "offer_promotion_events",
+    ]) {
+      assert.equal(database.entities[name].appendOnly, true, name);
+    }
+    for (const [name, entity] of Object.entries(database.entities)) {
+      assert.ok(entity.requiredFields.includes("scope_type"), name);
+      assert.ok(entity.requiredFields.includes("scope_id"), name);
+      assert.ok(entity.recordSchema.startsWith("schemas/"), name);
+      assert.ok(entity.uniqueKeys.length > 0, name);
+      assert.ok(
+        entity.uniqueKeys.some(
+          ({ columns }) => JSON.stringify(columns) === JSON.stringify(entity.primaryKey),
+        ),
+        `${name} lacks a physical primary-key uniqueness constraint`,
+      );
+      for (const key of entity.uniqueKeys) {
+        assert.equal(key.nullsAllowed, false, key.id);
+        assert.equal(key.status, "external-unverified", key.id);
+      }
+    }
+
+    const offer = database.entities.creator_supply_offers;
+    for (const field of database.commonFieldPolicies.lateDataFields) {
+      assert.ok(offer.requiredFields.includes(field), field);
+    }
+    for (const name of [
+      "requirement_headers",
+      "customer_demands",
+      "requirement_snapshots",
+      "selection_results",
+    ]) {
+      for (const field of database.commonFieldPolicies.dictionaryReferenceFields) {
+        assert.ok(database.entities[name].requiredFields.includes(field), `${name}.${field}`);
+      }
     }
     assertDatabaseContract(database);
   });
@@ -2564,12 +2496,52 @@ describe("error semantics contract", () => {
     const errors = await loadSpec(ERRORS_SPEC);
 
     assert.deepEqual(errors.codes, ERROR_CODES);
-    assert.deepEqual(errors.errors, ERROR_SEMANTICS);
     assert.equal(new Set(errors.codes).size, errors.codes.length);
     assert.deepEqual(
       errors.errors.map(({ code }) => code),
       ERROR_CODES,
     );
+    assertErrorsContract(errors);
+  });
+
+  it("covers every contract-closure fail-closed condition", async () => {
+    const errors = await loadSpec(ERRORS_SPEC);
+    const newCodes = [
+      "CANONICAL_INPUT_CONFLICT",
+      "DICTIONARY_REFERENCE_MISMATCH",
+      "VALUE_RANGE_INVALID",
+      "DEADLINE_ORDER_INVALID",
+      "CONSTRAINT_GRAMMAR_INVALID",
+      "JOIN_GATE_FAILED",
+      "SCOPE_MISMATCH",
+      "LATE_DATA_REJECTED",
+      "OFFER_PROMOTION_CONFLICT",
+      "SELECTION_RESULT_STALE",
+      "STATE_COMBINATION_INVALID",
+    ];
+
+    for (const code of newCodes) {
+      const error = errors.errors.find((candidate) => candidate.code === code);
+      assert.ok(error, code);
+      assert.equal(error.retryable, false, code);
+      assert.equal(error.blindRetry, false, code);
+      assert.equal(error.retryPolicy.directRetry, false, code);
+      assert.equal(typeof error.recoveryAction, "string", code);
+      assert.ok(error.recoveryAction.length > 0, code);
+    }
+    for (const code of [
+      "DICTIONARY_REFERENCE_MISMATCH",
+      "JOIN_GATE_FAILED",
+      "SCOPE_MISMATCH",
+      "LATE_DATA_REJECTED",
+      "OFFER_PROMOTION_CONFLICT",
+      "SELECTION_RESULT_STALE",
+      "STATE_COMBINATION_INVALID",
+    ]) {
+      const error = errors.errors.find((candidate) => candidate.code === code);
+      assert.equal(error.retryPolicy.authoritativeReconciliationRequired, true, code);
+      assert.equal(typeof error.retryPolicy.reconcileWith, "string", code);
+    }
     assertErrorsContract(errors);
   });
 
@@ -2615,6 +2587,19 @@ describe("error semantics contract", () => {
     assert.equal(
       unknownWrite.retryPolicy.reconcileWith,
       "query-or-sync-write-result",
+    );
+
+    const recoveryNotConfirmed = errors.errors.find(
+      ({ code }) => code === "RECOVERY_NOT_CONFIRMED",
+    );
+    assert.doesNotMatch(recoveryNotConfirmed.message, /session/i);
+    assert.equal(
+      recoveryNotConfirmed.retryPolicy.authoritativeReconciliationRequired,
+      true,
+    );
+    assert.equal(
+      recoveryNotConfirmed.retryPolicy.reconcileWith,
+      "get_workflow_state",
     );
   });
 

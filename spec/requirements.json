@@ -1,0 +1,288 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "status": "approved",
+  "dictionary": {
+    "path": "requirement-dictionary.json",
+    "version": "2026-07-12.1",
+    "hash": "35bcf309b7497eec57acb63e417f8070adb2c9e88ce409e1ea9b9fc967cf8342",
+    "hashAlgorithm": "sha256",
+    "hashCanonicalization": "recursive-key-sort-json-v1",
+    "hashScope": "definitions",
+    "customerContentAllowed": false,
+    "referencedBy": [
+      "requirement_headers",
+      "customer_demands",
+      "requirement_snapshots",
+      "selection_results"
+    ]
+  },
+  "schemaHashAlgorithm": "sha256",
+  "schemaHashCanonicalization": "recursive-key-sort-json-v1",
+  "schemas": {
+    "constraintExpression": {
+      "path": "schemas/constraint-expression.schema.json",
+      "hash": "fa3d9907a470c1093b65525f0acc1a4512397be3f6b31a89d8524acdbe409593"
+    },
+    "requirementRecord": {
+      "path": "schemas/requirement-record.schema.json",
+      "hash": "abfe58eda6ecff6db24f0da0ef26d387cd0c105061289bd02cec26940d02162b"
+    },
+    "requirementSnapshot": {
+      "path": "schemas/requirement-snapshot.schema.json",
+      "hash": "5f5cf69bf3ce89cb16df90da5dc6add42791df94cccf73a2c2e777325da30322"
+    },
+    "domainRecords": {
+      "path": "schemas/domain-records.schema.json",
+      "hash": "e923479768a9032efa7c3dbc16c48a0df339419f0c846f30622b2e041e452875"
+    },
+    "workflowState": {
+      "path": "schemas/workflow-state.schema.json",
+      "hash": "7445ad453b0d6a4bdbf0b6d5b10f23546c85c5d9a85218791919819cd6a8c409"
+    }
+  },
+  "canonicalInput": {
+    "field": "raw_messages_json",
+    "transportType": "canonical-json-text",
+    "storedType": "json-array",
+    "canonicalization": "recursive-key-sort-json-v1-preserve-array-order",
+    "compatibilityAliases": [
+      "raw_messages"
+    ],
+    "whenCanonicalAndAliasPresent": "parse-normalize-and-require-deep-equality",
+    "onConflict": "fail-closed",
+    "conflictError": "CANONICAL_INPUT_CONFLICT",
+    "dictionaryMayContainValues": false
+  },
+  "valuePolicies": {
+    "budget": {
+      "lowerBoundField": "budget_min_cents",
+      "upperBoundField": "budget_max_cents",
+      "rawAuditField": "budget_raw",
+      "type": "integer",
+      "unit": "CNY-cent",
+      "minimum": 0,
+      "boundsRequired": true,
+      "ordering": "lower <= upper",
+      "exactValueRepresentation": "lower === upper",
+      "onViolation": "VALUE_RANGE_INVALID"
+    },
+    "rebate": {
+      "lowerBoundField": "rebate_min_rate",
+      "upperBoundField": "rebate_max_rate",
+      "rawAuditField": "rebate_raw",
+      "type": "number",
+      "unit": "fraction",
+      "minimum": 0,
+      "maximum": 1,
+      "boundsRequired": true,
+      "ordering": "lower <= upper",
+      "percentInputNormalization": "divide-by-100-before-persist",
+      "onViolation": "VALUE_RANGE_INVALID"
+    },
+    "deadlines": {
+      "timezoneRequired": true,
+      "format": "RFC3339-date-time",
+      "missingBehavior": "clarification-required",
+      "types": [
+        {
+          "name": "supplier_response_deadline_at",
+          "owner": "supplier-response",
+          "required": true
+        },
+        {
+          "name": "client_submission_deadline_at",
+          "owner": "client-plan-submission",
+          "required": true
+        },
+        {
+          "name": "content_publish_deadline_at",
+          "owner": "content-publication",
+          "required": true
+        }
+      ],
+      "compatibilityInputs": [
+        {
+          "field": "submission_deadline_at",
+          "mapsTo": "client_submission_deadline_at",
+          "normalization": "RFC3339-instant",
+          "whenBothPresent": "require-equal-after-normalization"
+        },
+        {
+          "field": "submission_deadline_raw",
+          "mapsTo": "client_submission_deadline_at",
+          "normalization": "parse-to-RFC3339-instant",
+          "whenBothPresent": "require-equal-after-normalization"
+        }
+      ],
+      "compatibilityConflictBehavior": "fail-closed",
+      "compatibilityConflictError": "DEADLINE_ORDER_INVALID",
+      "ordering": [
+        "supplier_response_deadline_at <= client_submission_deadline_at",
+        "client_submission_deadline_at <= content_publish_deadline_at"
+      ],
+      "onViolation": "DEADLINE_ORDER_INVALID"
+    },
+    "platformSplit": {
+      "supportedPlatforms": [
+        "xhs",
+        "dy"
+      ],
+      "headEntity": "requirement_headers",
+      "executionEntity": "customer_demands",
+      "executionUnitPlatformCardinality": 1,
+      "multiPlatformBehavior": "one-child-requirement-per-platform-under-one-head",
+      "sharedCanonicalInputAtHead": true,
+      "crossPlatformExecutionAllowed": false,
+      "onUnsplittableInput": "INVALID_INPUT"
+    }
+  },
+  "processingPolicies": {
+    "constraintGrammar": {
+      "schema": "schemas/constraint-expression.schema.json",
+      "rootKinds": [
+        "all",
+        "any",
+        "not",
+        "comparison",
+        "range",
+        "set"
+      ],
+      "fieldVocabulary": {
+        "source": "requirement-dictionary.json#definitions",
+        "membership": "exact-key-match",
+        "allowedClassifications": [
+          "execution-scope",
+          "money-lower-bound",
+          "money-upper-bound",
+          "rate-lower-bound",
+          "rate-upper-bound",
+          "deadline"
+        ]
+      },
+      "unknownOperatorBehavior": "fail-closed",
+      "unknownFieldBehavior": "fail-closed",
+      "missingValuePolicies": [
+        "reject",
+        "need_review",
+        "ignore-soft-only"
+      ],
+      "onViolation": "CONSTRAINT_GRAMMAR_INVALID"
+    },
+    "joinGate": {
+      "evaluationPoints": [
+        "before-candidate-eligibility",
+        "before-ranking",
+        "before-send",
+        "before-offer-promotion"
+      ],
+      "joins": [
+        {
+          "id": "requirement-dictionary",
+          "from": "customer_demands.(dictionary_version,dictionary_hash)",
+          "to": "requirement_dictionary.(dictionaryVersion,dictionaryHash)",
+          "cardinality": "exactly-one",
+          "scopeRule": "hash-and-version-exact"
+        },
+        {
+          "id": "selection-snapshot",
+          "from": "selection_results.requirement_snapshot_id",
+          "to": "requirement_snapshots.snapshot_id",
+          "cardinality": "exactly-one",
+          "scopeRule": "scope-and-requirement-exact"
+        },
+        {
+          "id": "offer-supplier-binding",
+          "from": "creator_supply_offers.supplier_binding_id",
+          "to": "supplier_bindings.supplier_binding_id",
+          "cardinality": "exactly-one-active-at-as-of",
+          "scopeRule": "scope-and-validity-window-match"
+        },
+        {
+          "id": "send-selection",
+          "from": "send_operations.selection_result_id",
+          "to": "selection_results.selection_result_id",
+          "cardinality": "exactly-one",
+          "scopeRule": "scope-requirement-and-state-version-exact"
+        }
+      ],
+      "missingBehavior": "fail-closed",
+      "ambiguousBehavior": "fail-closed",
+      "missingOrAmbiguousError": "JOIN_GATE_FAILED",
+      "scopeError": "SCOPE_MISMATCH"
+    },
+    "lateData": {
+      "requiredLineageFields": [
+        "observed_at",
+        "effective_at",
+        "received_at",
+        "as_of_at",
+        "late_data_cutoff_at",
+        "is_late",
+        "late_reason"
+      ],
+      "classification": "received_at > late_data_cutoff_at",
+      "frozenArtifacts": [
+        "requirement_snapshots",
+        "selection_results",
+        "recommendation_runs",
+        "submission_batches"
+      ],
+      "lateRecordBehavior": "retain-lineage-and-route-to-next-snapshot-or-manual-review",
+      "mutationOfFrozenArtifactAllowed": false,
+      "onForbiddenMutation": "LATE_DATA_REJECTED"
+    },
+    "offerPromotion": {
+      "sourceEntities": [
+        "mcn_submission_items",
+        "manual_sourced_creators"
+      ],
+      "targetEntity": "creator_supply_offers",
+      "states": [
+        "candidate",
+        "validated",
+        "promoted",
+        "rejected",
+        "superseded"
+      ],
+      "promotionFrom": "validated",
+      "promotionTo": "promoted",
+      "requirements": [
+        "source-status-accepted",
+        "join-gate-passed",
+        "scope-match",
+        "lineage-complete",
+        "not-late-for-frozen-snapshot"
+      ],
+      "writeMode": "append-new-offer-revision-and-audit-event",
+      "overwriteActiveOfferAllowed": false,
+      "idempotencyKey": [
+        "source_type",
+        "source_record_id",
+        "scope_type",
+        "scope_id"
+      ],
+      "onConflict": "OFFER_PROMOTION_CONFLICT"
+    }
+  },
+  "governance": {
+    "defines": [
+      "input-canonicalization",
+      "data-validity",
+      "join-admissibility",
+      "snapshot-and-late-data-lifecycle",
+      "offer-promotion-lifecycle"
+    ],
+    "doesNotDefine": [
+      "creator-ranking-weight",
+      "mcn-ranking-weight",
+      "recall-formula",
+      "scoring-threshold"
+    ],
+    "algorithmContract": "algorithms.json",
+    "algorithmReadinessRequiredForProduction": true,
+    "databaseDeploymentStatus": "external-unverified",
+    "legacyProfileCapability": "detection-only",
+    "productionReadiness": "NO-GO"
+  }
+}
