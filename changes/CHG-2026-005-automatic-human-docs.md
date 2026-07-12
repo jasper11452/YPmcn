@@ -98,3 +98,10 @@ rollback: "revert 本变更；现有 Spec、Agent 和运行时不受影响"
 4. 更新人类/Agent 流程并刷新生成区块。
 5. 运行全量验证、打包和不同模型只读验收。
 6. 快进 `main`、在主工作树启用 hook并清理临时目录。
+
+## Implementation Evidence
+
+- 根 `npm ci` 自动输出 `[git-hooks] installed .githooks`，无需额外安装命令。
+- 5 项人类文档测试覆盖生成漂移、精简度、hook 安装、真实自动提交和部分暂存阻断。
+- `npm run verify` 通过 178 项；`npm run pack:yp` 通过，发布包 SHA-256 保持 `b29f269d0e9229c42b7a4f2a69dead8ec23695754063fefc1a783de3112f57cc`。
+- 正式 `spec/**`、组件源码和发布包内容未修改。
