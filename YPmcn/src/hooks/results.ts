@@ -1,3 +1,4 @@
+import { loadWorkflowContract } from "../contract/loader.js";
 import { validateFieldSelection, validateToolOutput } from "../contract/validator.js";
 import { normalizeYpmcnToolName } from "./guards.js";
 import type {
@@ -22,28 +23,6 @@ function nonemptyString(value: unknown): value is string {
 
 function hasOwn(value: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
-}
-
-function parseJson(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-}
-
-function unwrapResult(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  if (hasOwn(value, "result")) return unwrapResult(value.result);
-  if (hasOwn(value, "structuredContent")) return unwrapResult(value.structuredContent);
-  if (Array.isArray(value.content)) {
-    for (const entry of value.content) {
-      if (!isRecord(entry) || typeof entry.text !== "string") continue;
-      const parsed = parseJson(entry.text);
-      if (parsed !== undefined) return unwrapResult(parsed);
-    }
-  }
-  return value;
 }
 
 function standardData(result: unknown): Record<string, unknown> | undefined {
@@ -148,6 +127,50 @@ function workflowActions(value: unknown): WorkflowAction[] | undefined {
     : undefined;
 }
 
+interface StateCombination {
+  phase: string;
+  lifecycleStatuses: Array<string | null>;
+  responseStatuses: Array<string | null>;
+  allowedActions: string[];
+}
+
+const STATE_COMBINATIONS = loadWorkflowContract().stateCombinations as unknown as StateCombination[];
+const STATE_CHANGING_TOOLS = new Set([
+  "validate_requirement",
+  "search_creators",
+  "rank_mcns",
+  "select_inquiry_form_fields",
+  "create_with_distributions",
+  "sync_mcn_inquiry_status",
+  "ingest_mcn_submissions",
+  "manual_source_creators",
+  "rank_creators",
+  "create_submission_batch",
+  "record_client_feedback",
+  "audit_manual_adjustment",
+]);
+
+function sameActionSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const expected = new Set(left);
+  return right.every((value) => expected.has(value));
+}
+
+function stateCombination(
+  phase: string | undefined,
+  lifecycleStatus: string | null,
+  responseStatus: string | null,
+  actions: readonly WorkflowAction[],
+): StateCombination | undefined {
+  const matches = STATE_COMBINATIONS.filter((combination) =>
+    (phase === undefined || combination.phase === phase) &&
+    combination.lifecycleStatuses.includes(lifecycleStatus) &&
+    combination.responseStatuses.includes(responseStatus) &&
+    sameActionSet(combination.allowedActions, actions),
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 function validSyncEvidence(
   data: Record<string, unknown>,
   at: number,
@@ -192,17 +215,20 @@ function projectionFromWorkflowState(
   ) {
     return undefined;
   }
+  const lifecycleStatus = typeof data.lifecycle_status === "string" || data.lifecycle_status === null
+    ? data.lifecycle_status
+    : null;
+  const responseStatus = typeof data.response_status === "string" || data.response_status === null
+    ? data.response_status
+    : null;
+  if (!stateCombination(data.phase, lifecycleStatus, responseStatus, actions)) return undefined;
   return {
     state_version: version,
     allowed_actions: actions,
     phase: data.phase as RuntimeState["phase"],
     current_identifier: data.current_identifier,
-    lifecycle_status: typeof data.lifecycle_status === "string" || data.lifecycle_status === null
-      ? data.lifecycle_status
-      : undefined,
-    response_status: typeof data.response_status === "string" || data.response_status === null
-      ? data.response_status
-      : undefined,
+    lifecycle_status: lifecycleStatus,
+    response_status: responseStatus,
     pending_gates: [...data.pending_gates],
     identifiers,
     updated_at: data.updated_at,
@@ -212,13 +238,33 @@ function projectionFromWorkflowState(
 function applyWorkflowState(
   current: RuntimeState | undefined,
   data: Record<string, unknown>,
+  context: ApplyToolResultContext,
 ): RuntimeState | undefined {
   const projection = projectionFromWorkflowState(data);
-  if (!projection || !canReplaceAuthority(current, projection.state_version)) return current;
+  if (!projection) {
+    return current ? invalidateAuthority(current, undefined) : current;
+  }
+  if (!canReplaceAuthority(current, projection.state_version)) return current;
+  const queriedIdentifier = Object.values(context.params).find(nonemptyString);
+  if (
+    queriedIdentifier !== undefined &&
+    projection.current_identifier !== queriedIdentifier &&
+    !Object.values(projection.identifiers ?? {}).includes(queriedIdentifier)
+  ) {
+    return current;
+  }
   const base = localIdentifiers(currentOrDraft(current), projection.identifiers);
+  const fieldSelection = base.fieldSelection && projection.phase === "field_selection_ready"
+    ? {
+      ...base.fieldSelection,
+      selection_result_id: projection.identifiers?.selection_result_id,
+      state_version: projection.state_version,
+    }
+    : base.fieldSelection;
   return {
     ...base,
     phase: projection.phase ?? base.phase,
+    fieldSelection,
     authoritative: projection,
     lastServerStateVersion: projection.state_version,
     requiresWorkflowRefresh: false,
@@ -234,25 +280,36 @@ function applyRecoveryAuthority(
 ): RuntimeState | undefined {
   const version = stateVersion(data);
   const actions = workflowActions(data.allowed_actions);
-  if (version === undefined || !actions || !canReplaceAuthority(current, version)) return current;
+  if (version === undefined || !actions) {
+    return current ? invalidateAuthority(current, undefined) : current;
+  }
+  if (!canReplaceAuthority(current, version)) return current;
   const base = currentOrDraft(current);
   const inheritedIdentifiers = structuredClone(base.authoritative?.identifiers ?? {});
   if (toolName === "ingest_mcn_submissions" && nonemptyString(data.recovery_operation_id)) {
     inheritedIdentifiers.recovery_operation_id = data.recovery_operation_id;
   }
+  const lifecycleStatus = typeof data.lifecycle_status === "string"
+    ? data.lifecycle_status
+    : base.authoritative?.lifecycle_status ?? null;
+  const responseStatus = typeof data.response_status === "string"
+    ? data.response_status
+    : base.authoritative?.response_status ?? null;
+  const combination = toolName === "ingest_mcn_submissions"
+    ? STATE_COMBINATIONS.find((entry) => sameActionSet(entry.allowedActions, actions))
+    : stateCombination(undefined, lifecycleStatus, responseStatus, actions);
+  if (!combination) return invalidateAuthority(base, version);
   const authority: AuthoritativeWorkflowProjection = {
     state_version: version,
     allowed_actions: actions,
-    lifecycle_status: typeof data.lifecycle_status === "string"
-      ? data.lifecycle_status
-      : base.authoritative?.lifecycle_status,
-    response_status: typeof data.response_status === "string"
-      ? data.response_status
-      : base.authoritative?.response_status,
+    phase: combination.phase as RuntimeState["phase"],
+    lifecycle_status: toolName === "ingest_mcn_submissions" ? undefined : lifecycleStatus,
+    response_status: toolName === "ingest_mcn_submissions" ? undefined : responseStatus,
     identifiers: inheritedIdentifiers,
   };
   const next: RuntimeState = {
     ...base,
+    phase: combination.phase as RuntimeState["phase"],
     authoritative: authority,
     lastServerStateVersion: version,
     requiresWorkflowRefresh: false,
@@ -310,13 +367,17 @@ function applySuccessfulResult(
 
   const data = standardData(result);
   if (!data) return current;
-  if (toolName === "get_workflow_state") return applyWorkflowState(current, data);
+  if (toolName === "get_workflow_state") return applyWorkflowState(current, data, context);
   if (toolName === "sync_mcn_inquiry_status" || toolName === "ingest_mcn_submissions") {
     return applyRecoveryAuthority(toolName, current, data, context);
   }
 
   const version = stateVersion(data);
-  if (isStaleServerResult(current, version)) return current;
+  if (isStaleServerResult(current, version)) {
+    return STATE_CHANGING_TOOLS.has(toolName) && current
+      ? invalidateAuthority(current, undefined)
+      : current;
+  }
   const base = currentOrDraft(current);
   let next: RuntimeState;
   switch (toolName) {
@@ -388,11 +449,21 @@ export function applyToolResult(context: ApplyToolResultContext): RuntimeState |
   const toolName = normalizeYpmcnToolName(context.toolName);
   if (!toolName) return context.store.get(context.sessionKey);
 
-  const result = unwrapResult(context.result);
+  const result = context.result;
+  const current = context.store.get(context.sessionKey);
   if (validateToolOutput(toolName, result).length > 0) {
-    return context.store.get(context.sessionKey);
+    if (!STATE_CHANGING_TOOLS.has(toolName) || !current) return current;
+    return context.store.update(context.sessionKey, (state) =>
+      state ? invalidateAuthority(state, undefined) : state,
+    );
   }
-  return context.store.update(context.sessionKey, (current) =>
-    applySuccessfulResult(toolName, current, context, result),
+  if (isRecord(result) && result.success === false) {
+    if (!STATE_CHANGING_TOOLS.has(toolName) || !current) return current;
+    return context.store.update(context.sessionKey, (state) =>
+      state ? invalidateAuthority(state, undefined) : state,
+    );
+  }
+  return context.store.update(context.sessionKey, (state) =>
+    applySuccessfulResult(toolName, state, context, result),
   );
 }

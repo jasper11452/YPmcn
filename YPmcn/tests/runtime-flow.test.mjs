@@ -84,7 +84,7 @@ function validSyncResult(version, allowedActions) {
     inquiry_batch_id: "inquiry-batch-1",
     inquiry_ids: ["inquiry-1"],
     snapshot_id: "snapshot-1",
-    lifecycle_status: "recovering",
+    lifecycle_status: "recover_requested",
     response_status: "partial",
     state_version: version,
     allowed_actions: allowedActions,
@@ -105,9 +105,10 @@ describe("mvp-v2 runtime state flow", () => {
 
   it("does not let an old authoritative projection overwrite a newer one", () => {
     const store = createRuntimeStateStore({ now: () => NOW });
-    apply(store, "get_workflow_state", { mcn_recommendation_id: "mcnr-1" }, workflowState(8, ["rank_creators"], {
+    apply(store, "get_workflow_state", { mcn_recommendation_id: "mcnr-1" }, workflowState(8, ["refresh_recovery", "rank_creators"], {
       phase: "recovered",
       lifecycle_status: "recovered",
+      response_status: "completed",
     }));
     const before = store.get("session-1");
 
@@ -115,7 +116,8 @@ describe("mvp-v2 runtime state flow", () => {
     assert.deepEqual(store.get("session-1"), before);
 
     apply(store, "create_with_distributions", { mcn_recommendation_id: "mcnr-1" }, validDistributionResult(8));
-    assert.deepEqual(store.get("session-1"), before);
+    assert.equal(store.get("session-1")?.authoritative, undefined);
+    assert.equal(store.get("session-1")?.requiresWorkflowRefresh, true);
   });
 
   it("requires a get_workflow_state refresh after a valid write omits allowed_actions", () => {
@@ -128,22 +130,38 @@ describe("mvp-v2 runtime state flow", () => {
     assert.equal(state?.authoritative, undefined);
     assert.equal(state?.requiresWorkflowRefresh, true);
 
-    apply(store, "get_workflow_state", { mcn_recommendation_id: "mcnr-1" }, workflowState(5, ["refresh_recovery"]));
+    apply(store, "get_workflow_state", { mcn_recommendation_id: "mcnr-1" }, workflowState(5, ["refresh_recovery"], {
+      phase: "distribution_sync_pending",
+      lifecycle_status: "sent",
+      response_status: "pending",
+    }));
     assert.equal(store.get("session-1")?.authoritative?.state_version, 5);
   });
 
   it("does not restore authority from an old projection after a write omits state_version", () => {
     const store = createRuntimeStateStore({ now: () => NOW });
-    apply(store, "get_workflow_state", { mcn_recommendation_id: "mcnr-1" }, workflowState(4, ["validate_requirement"]));
+    apply(store, "get_workflow_state", { requirement_id: "req-draft" }, workflowState(4, ["validate_requirement"], {
+      phase: "requirement_draft",
+      current_identifier: "req-draft",
+      identifiers: {},
+    }));
     apply(store, "validate_requirement", { raw_messages_json: "[]" }, validValidationResult());
     const afterWrite = store.get("session-1");
     assert.equal(afterWrite?.lastServerStateVersion, 4);
     assert.equal(afterWrite?.requiresNewerWorkflowState, true);
 
-    apply(store, "get_workflow_state", { requirement_id: "req-2" }, workflowState(4, ["search_creators"]));
+    apply(store, "get_workflow_state", { requirement_id: "req-2" }, workflowState(4, ["search_creators"], {
+      phase: "requirement_ready",
+      current_identifier: "req-2",
+      identifiers: { requirement_id: "req-2" },
+    }));
     assert.deepEqual(store.get("session-1"), afterWrite);
 
-    apply(store, "get_workflow_state", { requirement_id: "req-2" }, workflowState(5, ["search_creators"]));
+    apply(store, "get_workflow_state", { requirement_id: "req-2" }, workflowState(5, ["search_creators"], {
+      phase: "requirement_ready",
+      current_identifier: "req-2",
+      identifiers: { requirement_id: "req-2" },
+    }));
     assert.equal(store.get("session-1")?.authoritative?.state_version, 5);
     assert.equal(store.get("session-1")?.requiresNewerWorkflowState, false);
   });
@@ -165,7 +183,7 @@ describe("mvp-v2 runtime state flow", () => {
     const state = store.get("session-1");
     assert.equal(state?.authoritative?.state_version, 6);
     assert.deepEqual(state?.authoritative?.allowed_actions, ["request_recovery"]);
-    assert.equal(state?.authoritative?.lifecycle_status, "recovering");
+    assert.equal(state?.authoritative?.lifecycle_status, "recover_requested");
     assert.equal(state?.requiresWorkflowRefresh, false);
   });
 
