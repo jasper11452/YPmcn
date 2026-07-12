@@ -1,0 +1,49 @@
+{
+  "task_id": "CHG-2026-006-TERRA-CASE",
+  "base_sha": "772f7161f2b52123a23d0df02ace58e4f52edac3",
+  "head_sha": "387559836b5a5f1c6bc7f5465b132d066a966392",
+  "verifier": {
+    "tool": "OpenCode",
+    "model": "yuepu/Deepseek-V4-Pro",
+    "mode": "read-only"
+  },
+  "status": "PASS",
+  "commands": [
+    {
+      "command": "node --test tests/agent_flow.test.mjs",
+      "result": "PASS",
+      "evidence": "13/13 passed, including lowercase Terra profile and strict verifier output-contract assertions"
+    },
+    {
+      "command": "npm run verify",
+      "result": "PASS",
+      "evidence": "191/191 repository tests passed with zero failures"
+    },
+    {
+      "command": "npm run agent-flow -- profiles --check-catalog --json",
+      "result": "PASS",
+      "evidence": "all three profiles returned listed_exactly=true and reasoning_supported=true"
+    },
+    {
+      "command": "node scripts/scan-secrets.mjs --tracked",
+      "result": "PASS",
+      "evidence": "zero findings"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS",
+      "evidence": "no whitespace errors"
+    }
+  ],
+  "findings": [],
+  "evidence": [
+    "executor-terra-max-fast and executor-terra-medium-fast both use the exact lowercase gpt-5.6-terra slug and differ only by max versus medium reasoning.",
+    "executor-sol-max-fast remains pinned to gpt-5.6-sol with max reasoning; all three profiles retain fast mode.",
+    "The user-level medium profile was refreshed without changing /Users/jasper/.codex/yuepu.config.toml.",
+    "All 11 tracked changes are inside allowed_paths and zero forbidden paths changed.",
+    "Git status and plan roots were unchanged across the native OpenCode read-only verification call.",
+    "The first verifier response was correctly rejected for schema violations; the unchanged validator accepted the second response only after it matched the strict JSON contract."
+  ],
+  "known_risks": [],
+  "unexpected_writes": []
+}
