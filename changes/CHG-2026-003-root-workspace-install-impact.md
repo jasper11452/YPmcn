@@ -22,6 +22,8 @@ approved_spec_version: "mvp-v2 / schemaVersion 1"
 | Test | Yes | 新增根 workspace/lock 回归门禁，并纳入 `npm run verify`。 |
 | Documentation | Yes | 明确根安装覆盖组件，不再要求隐藏的手工子目录安装步骤。 |
 
+测试清单断言 `tests/test_skill_package.py` 随统一门禁总数从 172 更新为 173；它只校验文档证据，不改变 Skill 行为。
+
 ## Compatibility And Dependency Order
 
 - 使用 npm 原生 workspace，兼容现有 `package-lock.json` v3 和当前 npm CLI。
