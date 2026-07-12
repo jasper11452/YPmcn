@@ -12,9 +12,8 @@ const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
 const specRoot = fileURLToPath(new URL("../spec/", import.meta.url));
 const vectorRoot = fileURLToPath(new URL("../vector-mcp/", import.meta.url));
 const vectorDist = fileURLToPath(new URL("../vector-mcp/dist/", import.meta.url));
-const stagingRoot = fileURLToPath(
-  new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
-);
+const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.url));
+const stagingRoot = join(stagingBase, "ypmcn-media-assistant");
 const releaseRoot = fileURLToPath(new URL("../packages/releases/", import.meta.url));
 const pluginAssets = [
   ".claude-plugin",
@@ -42,7 +41,7 @@ function run(command, args, cwd, options = {}) {
 }
 
 export function stagePackageAssets() {
-  rmSync(stagingRoot, { recursive: true, force: true });
+  rmSync(stagingBase, { recursive: true, force: true });
   rmSync(join(pluginRoot, "spec"), { recursive: true, force: true });
   rmSync(join(pluginRoot, "vector-mcp"), { recursive: true, force: true });
   run("npm", ["run", "build"], pluginRoot);
@@ -73,7 +72,7 @@ export function preparePackage({ verify = true } = {}) {
     process.stdout.write(`${archive}\n`);
     return archive;
   } finally {
-    rmSync(stagingRoot, { recursive: true, force: true });
+    rmSync(stagingBase, { recursive: true, force: true });
   }
 }
 

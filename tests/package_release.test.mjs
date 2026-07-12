@@ -6,6 +6,7 @@ import { after, before, describe, it } from "node:test";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
+const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.url));
 const stagedPluginRoot = fileURLToPath(
   new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
 );
@@ -35,7 +36,7 @@ function dryRunFiles() {
 }
 
 before(stageIfImplemented);
-after(() => rmSync(stagedPluginRoot, { recursive: true, force: true }));
+after(() => rmSync(stagingBase, { recursive: true, force: true }));
 
 describe("3.0.0 release metadata", () => {
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
