@@ -1,0 +1,20 @@
+{
+  "task_id": "CHG-YYYY-NNN-DOMAIN",
+  "base_sha": "FULL_BASE_SHA",
+  "head_sha": "FULL_HEAD_SHA",
+  "verifier": {
+    "tool": "OpenCode",
+    "model": "DIFFERENT_FROM_EXECUTOR",
+    "mode": "read-only"
+  },
+  "status": "PASS",
+  "commands": [
+    {
+      "command": "npm run verify",
+      "result": "PASS",
+      "evidence": "summary or artifact reference"
+    }
+  ],
+  "findings": [],
+  "known_risks": []
+}

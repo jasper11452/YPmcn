@@ -12,7 +12,7 @@
   },
   "contracts": {
     "profile": "mvp-v2",
-    "spec": "./spec/profiles/mvp-v2.json",
+    "spec": "./spec/mcp.json",
     "providerVerification": "external-required"
   },
   "hooks": "./dist/index.js",

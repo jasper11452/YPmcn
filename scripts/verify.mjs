@@ -23,6 +23,11 @@ function runStage({ name, command, args, cwd = repoRoot, env }) {
 export function verifyRepository() {
   const stages = [
     {
+      name: "Spec governance",
+      command: process.execPath,
+      args: ["--test", "tests/spec_governance.test.mjs"],
+    },
+    {
       name: "secret scanner tests",
       command: process.execPath,
       args: ["--test", "tests/secret_scan.test.mjs"],
@@ -74,4 +79,3 @@ if (isMain) {
     process.exitCode = 1;
   }
 }
-

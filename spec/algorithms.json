@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "readinessStatus": "external-unverified",
+  "definitions": {},
+  "sourceDocuments": [
+    "doc/20260630-06-业务算法规则.md的替身"
+  ],
+  "governance": {
+    "changePolicy": "blocked_until_approved_definition_exists",
+    "implementationMustNotDefineContract": true,
+    "notes": "本文件显式记录算法契约尚未导入；不得依据当前代码或 Agent 推断补写业务规则。"
+  }
+}

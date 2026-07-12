@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "implementation": "YPmcn/src/hooks/register.ts",
+  "events": {
+    "before_tool_call": {
+      "responsibility": "deterministic_precondition_and_permission_guards",
+      "mayBlock": true
+    },
+    "after_tool_call": {
+      "responsibility": "validated_runtime_state_projection",
+      "mayBlock": false
+    },
+    "tool_result_persist": {
+      "responsibility": "preserve_provider_evidence_without_rewrite",
+      "mayBlock": false
+    },
+    "message_received": {
+      "responsibility": "explicit_manual_recovery_confirmation",
+      "mayBlock": false
+    },
+    "agent_turn_prepare": {
+      "responsibility": "inject_redacted_session_projection",
+      "mayBlock": false
+    },
+    "session_end": {
+      "responsibility": "delete_ephemeral_session_projection",
+      "mayBlock": false
+    }
+  },
+  "boundaries": {
+    "owns": [
+      "input_completeness",
+      "format_validation",
+      "preconditions",
+      "permission_guards",
+      "risk_blocking"
+    ],
+    "doesNotOwn": [
+      "database_schema",
+      "mcp_tool_schema",
+      "business_ranking_algorithm",
+      "provider_evidence_rewrite"
+    ]
+  }
+}

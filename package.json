@@ -6,6 +6,7 @@
   "scripts": {
     "test": "npm run verify",
     "verify": "node scripts/verify.mjs",
+    "verify:spec": "node --test tests/spec_governance.test.mjs",
     "verify:provider": "node scripts/check-provider-contract.mjs --url https://mcp.eshypdata.com/sse",
     "pack:yp": "node scripts/prepare-package.mjs"
   },

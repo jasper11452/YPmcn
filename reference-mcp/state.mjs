@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const profilePath = new URL("../YPmcn/spec/profiles/mvp-v2.json", import.meta.url);
+const profilePath = new URL("../spec/mcp.json", import.meta.url);
 const targetProfile = JSON.parse(readFileSync(profilePath, "utf8"));
 
 const FIELD_ITEMS = [

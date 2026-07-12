@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { before, describe, it } from "node:test";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
+const stagedPluginRoot = fileURLToPath(
+  new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
+);
 const VERSION = "3.0.0";
 
 function json(relativePath) {
@@ -24,7 +27,7 @@ function stageIfImplemented() {
 
 function dryRunFiles() {
   const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
-    cwd: pluginRoot,
+    cwd: stagedPluginRoot,
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
@@ -63,7 +66,7 @@ describe("3.0.0 release metadata", () => {
     assert.equal(pluginPackage["openclaw.hooks"], undefined);
     assert.equal(pluginPackage["openclaw.extensions"], undefined);
     assert.equal(manifest.contracts.profile, "mvp-v2");
-    assert.equal(manifest.contracts.spec, "./spec/profiles/mvp-v2.json");
+    assert.equal(manifest.contracts.spec, "./spec/mcp.json");
   });
 
   it("keeps dependencies owned and exactly pinned", () => {
@@ -85,7 +88,7 @@ describe("reproducible plugin package", () => {
     for (const required of (
       [
         "dist/index.js",
-        "spec/profiles/mvp-v2.json",
+        "spec/mcp.json",
         "spec/workflow.json",
         "skills/media-assistant/SKILL.md",
         "vector-mcp/dist/server.js",
@@ -119,5 +122,25 @@ describe("reproducible plugin package", () => {
     assert.equal(rootPackage.scripts["pack:yp"], "node scripts/prepare-package.mjs");
     assert.equal(pluginPackage.scripts["pack:yp"], "node ../scripts/prepare-package.mjs");
     assert.equal(existsSync(new URL("../.github/workflows/verify.yml", import.meta.url)), true);
+  });
+
+  it("stages outside source and reserves packages/releases for archives", () => {
+    assert.equal(existsSync(new URL("../YPmcn/spec", import.meta.url)), false);
+    assert.equal(existsSync(new URL("../YPmcn/vector-mcp", import.meta.url)), false);
+    assert.equal(existsSync(new URL("../packages/.staging/ypmcn-media-assistant/spec/mcp.json", import.meta.url)), true);
+  });
+
+  it("loads the staged package-local Spec without a repository-relative copy", () => {
+    const loaderUrl = pathToFileURL(`${stagedPluginRoot}/dist/contract/loader.js`).href;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `const { loadContractProfile } = await import(${JSON.stringify(loaderUrl)}); if (loadContractProfile("mvp-v2").profile !== "mvp-v2") process.exit(1);`,
+      ],
+      { cwd: stagedPluginRoot, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   });
 });

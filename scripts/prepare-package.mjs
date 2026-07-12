@@ -9,10 +9,23 @@ import { verifyRepository } from "./verify.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
+const specRoot = fileURLToPath(new URL("../spec/", import.meta.url));
 const vectorRoot = fileURLToPath(new URL("../vector-mcp/", import.meta.url));
 const vectorDist = fileURLToPath(new URL("../vector-mcp/dist/", import.meta.url));
-const stagedVectorRoot = fileURLToPath(new URL("../YPmcn/vector-mcp/", import.meta.url));
-const stagedVectorDist = fileURLToPath(new URL("../YPmcn/vector-mcp/dist/", import.meta.url));
+const stagingRoot = fileURLToPath(
+  new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
+);
+const releaseRoot = fileURLToPath(new URL("../packages/releases/", import.meta.url));
+const pluginAssets = [
+  ".claude-plugin",
+  ".npmignore",
+  "README.md",
+  "dist",
+  "mcp.json",
+  "openclaw.plugin.json",
+  "package.json",
+  "skills",
+];
 
 function run(command, args, cwd, options = {}) {
   const result = spawnSync(command, args, {
@@ -29,27 +42,39 @@ function run(command, args, cwd, options = {}) {
 }
 
 export function stagePackageAssets() {
-  rmSync(stagedVectorRoot, { recursive: true, force: true });
+  rmSync(stagingRoot, { recursive: true, force: true });
+  rmSync(join(pluginRoot, "spec"), { recursive: true, force: true });
+  rmSync(join(pluginRoot, "vector-mcp"), { recursive: true, force: true });
   run("npm", ["run", "build"], pluginRoot);
   run("npm", ["run", "build"], vectorRoot);
-  mkdirSync(stagedVectorRoot, { recursive: true });
-  cpSync(vectorDist, stagedVectorDist, { recursive: true });
+  mkdirSync(stagingRoot, { recursive: true });
+  for (const asset of pluginAssets) {
+    cpSync(join(pluginRoot, asset), join(stagingRoot, asset), { recursive: true });
+  }
+  cpSync(specRoot, join(stagingRoot, "spec"), { recursive: true });
+  cpSync(vectorDist, join(stagingRoot, "vector-mcp", "dist"), { recursive: true });
+  return stagingRoot;
 }
 
 export function preparePackage({ verify = true } = {}) {
   if (verify) verifyRepository();
   stagePackageAssets();
-  const output = run(
-    "npm",
-    ["pack", "--pack-destination", repoRoot, "--json", "--ignore-scripts"],
-    pluginRoot,
-    { capture: true },
-  );
-  const packed = JSON.parse(output)[0];
-  const archive = join(repoRoot, packed.filename);
-  run(process.execPath, ["scripts/scan-secrets.mjs", archive], repoRoot);
-  process.stdout.write(`${archive}\n`);
-  return archive;
+  mkdirSync(releaseRoot, { recursive: true });
+  try {
+    const output = run(
+      "npm",
+      ["pack", "--pack-destination", releaseRoot, "--json", "--ignore-scripts"],
+      stagingRoot,
+      { capture: true },
+    );
+    const packed = JSON.parse(output)[0];
+    const archive = join(releaseRoot, packed.filename);
+    run(process.execPath, ["scripts/scan-secrets.mjs", archive], repoRoot);
+    process.stdout.write(`${archive}\n`);
+    return archive;
+  } finally {
+    rmSync(stagingRoot, { recursive: true, force: true });
+  }
 }
 
 function parseArgs(args) {
@@ -62,7 +87,7 @@ const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.arg
 if (isMain) {
   try {
     const { stageOnly } = parseArgs(process.argv.slice(2));
-    if (stageOnly) stagePackageAssets();
+    if (stageOnly) process.stdout.write(`${stagePackageAssets()}\n`);
     else preparePackage();
   } catch (error) {
     process.stderr.write(`[prepare-package] FAIL: ${error instanceof Error ? error.message : String(error)}\n`);

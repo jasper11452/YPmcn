@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "skills": {
+    "media-assistant": {
+      "implementation": "YPmcn/skills/media-assistant/SKILL.md",
+      "allowedTools": [
+        "validate_requirement",
+        "search_creators",
+        "rank_mcns",
+        "select_inquiry_form_fields",
+        "create_with_distributions",
+        "sync_mcn_inquiry_status",
+        "ingest_mcn_submissions",
+        "manual_source_creators",
+        "rank_creators",
+        "create_submission_batch",
+        "record_client_feedback",
+        "get_recommendation_run_detail",
+        "get_creator_detail",
+        "audit_manual_adjustment",
+        "get_workflow_state"
+      ],
+      "toolPolicy": {
+        "contract": "mcp.json",
+        "runtimeCapabilityCheck": "tools/list",
+        "incompatibleProviderAction": "integration_required",
+        "automaticLegacyFallback": false,
+        "preconditions": {
+          "create_with_distributions": [
+            "field_selection_confirmed",
+            "supply_confirmed",
+            "mcn_confirmed",
+            "message_confirmed"
+          ],
+          "ingest_mcn_submissions": [
+            "fresh_successful_sync_evidence",
+            "manual_or_scheduled_recovery_trigger"
+          ]
+        }
+      },
+      "errorContract": "errors.json",
+      "workflowContract": "workflow.json",
+      "forbidden": [
+        "direct_database_access",
+        "invented_tool_result",
+        "undeclared_tool_parameter",
+        "simulated_result_as_production_evidence"
+      ]
+    }
+  }
+}

@@ -3,12 +3,13 @@ node_modules/
 YPmcn/node_modules/
 YPmcn/dist/
 *.tgz
+/packages/*
+!/packages/README.md
 .omo/
 .codegraph/
 __pycache__/
 *.pyc
 vector-mcp/.qdrant-*.json
 vector-mcp/dist/
-YPmcn/vector-mcp/
 
 .playwright-cli/

@@ -1,0 +1,21 @@
+task_id: CHG-YYYY-NNN-DOMAIN
+change_type: feature
+status: SPEC_APPROVED
+goal: "一句话描述可验证目标"
+approved_spec_version: "mvp-v2 / schemaVersion 1"
+change_proposal: "changes/CHG-YYYY-NNN-slug.md"
+impact_analysis: "changes/CHG-YYYY-NNN-slug-impact.md"
+allowed_paths:
+  - "具体路径/**"
+forbidden_paths:
+  - "spec/**"
+acceptance:
+  - "可观察、可复现的完成条件"
+verification:
+  - "npm run verify"
+rollback: "明确的代码和数据回滚方式"
+deliverables:
+  - "diff"
+  - "test results"
+  - "known risks"
+  - "commit hash"

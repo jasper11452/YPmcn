@@ -20,14 +20,15 @@
 
 ## 2. 仓库验收证据
 
-`npm run verify` 已通过，统一验证覆盖 166 项测试：
+`npm run verify` 已通过，统一验证覆盖 174 项测试：
 
+- Spec 治理与漂移门禁：6 项。
 - 密钥与发布边界：18 项。
 - OpenClaw 插件、契约与 Hook：104 项。
 - reference MCP 与 provider checker：8 项。
 - Skill、工具卡和文档一致性：16 项。
 - 向量 MCP 可靠性：14 项。
-- 可复现发布包：6 项。
+- 可复现发布包：8 项。
 
 验证结果同时证明：
 
@@ -37,7 +38,7 @@
 - 回收固定为 `sync → ingest → sync`，已终态请求为无副作用 no-op。
 - reference MCP 不联网、不写生产库、不发送企微，并在结果中标记 `simulated: true` 与 `productionEvidence: false`。
 - tracked 文件和发布包的密钥扫描均为零发现；发布包不包含 mock、测试、源码、凭据或绝对路径。
-- `ypmcn-media-assistant-3.0.0.tgz` 已完成构建、内容约束和二次密钥扫描。
+- `packages/releases/ypmcn-media-assistant-3.0.0.tgz` 已完成构建、内容约束和二次密钥扫描。
 
 独立验证使用不同模型、只读检查完整提交差异，并复跑密钥扫描及关键测试；结果为 `PASS`、零 findings。该审查没有修改工作树。
 
@@ -63,7 +64,7 @@ npm run verify:provider
 
 ## 4. 尚需外部证明的数据库与后端不变量
 
-`YPmcn/spec/database.json` 是验收要求，不是 migration 或 deployment proof。以下 9 项当前均为 `external-unverified`：
+`spec/database.json` 是验收要求，不是 migration 或 deployment proof。以下 9 项当前均为 `external-unverified`：
 
 | 不变量 | 责任边界 | 放行证据 |
 | --- | --- | --- |

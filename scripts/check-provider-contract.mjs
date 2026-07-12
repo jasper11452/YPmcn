@@ -5,10 +5,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const targetProfile = JSON.parse(
-  readFileSync(new URL("../YPmcn/spec/profiles/mvp-v2.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../spec/mcp.json", import.meta.url), "utf8"),
 );
 const legacyProfile = JSON.parse(
-  readFileSync(new URL("../YPmcn/spec/profiles/legacy-1.9.4.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../spec/profiles/legacy-1.9.4.json", import.meta.url), "utf8"),
 );
 const PROTOCOL_VERSION = "2024-11-05";
 

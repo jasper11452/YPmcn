@@ -12,7 +12,7 @@ import {
 } from "../scripts/check-provider-contract.mjs";
 
 const legacyProfilePath = fileURLToPath(
-  new URL("../YPmcn/spec/profiles/legacy-1.9.4.json", import.meta.url),
+  new URL("../spec/profiles/legacy-1.9.4.json", import.meta.url),
 );
 const legacyProfile = JSON.parse(readFileSync(legacyProfilePath, "utf8"));
 
@@ -96,4 +96,3 @@ describe("read-only provider contract checker", () => {
     assert.equal(methods.includes("tools/call"), false);
   });
 });
-

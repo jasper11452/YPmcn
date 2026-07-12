@@ -9,7 +9,7 @@ description: Use for the YPmcn mvp-v2 brief, creator search, MCN inquiry, recove
 
 ## 契约门禁
 
-1. 调用前读取运行时 `tools/list`，并以 `YPmcn/spec/profiles/mvp-v2.json` 为参数权威。
+1. 调用前读取运行时 `tools/list`，并以仓库根 `spec/mcp.json` 为参数权威。
 2. 工具缺失、required/type/forbidden 不兼容、ID 语义不明确时停止，返回 `integration_required`。
 3. 不自动切到 legacy-1.9.4，不跨 provider 混用 ID。
 4. reference MCP 只供演练；不得把 reference MCP 的 simulated=true 当作生产成功。

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import type {
   ContractProfile,
@@ -13,7 +13,7 @@ import type {
 } from "./types.js";
 
 const PROFILE_FILES: Record<ContractProfileName, string> = {
-  "mvp-v2": "profiles/mvp-v2.json",
+  "mvp-v2": "mcp.json",
   "legacy-1.9.4": "profiles/legacy-1.9.4.json",
 };
 
@@ -45,7 +45,13 @@ function requireArray(value: unknown, label: string): unknown[] {
 }
 
 function readSpec(relativePath: string): unknown {
-  const specUrl = new URL(`../../spec/${relativePath}`, import.meta.url);
+  const specUrl = [
+    new URL(`../../../spec/${relativePath}`, import.meta.url),
+    new URL(`../../spec/${relativePath}`, import.meta.url),
+  ].find((candidate) => existsSync(candidate));
+  if (!specUrl) {
+    throw new Error(`approved spec is missing: ${relativePath}`);
+  }
   return JSON.parse(readFileSync(specUrl, "utf8")) as unknown;
 }
 

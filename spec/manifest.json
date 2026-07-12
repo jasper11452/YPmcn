@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "status": "approved",
+  "contracts": {
+    "database": "database.json",
+    "mcp": "mcp.json",
+    "hooks": "hooks.json",
+    "skills": "skills.json",
+    "workflow": "workflow.json",
+    "errors": "errors.json",
+    "algorithms": "algorithms.json"
+  },
+  "compatibilityProfiles": {
+    "legacy-1.9.4": "profiles/legacy-1.9.4.json"
+  }
+}

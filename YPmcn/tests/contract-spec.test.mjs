@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
-const V2_PROFILE = "profiles/mvp-v2.json";
+const V2_PROFILE = "mcp.json";
 const LEGACY_PROFILE = "profiles/legacy-1.9.4.json";
 const WORKFLOW_SPEC = "workflow.json";
 const DATABASE_SPEC = "database.json";
@@ -1337,7 +1337,7 @@ const TOOL_EXPECTATIONS = {
 
 async function loadSpec(relativePath) {
   const source = await readFile(
-    new URL(`../spec/${relativePath}`, import.meta.url),
+    new URL(`../../spec/${relativePath}`, import.meta.url),
     "utf8",
   );
   return JSON.parse(source);
