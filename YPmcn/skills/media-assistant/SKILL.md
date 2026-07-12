@@ -13,7 +13,12 @@ description: Use for the YPmcn mvp-v2 brief, creator search, MCN inquiry, recove
 2. 工具缺失、required/type/forbidden 不兼容、ID 语义不明确时停止，返回 `integration_required`。
 3. 不自动切到 legacy-1.9.4，不跨 provider 混用 ID。
 4. reference MCP 只供演练；不得把 reference MCP 的 simulated=true 当作生产成功。
-5. 写结果未知时先查权威状态，不盲目重写。
+5. 业务 Hook 只承认精确的 `mcp__ypmcn__<contract-tool>`；bare 名称、foreign namespace 和 shell/curl 写入一律 fail-closed。
+6. `get_workflow_state` 返回的 `state_version`、`allowed_actions`、`identifiers` 是唯一动作授权和关键身份事实；本地 phase、缓存 ID、人工恢复文本与 cron context 只可增加拒绝条件或作为审计来源。
+7. 每次接受的业务写结果若未包含完整 `allowed_actions`，写后刷新：下一次业务写前必须调用 `get_workflow_state`，不得沿用旧投影或本地推断。
+8. 写结果未知时先查权威状态，不盲目重写。
+
+唯一启动例外是全新会话的 `mcp__ypmcn__validate_requirement`：尚无语义 ID 可查询时，它可提交给服务端，但绝不建立本地动作授权；其成功返回后，任何后续业务写入前都必须先调用 `get_workflow_state`。
 
 当前生产 provider 仍被预检识别为 `legacy-1.9.4`，缺 `select_inquiry_form_fields`、`create_with_distributions`、`sync_mcn_inquiry_status`。因此完整 v2 生产链路保持阻断，直到 provider 预检通过。
 
@@ -21,6 +26,7 @@ description: Use for the YPmcn mvp-v2 brief, creator search, MCN inquiry, recove
 
 ```text
 validate_requirement
+→ get_workflow_state
 → search_creators(requirement_id)
 → rank_mcns(candidate_pool_id)
 → 人工确认供需、目标 MCN、外发消息
@@ -45,6 +51,7 @@ validate_requirement
 - `rank_creators.data.run_id` → `run_id`
 
 下游只传明确命名的语义 ID。`demand_id`、`demand_version` 属于旧调用契约，不能替代上述 ID。
+执行写入前，再将参数与当前 `get_workflow_state.data.identifiers` 的同名关键身份比对；缺失、冲突、旧 `state_version` 或不在 `allowed_actions` 的动作均停止。
 
 ## 人工门禁与发送
 
@@ -58,9 +65,9 @@ validate_requirement
 ## 等待与恢复
 
 - 普通消息不解除等待。
-- 手动回收仅接受当前会话明确的“继续回收”“现在回收”“提前回收”。
-- 定时回收只接受 `ctx.trigger=cron`。
-- 两种回收都执行 `sync → ingest → sync`；ingest 必须有当前会话刚获得的成功 sync 证据。
+- 手动回收文本和 `ctx.trigger=cron` 都只是 audit origin，不能独立授权 recovery write。
+- 两种回收都执行 `sync → ingest → sync`；每一步只在服务端 `allowed_actions` 明确包含 `refresh_recovery`、`request_recovery` 或 `finalize_recovery` 时继续。
+- sync/ingest 的 `state_version` 必须单调前进；较旧投影、畸形结果或未知结果均不更新本地证据。
 - 权威状态已是 `recovered`/`closed` 时阻断重复副作用，并返回 `RECOVERY_ALREADY_TERMINAL` 语义。
 
 ## 回复边界

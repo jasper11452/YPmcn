@@ -15,11 +15,14 @@
 - data.accepted_count
 - data.rejected_count
 - data.created_submission_item_count
+- data.recovery_operation_id
+- data.state_version
+- data.allowed_actions
 
 ## 调用后必须停在哪里
 
-进入 `recovery_sync_pending`，必须执行最终 `sync_mcn_inquiry_status`；此时不能精排。
+进入 `recovery_sync_pending`，必须执行最终 `sync_mcn_inquiry_status`；此时不能精排。仅结果的新 `allowed_actions` 含 `finalize_recovery` 时可继续。
 
 ## 错误与停止条件
 
-禁止 `demand_id`、`demand_version`、`items`。没有当前 sync 证据、触发类型不匹配或 scheduled 不在 cron 上下文时停止。
+禁止 `demand_id`、`demand_version`、`items`。manual 文本、scheduled/cron 与本地 phase 都不是授权；没有服务端 `request_recovery`、关键身份冲突、CAS/state_version 冲突或 output contract 不完整时停止。

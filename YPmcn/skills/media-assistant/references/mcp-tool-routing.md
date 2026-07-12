@@ -17,7 +17,9 @@ validate_requirement
 → record_client_feedback
 ```
 
-`get_recommendation_run_detail`、`get_creator_detail` 是只读详情查询；`audit_manual_adjustment` 只记录已明确的人工调整。可选 `get_workflow_state` 只能读取权威状态，不能替代链路证据。
+`get_recommendation_run_detail`、`get_creator_detail` 是只读详情查询；`audit_manual_adjustment` 只记录已明确的人工调整。`get_workflow_state` 是服务端权威投影：它返回 `state_version`、closed-world `allowed_actions` 和 `identifiers`。每次业务写若未返回完整 `allowed_actions`，下一次写前必须写后刷新此投影；不能用本地 phase、缓存或旧结果补齐。
+
+Host 业务 Hook 只接收 `mcp__ypmcn__<contract-tool>`；provider 的 `tools/list` 保持 bare name 仅供能力协商，bare 或 foreign 名称不能成为 Hook 的业务事件。
 
 ## 语义 ID 传递
 
@@ -29,6 +31,7 @@ validate_requirement
 | rank_creators.data.run_id → run_id | 提报、反馈、详情、人工调整的 `run_id` |
 
 不凭位置猜 ID，不使用旧版本字段替代语义 ID。任何来源不明或跨 provider 的 ID 都报 `STATE_CONFLICT`/`integration_required` 并停止。
+写入时以 `get_workflow_state.data.identifiers` 中同名字段为准；本地 ID 只用于显示与对账提示，不能授权动作。
 
 ## 人工决策点
 

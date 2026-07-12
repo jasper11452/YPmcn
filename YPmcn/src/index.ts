@@ -6,6 +6,7 @@ import type { HookApi } from "./hooks/register.js";
 export { runBeforeToolCallGuards, normalizeYpmcnToolName } from "./hooks/guards.js";
 export { registerHooks } from "./hooks/register.js";
 export { applyToolResult } from "./hooks/results.js";
+export { validateToolOutput } from "./contract/validator.js";
 export {
   createRuntimeStateStore,
   markManualRecoveryConfirmed,

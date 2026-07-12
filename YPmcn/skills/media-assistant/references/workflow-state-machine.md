@@ -1,6 +1,6 @@
 # mvp-v2 状态与恢复
 
-Hook 状态只是 TTL 会话投影，数据库/provider 状态才是业务事实。
+Hook 状态只是 TTL 会话投影，数据库/provider 状态才是业务事实。除全新会话首次 `mcp__ypmcn__validate_requirement`（仅送达服务端、不授权后续写）外，每个业务写入都以当前服务端 `state_version + allowed_actions` 授权；本地 phase 只用于展示和额外拒绝，不能授权。
 
 ## 精确阶段
 
@@ -27,16 +27,15 @@ Hook 状态只是 TTL 会话投影，数据库/provider 状态才是业务事实
 
 ## manual 恢复
 
-1. 当前会话收到明确回收意图，记录确认时间但阶段仍为 `waiting_return`。
-2. 带 `recoveryTrigger=manual` 执行 sync。
-3. 非终态成功结果进入 `recovering`。
-4. `trigger=manual` 执行 ingest。
-5. 进入 `recovery_sync_pending`，执行最终 sync。
-6. 只有最终 sync 的 lifecycle 为 `recovered` 才进入 `recovered`。
+1. 当前会话收到明确回收意图时，仅记录 audit origin；它不授予写入。
+2. 仅服务端 `allowed_actions` 含 `refresh_recovery` 时执行 sync。
+3. 仅 sync 返回的新 `allowed_actions` 含 `request_recovery` 时执行 `trigger=manual` ingest。
+4. 仅 ingest 返回的新 `allowed_actions` 含 `finalize_recovery` 且有 server `recovery_operation_id` 时执行最终 sync。
+5. 只有服务端最终投影的 lifecycle 为 `recovered`/`closed` 且 `allowed_actions` 含 `rank_creators` 才精排。
 
 ## scheduled 恢复
 
-scheduled 路径必须有 `ctx.trigger=cron`，顺序同样是 sync、`trigger=scheduled` ingest、最终 sync。缺 cron 证据时返回 `RECOVERY_NOT_CONFIRMED`。
+scheduled 的 `ctx.trigger=cron` 仅记录 audit origin，顺序同样是 sync、`trigger=scheduled` ingest、最终 sync；它与 manual 文本都不能绕过服务端授权。
 
 ## 终态与重启
 
@@ -45,3 +44,4 @@ scheduled 路径必须有 `ctx.trigger=cron`，顺序同样是 sync、`trigger=s
 - 发送后首次 sync 前投影丢失：可用 `requirement_id + mcn_recommendation_id` 做幂等 sync 对账。
 - ingest 前必须在当前会话先有成功 sync；rank 前最新权威 sync 必须为 recovered。
 - 普通消息不解除等待。
+- 任一写结果缺 `allowed_actions` 时，写后刷新 `get_workflow_state`；`state_version` 较旧或畸形结果不得覆盖新投影、不得改变任何证据。

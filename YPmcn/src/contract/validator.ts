@@ -1,9 +1,10 @@
-import { loadContractProfile } from "./loader.js";
+import { loadContractProfile, loadContractSchema } from "./loader.js";
 import type {
   ContractSchema,
   MvpContractProfile,
   SchemaType,
   ToolContract,
+  ToolOutputContract,
   ValidationIssue,
 } from "./types.js";
 
@@ -14,6 +15,8 @@ const FIELD_SELECTION_KEYS: ReadonlySet<string> = new Set([
   ...FIELD_SELECTION_REQUIRED_KEYS,
   ...FIELD_SELECTION_DISPLAY_KEYS,
 ]);
+const RFC3339_DATE_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -463,4 +466,226 @@ export function validateFieldSelection(result: unknown): ValidationIssue[] {
   }
 
   return issues;
+}
+
+function outputIssue(path: string, message: string): ValidationIssue {
+  return issue("SCHEMA_MISMATCH", path, message);
+}
+
+function resolveOutputSchemaReference(
+  profile: MvpContractProfile,
+  reference: string,
+): ContractSchema | undefined {
+  const outputEnvelopePrefix = "#/outputEnvelopes/";
+  if (reference.startsWith(outputEnvelopePrefix)) {
+    const name = reference.slice(outputEnvelopePrefix.length);
+    return profile.outputEnvelopes[name];
+  }
+  if (reference === "schemas/workflow-state.schema.json#/properties/identifiers") {
+    return loadContractSchema("workflow-state.schema.json").properties?.identifiers;
+  }
+  return undefined;
+}
+
+function isValidDateTime(value: string): boolean {
+  const match = RFC3339_DATE_TIME.exec(value);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = match[6] === undefined ? 0 : Number(match[6]);
+  const offsetHour = match[7] === undefined ? 0 : Number(match[7]);
+  const offsetMinute = match[8] === undefined ? 0 : Number(match[8]);
+  if (
+    month < 1 ||
+    month > 12 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    offsetHour > 23 ||
+    offsetMinute > 59
+  ) {
+    return false;
+  }
+  const daysInMonth = month === 2
+    ? (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28)
+    : [4, 6, 9, 11].includes(month) ? 30 : 31;
+  return day >= 1 && day <= daysInMonth && Number.isFinite(Date.parse(value));
+}
+
+function validateOutputSchema(
+  profile: MvpContractProfile,
+  schema: ContractSchema,
+  value: unknown,
+  path: string,
+): ValidationIssue[] {
+  if (schema.$ref !== undefined) {
+    const resolved = typeof schema.$ref === "string"
+      ? resolveOutputSchemaReference(profile, schema.$ref)
+      : undefined;
+    return resolved
+      ? validateOutputSchema(profile, resolved, value, path)
+      : [outputIssue(path, `Output schema reference ${String(schema.$ref)} is unsupported.`)];
+  }
+
+  const issues: ValidationIssue[] = [];
+  const types = expectedTypes(schema);
+  if (types.length > 0 && !types.some((type) => matchesType(value, type))) {
+    return [
+      outputIssue(
+        path,
+        `Expected ${types.join(" or ")}; received ${value === null ? "null" : typeof value}.`,
+      ),
+    ];
+  }
+
+  if (hasOwn(schema as Record<string, unknown>, "const") && !deepEqual(value, schema.const)) {
+    issues.push(outputIssue(path, "Value does not match the required constant."));
+  }
+  if (schema.enum && !schema.enum.some((candidate) => deepEqual(candidate, value))) {
+    issues.push(outputIssue(path, "Value is not in the approved enum."));
+  }
+  if (typeof value === "string") {
+    if (schema.minLength !== undefined && value.length < schema.minLength) {
+      issues.push(outputIssue(path, `String must contain at least ${schema.minLength} character(s).`));
+    }
+    if (schema.pattern !== undefined) {
+      try {
+        if (!new RegExp(schema.pattern).test(value)) {
+          issues.push(outputIssue(path, "String does not match the approved pattern."));
+        }
+      } catch {
+        issues.push(outputIssue(path, "Output schema pattern is invalid."));
+      }
+    }
+    if (schema.format === "date-time" && !isValidDateTime(value)) {
+      issues.push(outputIssue(path, "String must be a timezone-qualified date-time."));
+    }
+  }
+  if (typeof value === "number") {
+    if (schema.minimum !== undefined && value < schema.minimum) {
+      issues.push(outputIssue(path, `Number must be at least ${schema.minimum}.`));
+    }
+    if (schema.maximum !== undefined && value > schema.maximum) {
+      issues.push(outputIssue(path, `Number must be at most ${schema.maximum}.`));
+    }
+  }
+  if (Array.isArray(value)) {
+    if (schema.minItems !== undefined && value.length < schema.minItems) {
+      issues.push(outputIssue(path, `Array must contain at least ${schema.minItems} item(s).`));
+    }
+    if (schema.uniqueItems) {
+      for (let index = 0; index < value.length; index += 1) {
+        if (value.slice(0, index).some((candidate) => deepEqual(candidate, value[index]))) {
+          issues.push(outputIssue(`${path}[${index}]`, "Array items must be unique."));
+        }
+      }
+    }
+    if (schema.items) {
+      value.forEach((item, index) => {
+        issues.push(...validateOutputSchema(profile, schema.items as ContractSchema, item, `${path}[${index}]`));
+      });
+    }
+  }
+  if (isRecord(value)) {
+    if (schema.minProperties !== undefined && Object.keys(value).length < schema.minProperties) {
+      issues.push(outputIssue(path, `Object must contain at least ${schema.minProperties} property(ies).`));
+    }
+    for (const required of schema.required ?? []) {
+      if (!hasOwn(value, required)) {
+        issues.push(outputIssue(propertyPath(path, required), "Required property is missing."));
+      }
+    }
+    const properties = schema.properties ?? {};
+    for (const [key, child] of Object.entries(value)) {
+      const childPath = propertyPath(path, key);
+      if (hasOwn(properties, key)) {
+        issues.push(...validateOutputSchema(profile, properties[key], child, childPath));
+      } else if (isRecord(schema.additionalProperties)) {
+        issues.push(
+          ...validateOutputSchema(profile, schema.additionalProperties, child, childPath),
+        );
+      } else if (schema.additionalProperties === false) {
+        issues.push(outputIssue(childPath, "Property is not declared by the output contract."));
+      }
+    }
+  }
+  if (schema.oneOf) {
+    const matches = schema.oneOf.filter(
+      (candidate) => validateOutputSchema(profile, candidate, value, path).length === 0,
+    ).length;
+    if (matches !== 1) {
+      issues.push(outputIssue(path, "Value must match exactly one approved output variant."));
+    }
+  }
+  return issues;
+}
+
+function validateStandardToolOutput(
+  profile: MvpContractProfile,
+  contract: ToolOutputContract,
+  result: unknown,
+): ValidationIssue[] {
+  const envelopeName = isRecord(result) && result.success === true
+    ? contract.successEnvelope
+    : contract.failureEnvelope;
+  const envelope = profile.outputEnvelopes[envelopeName];
+  if (!envelope) {
+    return [outputIssue("$", `Output envelope ${envelopeName} is unavailable.`)];
+  }
+  const issues = validateOutputSchema(profile, envelope, result, "$");
+  if (!isRecord(result)) return issues;
+
+  if (result.success === true) {
+    return [
+      ...issues,
+      ...validateOutputSchema(profile, contract.successSchema, result.data, "$.data"),
+    ];
+  }
+  if (result.success === false && isRecord(result.error)) {
+    const code = result.error.code;
+    if (typeof code !== "string" || !contract.errorCodes.includes(code as never)) {
+      issues.push(outputIssue("$.error.code", "Error code is not declared for this tool."));
+    }
+  }
+  return issues;
+}
+
+/**
+ * Validate a normalized MCP result against the approved per-tool output
+ * contract. Transport wrappers are intentionally not accepted here; callers
+ * must unwrap only their known Hook transport envelope before validation.
+ */
+export function validateToolOutput(tool: string, result: unknown): ValidationIssue[] {
+  const profile = loadTargetProfile();
+  if (!profile) {
+    return [issue("INTEGRATION_REQUIRED", "$.profile", "The target contract profile is unavailable.")];
+  }
+  const contract = hasOwn(profile.outputContracts, tool)
+    ? profile.outputContracts[tool]
+    : undefined;
+  if (!contract) {
+    return [
+      issue(
+        "INTEGRATION_REQUIRED",
+        "$.tool",
+        `Tool ${String(tool)} is not declared by the target output contract.`,
+      ),
+    ];
+  }
+  if (contract.successEnvelope === "top-level-field-selection" && isRecord(result) && result.success === true) {
+    return [
+      ...validateOutputSchema(
+        profile,
+        profile.outputEnvelopes[contract.successEnvelope],
+        result,
+        "$",
+      ),
+      ...validateFieldSelection(result),
+    ];
+  }
+  return validateStandardToolOutput(profile, contract, result);
 }

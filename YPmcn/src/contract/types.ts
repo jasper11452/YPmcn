@@ -49,6 +49,7 @@ export interface ContractSchema {
   minimum?: number;
   maximum?: number;
   minItems?: number;
+  minProperties?: number;
   maxItems?: number;
   uniqueItems?: boolean;
   required?: string[];

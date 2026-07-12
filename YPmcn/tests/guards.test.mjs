@@ -1,13 +1,38 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { runBeforeToolCallGuards } from "../dist/hooks/guards.js";
+import {
+  normalizeYpmcnToolName,
+  runBeforeToolCallGuards,
+} from "../dist/hooks/guards.js";
 import { createRuntimeStateStore } from "../dist/hooks/runtime-state.js";
 
 const NOW = Date.parse("2026-07-11T10:00:00+08:00");
 
+function qualified(toolName) {
+  return `mcp__ypmcn__${toolName}`;
+}
+
 function fieldDefinition(key = "friendcount", name = "关注数") {
   return { key, name, type: "BIGINT", required: true };
+}
+
+function authority(overrides = {}) {
+  return {
+    phase: "field_selection_ready",
+    current_identifier: "mcnr-1",
+    state_version: 7,
+    allowed_actions: ["create_with_distributions"],
+    pending_gates: [],
+    identifiers: {
+      requirement_id: "req-1",
+      candidate_pool_id: "pool-1",
+      mcn_recommendation_id: "mcnr-1",
+      selection_result_id: "selection-1",
+    },
+    updated_at: "2026-07-11T10:00:00+08:00",
+    ...overrides,
+  };
 }
 
 function readyDistributionParams(overrides = {}) {
@@ -26,133 +51,293 @@ function readyDistributionParams(overrides = {}) {
   };
 }
 
-function sendContext(store, overrides = {}) {
+function withState(state) {
+  const store = createRuntimeStateStore({ now: () => NOW });
+  store.set("session-1", state);
+  return store;
+}
+
+function guardContext(store, toolName, params, overrides = {}) {
   return {
-    toolName: "create_with_distributions",
-    params: readyDistributionParams(),
+    toolName: qualified(toolName),
+    params,
     sessionKey: "session-1",
     toolCallId: "call-1",
     operatorRole: "media",
     nowMs: NOW,
-    gateState: {
-      supplyConfirmed: true,
-      mcnConfirmed: true,
-      messageConfirmed: true,
-    },
     store,
     ...overrides,
   };
 }
 
 describe("mvp-v2 before-tool guards", () => {
-  it("accepts exact semantic IDs and rejects legacy chained IDs", async () => {
+  it("allows only a fresh exact initial validation bootstrap without granting local authority", async () => {
     const store = createRuntimeStateStore({ now: () => NOW });
-    store.set("session-1", {
+    const bootstrap = await runBeforeToolCallGuards(guardContext(
+      store,
+      "validate_requirement",
+      { raw_messages_json: "[]" },
+    ));
+    assert.equal(bootstrap, undefined);
+    assert.equal(store.get("session-1"), undefined);
+
+    const missingCall = await runBeforeToolCallGuards(guardContext(
+      store,
+      "validate_requirement",
+      { raw_messages_json: "[]" },
+      { toolCallId: undefined },
+    ));
+    assert.equal(missingCall?.block, true);
+    assert.match(missingCall?.blockReason ?? "", /INVALID_INPUT/);
+
+    const nextWrite = await runBeforeToolCallGuards(guardContext(
+      store,
+      "search_creators",
+      { requirement_id: "req-1" },
+    ));
+    assert.equal(nextWrite?.block, true);
+    assert.match(nextWrite?.blockReason ?? "", /STATE_COMBINATION_INVALID/);
+
+    store.set("session-1", { phase: "requirement_draft" });
+    const nonFresh = await runBeforeToolCallGuards(guardContext(
+      store,
+      "validate_requirement",
+      { raw_messages_json: "[]" },
+    ));
+    assert.equal(nonFresh?.block, true);
+    assert.match(nonFresh?.blockReason ?? "", /STATE_COMBINATION_INVALID/);
+  });
+
+  it("accepts only the exact Host-qualified YPmcn tool identity", async () => {
+    assert.equal(normalizeYpmcnToolName(qualified("search_creators")), "search_creators");
+    for (const name of [
+      "search_creators",
+      "mcp__foreign__search_creators",
+      "mcp__vector-mcp__search_creators",
+      "mcp__ypmcn__search_creators__suffix",
+    ]) {
+      assert.equal(normalizeYpmcnToolName(name), null, name);
+    }
+
+    const store = withState({
       phase: "requirement_ready",
-      requirement_id: "req-1",
+      authoritative: authority({
+        phase: "requirement_ready",
+        allowed_actions: ["search_creators"],
+        identifiers: { requirement_id: "req-1" },
+      }),
     });
-
-    const allowed = await runBeforeToolCallGuards({
-      toolName: "search_creators",
-      params: { requirement_id: "req-1" },
-      sessionKey: "session-1",
-      toolCallId: "call-search",
-      operatorRole: "media",
-      nowMs: NOW,
-      store,
-    });
-    assert.equal(allowed, undefined);
-
-    const blocked = await runBeforeToolCallGuards({
-      toolName: "search_creators",
-      params: { id: "req-1", demand_id: "legacy", demand_version: 1 },
-      sessionKey: "session-1",
-      toolCallId: "call-search-legacy",
-      operatorRole: "media",
-      nowMs: NOW,
-      store,
-    });
-    assert.equal(blocked?.block, true);
-    assert.match(blocked?.blockReason ?? "", /SCHEMA_MISMATCH/);
-  });
-
-  it("fails a distribution closed when session, call ID, or role evidence is missing", async () => {
-    for (const missing of ["sessionKey", "toolCallId", "operatorRole"]) {
-      const store = createRuntimeStateStore({ now: () => NOW });
-      store.set("session-1", {
-        phase: "field_selection_ready",
-        requirement_id: "req-1",
-        candidate_pool_id: "pool-1",
-        mcn_recommendation_id: "mcnr-1",
-        fieldSelection: {
-          fields: { friendcount: fieldDefinition() },
-          items: [fieldDefinition()],
-          selected_count: 1,
-        },
+    for (const name of ["search_creators", "mcp__foreign__search_creators"]) {
+      const result = await runBeforeToolCallGuards({
+        ...guardContext(store, "search_creators", { requirement_id: "req-1" }),
+        toolName: name,
       });
-      const ctx = sendContext(store);
-      delete ctx[missing];
-      const result = await runBeforeToolCallGuards(ctx);
-      assert.equal(result?.block, true, missing);
-      assert.match(result?.blockReason ?? "", /CONFIRMATION_REQUIRED|INVALID_INPUT/, missing);
+      assert.equal(result?.block, true, name);
+      assert.match(result?.blockReason ?? "", /INTEGRATION_REQUIRED/);
     }
   });
 
-  it("requires every send confirmation and current field-selection proof", async () => {
-    const cases = [
-      { gateState: { supplyConfirmed: false, mcnConfirmed: true, messageConfirmed: true } },
-      { gateState: { supplyConfirmed: true, mcnConfirmed: false, messageConfirmed: true } },
-      { gateState: { supplyConfirmed: true, mcnConfirmed: true, messageConfirmed: false } },
-      { columns: [fieldDefinition("postcount", "作品数")] },
-    ];
-
-    for (const testCase of cases) {
-      const store = createRuntimeStateStore({ now: () => NOW });
-      store.set("session-1", {
-        phase: "field_selection_ready",
-        requirement_id: "req-1",
-        candidate_pool_id: "pool-1",
-        mcn_recommendation_id: "mcnr-1",
-        fieldSelection: {
-          fields: { friendcount: fieldDefinition() },
-          items: [fieldDefinition()],
-          selected_count: 1,
-        },
-      });
-      const result = await runBeforeToolCallGuards(sendContext(store, {
-        gateState: testCase.gateState ?? sendContext(store).gateState,
-        params: readyDistributionParams(testCase.columns ? { columns: testCase.columns } : {}),
-      }));
-      assert.equal(result?.block, true);
-      assert.match(result?.blockReason ?? "", /CONFIRMATION_REQUIRED|FIELD_SELECTION_INVALID/);
-    }
-  });
-
-  it("rejects preview sends and past reminder timestamps", async () => {
-    const store = createRuntimeStateStore({ now: () => NOW });
-    store.set("session-1", {
-      phase: "field_selection_ready",
+  it("requires a current server projection and its allowed action for every business write", async () => {
+    const localOnly = withState({
+      phase: "recovering",
       requirement_id: "req-1",
-      candidate_pool_id: "pool-1",
       mcn_recommendation_id: "mcnr-1",
+      manualRecoveryConfirmedAt: NOW,
+      lastSync: {
+        at: NOW,
+        lifecycle_status: "recovering",
+        response_status: "partial",
+        trigger: "manual",
+      },
+    });
+    const blocked = await runBeforeToolCallGuards(
+      guardContext(localOnly, "ingest_mcn_submissions", {
+        mcn_recommendation_id: "mcnr-1",
+        requirement_id: "req-1",
+        trigger: "manual",
+      }, { recoveryTrigger: "manual" }),
+    );
+    assert.equal(blocked?.block, true);
+    assert.match(blocked?.blockReason ?? "", /STATE_COMBINATION_INVALID/);
+
+    const serverAuthorized = withState({
+      phase: "requirement_draft",
+      authoritative: authority({
+        phase: "recovering",
+        state_version: 8,
+        allowed_actions: ["request_recovery"],
+        identifiers: { requirement_id: "req-1", mcn_recommendation_id: "mcnr-1" },
+      }),
+    });
+    const allowed = await runBeforeToolCallGuards(
+      guardContext(serverAuthorized, "ingest_mcn_submissions", {
+        mcn_recommendation_id: "mcnr-1",
+        requirement_id: "req-1",
+        trigger: "scheduled",
+      }),
+    );
+    assert.equal(allowed, undefined);
+  });
+
+  it("does not let manual text, cron context, local phase, or local IDs grant a recovery write", async () => {
+    const store = withState({
+      phase: "recovering",
+      requirement_id: "req-local",
+      mcn_recommendation_id: "mcn-local",
+      manualRecoveryConfirmedAt: NOW,
+      lastSync: {
+        at: NOW,
+        lifecycle_status: "recovering",
+        response_status: "partial",
+        trigger: "scheduled",
+      },
+      authoritative: authority({
+        phase: "waiting_return",
+        state_version: 9,
+        allowed_actions: ["refresh_recovery"],
+        identifiers: {
+          requirement_id: "req-1",
+          mcn_recommendation_id: "mcnr-1",
+        },
+      }),
+    });
+    const result = await runBeforeToolCallGuards(
+      guardContext(store, "ingest_mcn_submissions", {
+        mcn_recommendation_id: "mcn-local",
+        requirement_id: "req-local",
+        trigger: "scheduled",
+      }, { trigger: "cron", recoveryTrigger: "scheduled" }),
+    );
+    assert.equal(result?.block, true);
+    assert.match(result?.blockReason ?? "", /STATE_COMBINATION_INVALID/);
+  });
+
+  it("uses server identifiers and allowed actions, while retaining local confirmations as deny-only send checks", async () => {
+    const store = withState({
+      phase: "requirement_draft",
+      mcn_recommendation_id: "mcn-local",
       fieldSelection: {
         fields: { friendcount: fieldDefinition() },
         items: [fieldDefinition()],
         selected_count: 1,
       },
+      authoritative: authority(),
     });
+    const allowed = await runBeforeToolCallGuards(guardContext(
+      store,
+      "create_with_distributions",
+      readyDistributionParams(),
+      {
+        gateState: {
+          supplyConfirmed: true,
+          mcnConfirmed: true,
+          messageConfirmed: true,
+        },
+      },
+    ));
+    assert.equal(allowed, undefined);
 
-    const preview = await runBeforeToolCallGuards(sendContext(store, {
-      params: readyDistributionParams({ preview_only: true }),
-    }));
-    assert.equal(preview?.block, true);
-    assert.match(preview?.blockReason ?? "", /SCHEMA_MISMATCH/);
+    const wrongServerId = await runBeforeToolCallGuards(guardContext(
+      store,
+      "create_with_distributions",
+      readyDistributionParams({ mcn_recommendation_id: "mcn-local" }),
+      {
+        gateState: {
+          supplyConfirmed: true,
+          mcnConfirmed: true,
+          messageConfirmed: true,
+        },
+      },
+    ));
+    assert.equal(wrongServerId?.block, true);
+    assert.match(wrongServerId?.blockReason ?? "", /STATE_CONFLICT/);
 
-    const expired = await runBeforeToolCallGuards(sendContext(store, {
-      params: readyDistributionParams({ remindAt: "2026-07-10T12:00:00+08:00" }),
-    }));
-    assert.equal(expired?.block, true);
-    assert.match(expired?.blockReason ?? "", /INVALID_INPUT/);
+    const missingConfirmation = await runBeforeToolCallGuards(guardContext(
+      store,
+      "create_with_distributions",
+      readyDistributionParams(),
+      { gateState: { supplyConfirmed: true, mcnConfirmed: false, messageConfirmed: true } },
+    ));
+    assert.equal(missingConfirmation?.block, true);
+    assert.match(missingConfirmation?.blockReason ?? "", /CONFIRMATION_REQUIRED/);
+  });
+
+  it("requires authoritative recovery actions and a server recovery operation for finalization", async () => {
+    const refreshStore = withState({
+      phase: "requirement_draft",
+      authoritative: authority({
+        phase: "waiting_return",
+        state_version: 10,
+        allowed_actions: ["refresh_recovery"],
+        identifiers: { requirement_id: "req-1", mcn_recommendation_id: "mcnr-1" },
+      }),
+    });
+    const refresh = await runBeforeToolCallGuards(guardContext(
+      refreshStore,
+      "sync_mcn_inquiry_status",
+      { mcn_recommendation_id: "mcnr-1", requirement_id: "req-1" },
+    ));
+    assert.equal(refresh, undefined);
+
+    const incompleteFinalizeStore = withState({
+      phase: "recovery_sync_pending",
+      authoritative: authority({
+        phase: "recovery_sync_pending",
+        state_version: 11,
+        allowed_actions: ["finalize_recovery"],
+        identifiers: { requirement_id: "req-1", mcn_recommendation_id: "mcnr-1" },
+      }),
+    });
+    const incompleteFinalize = await runBeforeToolCallGuards(guardContext(
+      incompleteFinalizeStore,
+      "sync_mcn_inquiry_status",
+      { mcn_recommendation_id: "mcnr-1", requirement_id: "req-1" },
+    ));
+    assert.equal(incompleteFinalize?.block, true);
+    assert.match(incompleteFinalize?.blockReason ?? "", /STATE_COMBINATION_INVALID/);
+
+    const finalizeStore = withState({
+      phase: "requirement_draft",
+      authoritative: authority({
+        phase: "recovery_sync_pending",
+        state_version: 11,
+        allowed_actions: ["finalize_recovery"],
+        identifiers: {
+          requirement_id: "req-1",
+          mcn_recommendation_id: "mcnr-1",
+          recovery_operation_id: "recovery-1",
+        },
+      }),
+    });
+    const finalized = await runBeforeToolCallGuards(guardContext(
+      finalizeStore,
+      "sync_mcn_inquiry_status",
+      { mcn_recommendation_id: "mcnr-1", requirement_id: "req-1" },
+    ));
+    assert.equal(finalized, undefined);
+  });
+
+  it("blocks a write after an accepted result requires get_workflow_state refresh", async () => {
+    const store = withState({
+      phase: "field_selection_ready",
+      requiresWorkflowRefresh: true,
+      authoritative: undefined,
+      lastServerStateVersion: 12,
+    });
+    const result = await runBeforeToolCallGuards(guardContext(
+      store,
+      "create_with_distributions",
+      readyDistributionParams(),
+      {
+        gateState: {
+          supplyConfirmed: true,
+          mcnConfirmed: true,
+          messageConfirmed: true,
+        },
+      },
+    ));
+    assert.equal(result?.block, true);
+    assert.match(result?.blockReason ?? "", /STATE_COMBINATION_INVALID/);
   });
 
   it("blocks shell and curl bypasses of the provider write", async () => {
@@ -168,80 +353,5 @@ describe("mvp-v2 before-tool guards", () => {
     });
     assert.equal(result?.block, true);
     assert.match(result?.blockReason ?? "", /INTEGRATION_REQUIRED/);
-  });
-
-  it("allows manual and scheduled ingest only after the matching current sync", async () => {
-    const manualStore = createRuntimeStateStore({ now: () => NOW });
-    manualStore.set("session-1", {
-      phase: "recovering",
-      requirement_id: "req-1",
-      mcn_recommendation_id: "mcnr-1",
-      manualRecoveryConfirmedAt: NOW,
-      lastSync: { at: NOW, lifecycle_status: "waiting_return", response_status: "partial", trigger: "manual" },
-    });
-    const manual = await runBeforeToolCallGuards({
-      toolName: "ingest_mcn_submissions",
-      params: { mcn_recommendation_id: "mcnr-1", requirement_id: "req-1", trigger: "manual" },
-      sessionKey: "session-1",
-      toolCallId: "call-ingest-manual",
-      operatorRole: "media",
-      recoveryTrigger: "manual",
-      nowMs: NOW,
-      store: manualStore,
-    });
-    assert.equal(manual, undefined);
-
-    const scheduledStore = createRuntimeStateStore({ now: () => NOW });
-    scheduledStore.set("session-2", {
-      phase: "recovering",
-      requirement_id: "req-1",
-      mcn_recommendation_id: "mcnr-1",
-      lastSync: { at: NOW, lifecycle_status: "waiting_return", response_status: "partial", trigger: "scheduled" },
-    });
-    const scheduled = await runBeforeToolCallGuards({
-      toolName: "ingest_mcn_submissions",
-      params: { mcn_recommendation_id: "mcnr-1", requirement_id: "req-1", trigger: "scheduled" },
-      sessionKey: "session-2",
-      toolCallId: "call-ingest-scheduled",
-      operatorRole: "media",
-      trigger: "cron",
-      nowMs: NOW,
-      store: scheduledStore,
-    });
-    assert.equal(scheduled, undefined);
-
-    const outsideCron = await runBeforeToolCallGuards({
-      toolName: "ingest_mcn_submissions",
-      params: { mcn_recommendation_id: "mcnr-1", requirement_id: "req-1", trigger: "scheduled" },
-      sessionKey: "session-2",
-      toolCallId: "call-ingest-invalid",
-      operatorRole: "media",
-      nowMs: NOW,
-      store: scheduledStore,
-    });
-    assert.equal(outsideCron?.block, true);
-    assert.match(outsideCron?.blockReason ?? "", /RECOVERY_NOT_CONFIRMED/);
-  });
-
-  it("blocks ranking until an authoritative final sync reports recovered", async () => {
-    const store = createRuntimeStateStore({ now: () => NOW });
-    store.set("session-1", {
-      phase: "recovery_sync_pending",
-      requirement_id: "req-1",
-      mcn_recommendation_id: "mcnr-1",
-      lastSync: { at: NOW, lifecycle_status: "recovering", response_status: "partial", trigger: "manual" },
-      lastIngest: { at: NOW, ingest_batch_id: "ingest-1", trigger: "manual" },
-    });
-    const result = await runBeforeToolCallGuards({
-      toolName: "rank_creators",
-      params: { mcn_recommendation_id: "mcnr-1" },
-      sessionKey: "session-1",
-      toolCallId: "call-rank",
-      operatorRole: "media",
-      nowMs: NOW,
-      store,
-    });
-    assert.equal(result?.block, true);
-    assert.match(result?.blockReason ?? "", /INVALID_PHASE/);
   });
 });

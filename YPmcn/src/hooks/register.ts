@@ -150,6 +150,9 @@ function stateSummary(state: RuntimeState): string {
     ["inquiry_batch_id", state.inquiry_batch_id],
     ["run_id", state.run_id],
     ["batch_no", state.batch_no],
+    ["authoritative_state_version", state.authoritative?.state_version],
+    ["server_allowed_actions", state.authoritative?.allowed_actions.join(",")],
+    ["workflow_refresh_required", state.requiresWorkflowRefresh === true ? "true" : undefined],
   ];
   const lines = safeEntries
     .filter(([, value]) => value !== undefined)
@@ -250,4 +253,3 @@ export function registerHooks(api: HookApi, options: RegisterHooksOptions = {}):
 
   return store;
 }
-

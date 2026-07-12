@@ -16,6 +16,48 @@ export type WorkflowPhase =
 
 export type RecoveryTrigger = "manual" | "scheduled";
 
+export type WorkflowAction =
+  | "validate_requirement"
+  | "search_creators"
+  | "rank_mcns"
+  | "select_inquiry_form_fields"
+  | "create_with_distributions"
+  | "refresh_recovery"
+  | "request_recovery"
+  | "finalize_recovery"
+  | "rank_creators"
+  | "create_submission_batch"
+  | "record_client_feedback";
+
+export interface WorkflowIdentifiers {
+  requirement_id?: string;
+  candidate_pool_id?: string;
+  mcn_recommendation_id?: string;
+  selection_result_id?: string;
+  send_operation_id?: string;
+  inquiry_batch_id?: string;
+  recovery_operation_id?: string;
+  run_id?: string;
+  submission_batch_id?: string;
+}
+
+/**
+ * A validated provider projection. It may be a full `get_workflow_state`
+ * response or the action-bearing portion returned by a recovery operation.
+ * Only this structure can grant a business action.
+ */
+export interface AuthoritativeWorkflowProjection {
+  state_version: number;
+  allowed_actions: WorkflowAction[];
+  phase?: WorkflowPhase;
+  current_identifier?: string;
+  lifecycle_status?: string | null;
+  response_status?: string | null;
+  pending_gates?: string[];
+  identifiers?: WorkflowIdentifiers;
+  updated_at?: string;
+}
+
 export interface FieldDefinition {
   key: string;
   name: string;
@@ -47,6 +89,14 @@ export interface IngestEvidence {
 
 export interface RuntimeState {
   phase: WorkflowPhase;
+  /** Server-owned action authority; local fields below cannot grant writes. */
+  authoritative?: AuthoritativeWorkflowProjection;
+  /** Greatest accepted provider state version, including incomplete write results. */
+  lastServerStateVersion?: number;
+  /** A successful write omitted allowed_actions; refresh before another business write. */
+  requiresWorkflowRefresh?: boolean;
+  /** A write omitted state_version, so the refresh must advance the last known version. */
+  requiresNewerWorkflowState?: boolean;
   requirement_id?: string;
   candidate_pool_id?: string;
   mcn_recommendation_id?: string;
@@ -110,4 +160,3 @@ export interface ApplyToolResultContext {
   recoveryTrigger?: RecoveryTrigger;
   store: RuntimeStateStore;
 }
-

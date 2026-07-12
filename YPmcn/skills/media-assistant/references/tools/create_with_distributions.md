@@ -14,11 +14,12 @@
 - data.provider_project_id
 - data.distribution_batch_ref
 - data.distributions.length > 0
+- data.state_version
 
 ## 调用后必须停在哪里
 
-只进入 `distribution_sync_pending`，立即用两个语义 ID 做首次 sync；不能直接宣布等待。
+只进入 `distribution_sync_pending`，立即调用 `get_workflow_state` 写后刷新后再用两个权威语义 ID 做首次 sync；不能直接宣布等待。
 
 ## 错误与停止条件
 
-禁止 `demand_id`、`demand_version`。缺 `sessionKey`、`toolCallId`、角色、三项确认、未来时间或字段证明时阻断。写结果未知只对账，不重复创建。
+禁止 `demand_id`、`demand_version`。缺 `sessionKey`、`toolCallId`、角色、三项确认、当前服务端 `allowed_actions`、未来时间或字段证明时阻断。写结果未知只对账，不重复创建。

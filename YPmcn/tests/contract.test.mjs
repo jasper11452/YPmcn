@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import * as contractLoader from "../dist/contract/loader.js";
 import {
   validateFieldSelection,
+  validateToolOutput,
   validateToolParams,
 } from "../dist/contract/validator.js";
 
@@ -1045,5 +1046,89 @@ describe("field-selection validation", () => {
     for (const result of cases) {
       assertHasIssue(validateFieldSelection(result), "FIELD_SELECTION_INVALID");
     }
+  });
+});
+
+describe("tool output validation", () => {
+  it("accepts an exact standard success envelope and rejects malformed evidence", () => {
+    const valid = {
+      success: true,
+      data: {
+        id: "pool-1",
+        candidate_pool_written: true,
+        requirement_snapshot_id: "snapshot-1",
+        as_of_at: "2026-07-11T10:00:00+08:00",
+      },
+      error: null,
+    };
+    assert.deepEqual(validateToolOutput("search_creators", valid), []);
+
+    for (const result of [
+      { ...valid, extra: true },
+      {
+        ...valid,
+        data: { ...valid.data, requirement_snapshot_id: undefined },
+      },
+      {
+        ...valid,
+        data: { ...valid.data, as_of_at: "not-a-date" },
+      },
+      {
+        ...valid,
+        data: { ...valid.data, as_of_at: "2026-02-30T10:00:00+08:00" },
+      },
+    ]) {
+      assertHasIssue(validateToolOutput("search_creators", result), "SCHEMA_MISMATCH");
+    }
+  });
+
+  it("validates per-tool failure codes and the top-level field-selection exception", () => {
+    const failure = {
+      success: false,
+      data: null,
+      error: { code: "STATE_CONFLICT", message: "state changed", retryable: false },
+    };
+    assertHasIssue(validateToolOutput("search_creators", failure), "SCHEMA_MISMATCH");
+
+    assert.deepEqual(
+      validateToolOutput("select_inquiry_form_fields", validFieldSelection()),
+      [],
+    );
+    assertHasIssue(
+      validateToolOutput("select_inquiry_form_fields", {
+        ...validFieldSelection(),
+        selected_count: 1,
+      }),
+      "FIELD_SELECTION_INVALID",
+    );
+  });
+
+  it("validates the complete server workflow projection and its closed action set", () => {
+    const valid = {
+      success: true,
+      data: {
+        phase: "recovered",
+        current_identifier: "mcnr-1",
+        lifecycle_status: "recovered",
+        response_status: "completed",
+        state_version: 3,
+        allowed_actions: ["refresh_recovery", "rank_creators"],
+        pending_gates: [],
+        identifiers: { mcn_recommendation_id: "mcnr-1", run_id: "run-1" },
+        updated_at: "2026-07-11T10:00:00+08:00",
+      },
+      error: null,
+    };
+    assert.deepEqual(validateToolOutput("get_workflow_state", valid), []);
+    assertHasIssue(
+      validateToolOutput("get_workflow_state", {
+        ...valid,
+        data: {
+          ...valid.data,
+          allowed_actions: ["rank_creators", "invented_action"],
+        },
+      }),
+      "SCHEMA_MISMATCH",
+    );
   });
 });

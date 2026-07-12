@@ -5,6 +5,8 @@ import type {
   FieldDefinition,
   GuardContext,
   RuntimeState,
+  WorkflowAction,
+  WorkflowIdentifiers,
 } from "./types.js";
 
 const TARGET_TOOLS = new Set([
@@ -25,8 +27,8 @@ const TARGET_TOOLS = new Set([
   "get_workflow_state",
 ]);
 
+const HOST_PREFIX = "mcp__ypmcn__";
 const READ_ONLY_TOOLS = new Set([
-  "select_inquiry_form_fields",
   "get_recommendation_run_detail",
   "get_creator_detail",
   "get_workflow_state",
@@ -37,6 +39,34 @@ const PROVIDER_WRITE_PATTERN =
   /(?:create[-_]with[-_]distributions|\/api\/projects\/create-with-distributions)(?:\b|\/)/i;
 const ISO_WITH_TIMEZONE =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+const ACTIONS_BY_TOOL: Readonly<Record<string, readonly WorkflowAction[]>> = {
+  validate_requirement: ["validate_requirement"],
+  search_creators: ["search_creators"],
+  rank_mcns: ["rank_mcns"],
+  select_inquiry_form_fields: ["select_inquiry_form_fields"],
+  create_with_distributions: ["create_with_distributions"],
+  sync_mcn_inquiry_status: ["refresh_recovery", "finalize_recovery"],
+  ingest_mcn_submissions: ["request_recovery"],
+  rank_creators: ["rank_creators"],
+  create_submission_batch: ["create_submission_batch"],
+  record_client_feedback: ["record_client_feedback"],
+};
+
+const IDENTIFIER_BY_TOOL: Readonly<
+  Partial<Record<string, Array<keyof WorkflowIdentifiers>>>
+> = {
+  search_creators: ["requirement_id"],
+  rank_mcns: ["candidate_pool_id"],
+  select_inquiry_form_fields: ["mcn_recommendation_id"],
+  create_with_distributions: ["mcn_recommendation_id"],
+  sync_mcn_inquiry_status: ["requirement_id", "mcn_recommendation_id"],
+  ingest_mcn_submissions: ["requirement_id", "mcn_recommendation_id"],
+  manual_source_creators: ["requirement_id"],
+  rank_creators: ["mcn_recommendation_id"],
+  create_submission_batch: ["run_id"],
+  record_client_feedback: ["run_id"],
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -87,24 +117,6 @@ function shellText(params: Record<string, unknown>): string {
     .join("\n");
 }
 
-function phaseRequired(state: RuntimeState | undefined, expected: RuntimeState["phase"]): BeforeToolCallResult | undefined {
-  if (state?.phase === expected) return undefined;
-  return blocked(
-    "INVALID_PHASE",
-    `Tool requires phase ${expected}; current phase is ${state?.phase ?? "missing"}.`,
-  );
-}
-
-function sameIdentifier(
-  params: Record<string, unknown>,
-  state: RuntimeState,
-  key: "requirement_id" | "candidate_pool_id" | "mcn_recommendation_id" | "run_id",
-): BeforeToolCallResult | undefined {
-  const expected = state[key];
-  if (nonemptyString(expected) && params[key] === expected) return undefined;
-  return blocked("STATE_CONFLICT", `${key} does not match the current-session projection.`);
-}
-
 function validateSendTimestamps(
   params: Record<string, unknown>,
   nowMs: number,
@@ -131,6 +143,86 @@ function validateSendTimestamps(
   return undefined;
 }
 
+function authoritativeState(
+  state: RuntimeState | undefined,
+): RuntimeState["authoritative"] | undefined {
+  if (!state || state.requiresWorkflowRefresh || !state.authoritative) return undefined;
+  return state.authoritative;
+}
+
+function requireAuthoritativeIdentifiers(
+  toolName: string,
+  params: Record<string, unknown>,
+  state: RuntimeState | undefined,
+): BeforeToolCallResult | undefined {
+  const identifiers = authoritativeState(state)?.identifiers;
+  for (const key of IDENTIFIER_BY_TOOL[toolName] ?? []) {
+    const expected = identifiers?.[key];
+    if (!nonemptyString(expected)) {
+      return blocked(
+        "STATE_COMBINATION_INVALID",
+        `Server projection is missing the authoritative ${key}.`,
+      );
+    }
+    if (params[key] !== expected) {
+      return blocked("STATE_CONFLICT", `${key} does not match the server workflow projection.`);
+    }
+  }
+  return undefined;
+}
+
+function authorizeBusinessAction(
+  toolName: string,
+  state: RuntimeState | undefined,
+): BeforeToolCallResult | undefined {
+  const authority = authoritativeState(state);
+  if (!authority) {
+    return blocked(
+      "STATE_COMBINATION_INVALID",
+      "A current get_workflow_state projection with state_version and allowed_actions is required.",
+    );
+  }
+  const actions = ACTIONS_BY_TOOL[toolName];
+  if (!actions) {
+    return blocked(
+      "STATE_COMBINATION_INVALID",
+      `Tool ${toolName} has no server allowed_actions authorization in the approved workflow.`,
+    );
+  }
+  const active = actions.filter((action) => authority.allowed_actions.includes(action));
+  if (active.length === 0) {
+    return blocked(
+      "STATE_COMBINATION_INVALID",
+      `Server allowed_actions does not authorize ${toolName}.`,
+    );
+  }
+  if (toolName === "sync_mcn_inquiry_status") {
+    if (active.length > 1) {
+      return blocked("STATE_COMBINATION_INVALID", "Recovery operation is ambiguous in server allowed_actions.");
+    }
+    if (
+      active[0] === "finalize_recovery" &&
+      !nonemptyString(authority.identifiers?.recovery_operation_id)
+    ) {
+      return blocked(
+        "STATE_COMBINATION_INVALID",
+        "Final recovery sync requires a server recovery_operation_id.",
+      );
+    }
+  }
+  if (
+    toolName === "rank_creators" &&
+    authority.lifecycle_status !== "recovered" &&
+    authority.lifecycle_status !== "closed"
+  ) {
+    return blocked(
+      "STATE_COMBINATION_INVALID",
+      "Ranking requires a server lifecycle_status of recovered or closed.",
+    );
+  }
+  return undefined;
+}
+
 function validateDistributionGuard(
   context: GuardContext,
   state: RuntimeState | undefined,
@@ -151,11 +243,14 @@ function validateDistributionGuard(
       "Supply, target-MCN, and outbound-message confirmations are all required.",
     );
   }
-  const phaseError = phaseRequired(state, "field_selection_ready");
-  if (phaseError || !state) return phaseError;
-  const idError = sameIdentifier(context.params, state, "mcn_recommendation_id");
-  if (idError) return idError;
-  if (!state.fieldSelection) {
+  const authority = authoritativeState(state);
+  if (!authority || !nonemptyString(authority.identifiers?.selection_result_id)) {
+    return blocked(
+      "STATE_COMBINATION_INVALID",
+      "A current server selection_result_id is required before a distribution write.",
+    );
+  }
+  if (!state?.fieldSelection) {
     return blocked("FIELD_SELECTION_INVALID", "Current-session field-selection proof is missing.");
   }
   const selectionIssues = validateFieldSelection({
@@ -174,171 +269,18 @@ function validateDistributionGuard(
   return validateSendTimestamps(context.params, context.nowMs ?? Date.now());
 }
 
-function manualRecoveryIsCurrent(state: RuntimeState, nowMs: number): boolean {
-  return (
-    typeof state.manualRecoveryConfirmedAt === "number" &&
-    state.manualRecoveryConfirmedAt <= nowMs
-  );
+function isDisallowedBusinessAlias(toolName: string): boolean {
+  if (TARGET_TOOLS.has(toolName)) return true;
+  if (!toolName.startsWith("mcp__")) return false;
+  const candidate = toolName.split("__").at(-1) ?? "";
+  return TARGET_TOOLS.has(candidate);
 }
 
-function validateSyncGuard(
-  context: GuardContext,
-  state: RuntimeState | undefined,
-): BeforeToolCallResult | undefined {
-  // A state projection can be lost between send and first reconciliation. The
-  // authoritative sync is the only safe way to reconstruct it from semantic IDs.
-  if (!state) return undefined;
-
-  const requirementError = sameIdentifier(context.params, state, "requirement_id");
-  if (requirementError) return requirementError;
-  const mcnError = sameIdentifier(context.params, state, "mcn_recommendation_id");
-  if (mcnError) return mcnError;
-
-  if (state.phase === "distribution_sync_pending") return undefined;
-  if (state.phase === "recovered") {
-    return blocked(
-      "RECOVERY_ALREADY_TERMINAL",
-      "Authoritative state is terminal; another recovery write is not allowed.",
-    );
-  }
-  if (state.phase === "waiting_return") {
-    if (
-      context.recoveryTrigger === "manual" &&
-      manualRecoveryIsCurrent(state, context.nowMs ?? Date.now())
-    ) {
-      return undefined;
-    }
-    if (context.recoveryTrigger === "scheduled" && context.trigger === "cron") {
-      return undefined;
-    }
-    return blocked(
-      "RECOVERY_NOT_CONFIRMED",
-      "Waiting recovery requires explicit current-session manual intent or cron evidence.",
-    );
-  }
-  if (state.phase === "recovery_sync_pending") {
-    if (!state.lastIngest) {
-      return blocked("INVALID_PHASE", "Final sync requires successful ingest evidence.");
-    }
-    if (context.recoveryTrigger !== state.lastIngest.trigger) {
-      return blocked("STATE_CONFLICT", "Final sync trigger does not match the ingest trigger.");
-    }
-    if (state.lastIngest.trigger === "scheduled" && context.trigger !== "cron") {
-      return blocked("RECOVERY_NOT_CONFIRMED", "Scheduled final sync requires cron evidence.");
-    }
-    return undefined;
-  }
-  return blocked("INVALID_PHASE", `Sync is not allowed from phase ${state.phase}.`);
-}
-
-function validateIngestGuard(
-  context: GuardContext,
-  state: RuntimeState | undefined,
-): BeforeToolCallResult | undefined {
-  const phaseError = phaseRequired(state, "recovering");
-  if (phaseError || !state) return phaseError;
-  const requirementError = sameIdentifier(context.params, state, "requirement_id");
-  if (requirementError) return requirementError;
-  const mcnError = sameIdentifier(context.params, state, "mcn_recommendation_id");
-  if (mcnError) return mcnError;
-  if (!state.lastSync) {
-    return blocked("RECOVERY_NOT_CONFIRMED", "Ingest requires current-session sync evidence.");
-  }
-
-  const requestedTrigger = context.params.trigger;
-  if (requestedTrigger === "manual") {
-    if (
-      context.recoveryTrigger !== "manual" ||
-      state.lastSync.trigger !== "manual" ||
-      !manualRecoveryIsCurrent(state, context.nowMs ?? Date.now()) ||
-      state.lastSync.at < (state.manualRecoveryConfirmedAt ?? Number.POSITIVE_INFINITY)
-    ) {
-      return blocked(
-        "RECOVERY_NOT_CONFIRMED",
-        "Manual ingest requires confirmation followed by a matching successful sync.",
-      );
-    }
-    return undefined;
-  }
-  if (
-    requestedTrigger === "scheduled" &&
-    context.recoveryTrigger !== "manual" &&
-    context.trigger === "cron" &&
-    state.lastSync.trigger === "scheduled"
-  ) {
-    return undefined;
-  }
-  return blocked(
-    "RECOVERY_NOT_CONFIRMED",
-    "Scheduled ingest requires matching current-session sync and ctx.trigger=cron.",
-  );
-}
-
-function validatePhaseAndIdentity(
-  toolName: string,
-  context: GuardContext,
-  state: RuntimeState | undefined,
-): BeforeToolCallResult | undefined {
-  switch (toolName) {
-    case "validate_requirement":
-      if (!state || state.phase === "requirement_draft" || state.phase === "feedback_routing") {
-        return undefined;
-      }
-      return blocked("INVALID_PHASE", `Requirement validation is not allowed from ${state.phase}.`);
-    case "search_creators": {
-      const phaseError = phaseRequired(state, "requirement_ready");
-      return phaseError || (state ? sameIdentifier(context.params, state, "requirement_id") : phaseError);
-    }
-    case "rank_mcns": {
-      const phaseError = phaseRequired(state, "candidate_pool_ready");
-      return phaseError || (state ? sameIdentifier(context.params, state, "candidate_pool_id") : phaseError);
-    }
-    case "select_inquiry_form_fields": {
-      const phaseError = phaseRequired(state, "mcn_planning");
-      return phaseError || (state ? sameIdentifier(context.params, state, "mcn_recommendation_id") : phaseError);
-    }
-    case "create_with_distributions":
-      return validateDistributionGuard(context, state);
-    case "sync_mcn_inquiry_status":
-      return validateSyncGuard(context, state);
-    case "ingest_mcn_submissions":
-      return validateIngestGuard(context, state);
-    case "manual_source_creators": {
-      const phaseError = phaseRequired(state, "recovered");
-      return phaseError || (state ? sameIdentifier(context.params, state, "requirement_id") : phaseError);
-    }
-    case "rank_creators": {
-      const phaseError = phaseRequired(state, "recovered");
-      if (phaseError || !state) return phaseError;
-      const idError = sameIdentifier(context.params, state, "mcn_recommendation_id");
-      if (idError) return idError;
-      if (state.lastSync?.lifecycle_status !== "recovered") {
-        return blocked("INVALID_PHASE", "Ranking requires the latest authoritative sync to be recovered.");
-      }
-      return undefined;
-    }
-    case "create_submission_batch": {
-      const phaseError = phaseRequired(state, "recommendation_ready");
-      return phaseError || (state ? sameIdentifier(context.params, state, "run_id") : phaseError);
-    }
-    case "record_client_feedback": {
-      const phaseError = phaseRequired(state, "submission_batch_ready");
-      return phaseError || (state ? sameIdentifier(context.params, state, "run_id") : phaseError);
-    }
-    default:
-      return undefined;
-  }
-}
-
+/** Return a contract tool only for its exact Host-qualified business identity. */
 export function normalizeYpmcnToolName(toolName: string): string | null {
-  if (TARGET_TOOLS.has(toolName)) return toolName;
-  if (toolName.startsWith("mcp__")) {
-    const parts = toolName.split("__");
-    const candidate = parts.at(-1) ?? "";
-    return candidate.length > 0 ? candidate : null;
-  }
-  if (toolName === "create-with-distributions") return toolName;
-  return null;
+  if (!toolName.startsWith(HOST_PREFIX)) return null;
+  const candidate = toolName.slice(HOST_PREFIX.length);
+  return TARGET_TOOLS.has(candidate) ? candidate : null;
 }
 
 export async function runBeforeToolCallGuards(
@@ -352,25 +294,38 @@ export async function runBeforeToolCallGuards(
   }
 
   const toolName = normalizeYpmcnToolName(context.toolName);
-  if (!toolName) return undefined;
-  if (!TARGET_TOOLS.has(toolName)) {
-    return blocked("INTEGRATION_REQUIRED", `Tool ${toolName} is not executable in the mvp-v2 profile.`);
+  if (!toolName) {
+    return isDisallowedBusinessAlias(context.toolName)
+      ? blocked(
+        "INTEGRATION_REQUIRED",
+        "Business Hook events must use mcp__ypmcn__<contract-tool> exactly.",
+      )
+      : undefined;
   }
+
   if (!nonemptyString(context.sessionKey)) {
     return blocked("INVALID_INPUT", "A current sessionKey is required for state-safe execution.");
   }
   if (toolName === "create_with_distributions" && context.params.preview_only !== false) {
     return blocked("SCHEMA_MISMATCH", "mvp-v2 forbids preview sends; preview_only must be false.");
   }
-
   const contractError = blockedByIssues(validateToolParams(toolName, context.params));
   if (contractError) return contractError;
 
+  if (READ_ONLY_TOOLS.has(toolName)) return undefined;
   const state = context.store.get(context.sessionKey);
-  const phaseError = validatePhaseAndIdentity(toolName, context, state);
-  if (phaseError) return phaseError;
-
-  if (!READ_ONLY_TOOLS.has(toolName) && !nonemptyString(context.toolCallId)) {
+  const isInitialValidationBootstrap = toolName === "validate_requirement" && state === undefined;
+  if (!isInitialValidationBootstrap) {
+    const authorizationError = authorizeBusinessAction(toolName, state);
+    if (authorizationError) return authorizationError;
+    const identifierError = requireAuthoritativeIdentifiers(toolName, context.params, state);
+    if (identifierError) return identifierError;
+    if (toolName === "create_with_distributions") {
+      const distributionError = validateDistributionGuard(context, state);
+      if (distributionError) return distributionError;
+    }
+  }
+  if (!nonemptyString(context.toolCallId)) {
     return blocked("INVALID_INPUT", "A business write requires toolCallId evidence.");
   }
   return undefined;

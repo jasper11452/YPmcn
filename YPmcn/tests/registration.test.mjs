@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { registerHooks } from "../dist/hooks/register.js";
 import { createRuntimeStateStore } from "../dist/hooks/runtime-state.js";
+import plugin from "../dist/index.js";
 
 const NOW = Date.parse("2026-07-11T10:00:00+08:00");
 
@@ -13,6 +14,21 @@ function fakeApi() {
     on(name, handler) {
       handlers.set(name, handler);
     },
+  };
+}
+
+function validationResult() {
+  return {
+    success: true,
+    data: {
+      id: "req-1",
+      status: "ready",
+      requirement_head_id: "req-head-1",
+      requirement_ids: ["req-1"],
+      dictionary_version: "2026-07-12.1",
+      dictionary_hash: "0".repeat(64),
+    },
+    error: null,
   };
 }
 
@@ -29,6 +45,31 @@ describe("OpenClaw v2 hook registration", () => {
       "session_end",
       "tool_result_persist",
     ]);
+  });
+
+  it("permits fresh validation through the public entry without authorizing its next write", async () => {
+    const api = fakeApi();
+    plugin.register(api);
+    const context = { sessionKey: "bootstrap-session", toolCallId: "call-bootstrap" };
+
+    const bootstrap = await api.handlers.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { raw_messages_json: "[]" },
+    }, context);
+    assert.equal(bootstrap, undefined);
+
+    await api.handlers.get("after_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { raw_messages_json: "[]" },
+      result: validationResult(),
+    }, context);
+
+    const nextWrite = await api.handlers.get("before_tool_call")({
+      toolName: "mcp__ypmcn__search_creators",
+      params: { requirement_id: "req-1" },
+    }, { sessionKey: "bootstrap-session", toolCallId: "call-search" });
+    assert.equal(nextWrite?.block, true);
+    assert.match(nextWrite?.blockReason ?? "", /STATE_COMBINATION_INVALID/);
   });
 
   it("keeps waiting state for ordinary messages and records only explicit recovery intent", async () => {

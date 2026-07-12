@@ -76,6 +76,9 @@ class SkillPackageContractTest(unittest.TestCase):
         for required in (
             "mvp-v2",
             "integration_required",
+            "get_workflow_state",
+            "state_version",
+            "allowed_actions",
             "select_inquiry_form_fields",
             "sync_mcn_inquiry_status",
             "字段选择是发送前最后确认点",
@@ -154,6 +157,9 @@ class SkillPackageContractTest(unittest.TestCase):
             "messageConfirmed",
             "普通消息不解除等待",
             "不得把 reference MCP 的 simulated=true 当作生产成功",
+            "mcp__ypmcn__",
+            "写后刷新",
+            "fail-closed",
         ):
             self.assertIn(required, joined)
         for pattern in (

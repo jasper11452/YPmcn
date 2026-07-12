@@ -24,11 +24,11 @@ validate_requirement
 
 插件注册：`before_tool_call`、`after_tool_call`、`tool_result_persist`、`message_received`、`agent_turn_prepare`、`session_end`。
 
-- 会话投影受 TTL 约束，可随进程退出丢失，不代替数据库事实。
+- 会话投影受 TTL 约束，可随进程退出丢失，不代替数据库事实；除全新会话首次 `mcp__ypmcn__validate_requirement`（仅送达服务端、不产生本地授权）外，业务写只由 `get_workflow_state` 或已验证 recovery 输出中的服务端 `state_version + allowed_actions` 授权。
 - provider 发送缺 `sessionKey`、`toolCallId`、角色、三项确认或当前字段选择时一律阻断。
 - 字段选择是发送前最后确认点，v2 只允许 `preview_only=false`。
 - shell、PowerShell、curl 直连 provider 写接口会被阻断。
-- 工具结果原样持久化；Hook 不记录客户 payload。
+- 工具结果原样持久化；Hook 不记录客户 payload；写结果没有 `allowed_actions` 时必须先刷新权威 workflow state。
 
 ## Provider 状态
 
