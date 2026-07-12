@@ -1,0 +1,50 @@
+task_id: CHG-2026-010-REF-MCP
+change_id: CHG-2026-010
+change_type: implementation
+change_status: SPEC_APPROVED
+run_status: READY
+goal: 让离线 Reference MCP 的 15 个工具、权威 workflow state 与恢复序列符合已批准契约
+approved_spec_version: mvp-v2 / schemaVersion 1
+change_proposal: changes/CHG-2026-010-reference-mcp-runtime.md
+impact_analysis: changes/CHG-2026-010-reference-mcp-runtime-impact.md
+risk_level: high
+execution_profile: executor-sol-max-fast
+profile_reason: 单文件承载多工具状态机、幂等、canonical normalization 与 Schema 精确输出，架构和诊断占比高
+depends_on:
+  - CHG-2026-008-NAMESPACE
+conflicts_with: []
+allowed_paths:
+  - reference-mcp/state.mjs
+  - reference-mcp/README.md
+  - tests/reference_mcp.test.mjs
+forbidden_paths:
+  - spec/**
+  - changes/**
+  - workflows/**
+  - YPmcn/**
+  - vector-mcp/**
+  - packages/**
+  - scripts/**
+  - .github/**
+  - .env*
+acceptance:
+  - 15 个工具的成功/失败输出逐项符合 mcp.json，业务 data 不含 simulated
+  - 状态由 closed-world combinations 派生，包含单调 state_version 与 allowed_actions，未知组合 fail closed
+  - 恢复严格 refresh/request/finalize，manual/scheduled replay 只产生一个 recovery operation
+  - canonical raw、字典、金额/返点范围、deadline 顺序与 constraint grammar 按正式错误码 fail closed
+  - send 绑定当前 selection 并返回 selection/send/state 身份
+  - 冻结模拟 artifact 不被后续数据改写，不伪造 offer promotion 或生产部署证据
+verification:
+  - node --test tests/reference_mcp.test.mjs
+  - node --test tests/reference_mcp.test.mjs tests/provider_contract.test.mjs
+  - npm run verify:spec
+  - npm run verify:docs
+  - npm run verify
+  - node scripts/scan-secrets.mjs --tracked
+  - git diff --check
+rollback: revert Reference MCP 实现提交；模拟器只使用进程内状态
+attempt: 1
+branch: codex/chg-2026-010-ref-mcp
+worktree: /Users/jasper/Documents/YPmcn-worktrees/chg-2026-010-ref-mcp
+base_sha: null
+next_action: dispatch
