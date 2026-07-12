@@ -1,0 +1,64 @@
+{
+  "task_id": "CHG-2026-010-REF-MCP",
+  "base_sha": "6c2b1813c475c9444647bb22161409848394f43d",
+  "head_sha": "29f05abdb4b7e4140295b8aa33811f56cb06cac8",
+  "verifier": {
+    "tool": "OpenCode",
+    "model": "yuepu/Deepseek-V4-Pro",
+    "mode": "read-only"
+  },
+  "status": "PASS",
+  "commands": [
+    {
+      "command": "node --test tests/reference_mcp.test.mjs",
+      "result": "PASS",
+      "evidence": "7 suites, 7 pass, 0 fail: all 15 tool schemas, canonical replay, recovery idempotency, stdio metadata verified."
+    },
+    {
+      "command": "node --test tests/reference_mcp.test.mjs tests/provider_contract.test.mjs",
+      "result": "PASS",
+      "evidence": "11 combined tests (7 reference + 4 provider), all pass."
+    },
+    {
+      "command": "npm run verify:spec",
+      "result": "PASS",
+      "evidence": "11 spec governance tests passed including root manifest, namespace locking, hook alignment, algorithm boundary, JSON Schema resolution, and finding registry."
+    },
+    {
+      "command": "npm run verify:docs",
+      "result": "PASS",
+      "evidence": "[human-docs] synchronized — no drift between docs and Spec/Change Proposals."
+    },
+    {
+      "command": "npm run verify",
+      "result": "PASS",
+      "evidence": "Full gate: 118 plugin tests (14 suites) + 14 vector-mcp tests + 5 human-docs tests + 13 agent-flow tests + 16 package tests + 8 release metadata tests. Zero failures across all components."
+    },
+    {
+      "command": "node scripts/scan-secrets.mjs --tracked",
+      "result": "PASS",
+      "evidence": "Returned empty array [] — no secrets found in tracked files."
+    },
+    {
+      "command": "git diff --check 6c2b1813c475c9444647bb22161409848394f43d..29f05abdb4b7e4140295b8aa33811f56cb06cac8",
+      "result": "PASS",
+      "evidence": "No whitespace errors in frozen diff range."
+    }
+  ],
+  "findings": [],
+  "evidence": [
+    "Scope: exactly 3 files changed (reference-mcp/README.md, reference-mcp/state.mjs, tests/reference_mcp.test.mjs), working tree clean.",
+    "15 tools: test at reference_mcp.test.mjs:347-364 enumerates all 15 tools covering requiredTools + optionalTools from target profile; schema-exact success for each verified.",
+    "No business data simulated: _meta.simulated=true only in response envelope (server.mjs:43), never in business payload fields. Test at line 291 confirms 'without business simulation markers'.",
+    "Closed-world state: state_version monotonically increments (5→6→7→8) with derived allowed_actions (test lines 477-528). Unknown phases fail closed with INVALID_PHASE error (line 524).",
+    "Recovery: enforces strict refresh→request→finalize order. refresh_recovery idempotent (lines 517-518). request_recovery triggers ingest→recovering state. Each trigger produces exactly one recovery operation (state.mjs:893,916).",
+    "Send binding: distribution response returns selection_result_id matching the state's selection identity, plus send_operation_id (test lines 497-508).",
+    "Frozen artifacts: mutation of caller objects not reflected in repeated reads (line 603-626). No offer promotion evidence — get_creator_detail with include_offers:true returns no offers key (line 632-635). RAW_MESSAGES content not leaked into snapshot (line 636).",
+    "Network isolation: test mock rejects all fetch calls (line 298), networkCalls assertion is 0 (line 369).",
+    "Forbidden paths: no edits to dist/, packages/.staging/, scripts/, or any non-task files. diff --stat confirms only 3 owned files."
+  ],
+  "unexpected_writes": [],
+  "known_risks": [
+    "Simulator remains in-memory; cannot prove production database CAS, provider correlation, cron delivery, late-data constraints, or offer promotion deployment."
+  ]
+}
