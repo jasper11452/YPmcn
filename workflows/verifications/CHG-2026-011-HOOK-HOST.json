@@ -1,0 +1,54 @@
+{
+  "task_id": "CHG-2026-011-HOOK-HOST",
+  "base_sha": "e61635dc4003ee2d25ae91059daac850a2f699bb",
+  "head_sha": "0026a1c5c040d34639adc33e6f024e798f1af138",
+  "verifier": {
+    "tool": "OpenCode",
+    "model": "yuepu/Deepseek-V4-Pro",
+    "mode": "read-only"
+  },
+  "status": "PASS",
+  "commands": [
+    {
+      "command": "npm --prefix YPmcn test",
+      "result": "PASS",
+      "evidence": "122/122 tests passed across 14 suites in the task worktree."
+    },
+    {
+      "command": "npm run verify:spec",
+      "result": "PASS",
+      "evidence": "11/11 Spec governance tests passed."
+    },
+    {
+      "command": "npm run verify:docs",
+      "result": "PASS",
+      "evidence": "Human documentation synchronization check passed."
+    },
+    {
+      "command": "npm run verify",
+      "result": "PASS",
+      "evidence": "Full repository gate passed in the normal Orchestrator sandbox."
+    },
+    {
+      "command": "node scripts/scan-secrets.mjs --tracked",
+      "result": "PASS",
+      "evidence": "Returned an empty findings array."
+    },
+    {
+      "command": "git diff --check e61635dc4003ee2d25ae91059daac850a2f699bb..0026a1c5c040d34639adc33e6f024e798f1af138",
+      "result": "PASS",
+      "evidence": "No whitespace errors in frozen diff range."
+    }
+  ],
+  "findings": [],
+  "evidence": [
+    "Scope is exactly 12 allowed files under YPmcn hook/docs/tests; no spec/, reference-mcp/, vector-mcp/, packages/ or scripts/ changes.",
+    "Native Hook tests cover host session action registration, ypmcn__ tool naming, content-only MCP result unwrapping, fresh bootstrap, stale field-selection rejection, and real host integration paths.",
+    "Root verify passed after integration-oriented host adapter changes; working tree remained clean before status capture.",
+    "OpenCode machine-output step failed for verifier formatting rather than code behavior; local frozen-gate evidence remained fully PASS and no independent correctness findings survived final recheck."
+  ],
+  "unexpected_writes": [],
+  "known_risks": [
+    "Hook still depends on the current OpenClaw host event surface; production provider capability negotiation remains enforced by the separate provider gate."
+  ]
+}
