@@ -138,13 +138,15 @@ function validateDistributionGuard(
   if (!nonemptyString(context.toolCallId)) {
     return blocked("INVALID_INPUT", "A provider write requires toolCallId evidence.");
   }
-  if (!nonemptyString(context.operatorRole) || !SEND_ROLES.has(context.operatorRole)) {
+  const confirmation = state?.sendConfirmation;
+  if (!confirmation || !SEND_ROLES.has(confirmation.operatorRole)) {
     return blocked("CONFIRMATION_REQUIRED", "A known media/procurement operator role is required.");
   }
   if (
-    context.gateState?.supplyConfirmed !== true ||
-    context.gateState.mcnConfirmed !== true ||
-    context.gateState.messageConfirmed !== true
+    confirmation.mcn_recommendation_id !== context.params.mcn_recommendation_id ||
+    confirmation.supplyConfirmed !== true ||
+    confirmation.mcnConfirmed !== true ||
+    confirmation.messageConfirmed !== true
   ) {
     return blocked(
       "CONFIRMATION_REQUIRED",
@@ -331,13 +333,12 @@ function validatePhaseAndIdentity(
 }
 
 export function normalizeYpmcnToolName(toolName: string): string | null {
-  if (TARGET_TOOLS.has(toolName)) return toolName;
-  if (toolName.startsWith("mcp__")) {
-    const parts = toolName.split("__");
-    const candidate = parts.at(-1) ?? "";
-    return candidate.length > 0 ? candidate : null;
+  for (const prefix of ["ypmcn__", "mcp__ypmcn__"]) {
+    if (toolName.startsWith(prefix)) {
+      const candidate = toolName.slice(prefix.length);
+      return candidate.length > 0 ? candidate : null;
+    }
   }
-  if (toolName === "create-with-distributions") return toolName;
   return null;
 }
 

@@ -30,7 +30,7 @@ function selectionResult() {
 function apply(store, toolName, params, result, overrides = {}) {
   return applyToolResult({
     sessionKey: "session-1",
-    toolName,
+    toolName: `ypmcn__${toolName}`,
     params,
     result,
     nowMs: NOW,
@@ -40,14 +40,38 @@ function apply(store, toolName, params, result, overrides = {}) {
 }
 
 function progressToDistribution(store) {
-  apply(store, "validate_requirement", {}, standardResult({ id: "req-1", status: "ready" }));
-  apply(store, "search_creators", { requirement_id: "req-1" }, standardResult({ id: "pool-1", candidate_pool_written: true }));
-  apply(store, "rank_mcns", { candidate_pool_id: "pool-1" }, standardResult({ id: "mcnr-1", inquiry_advice: {} }));
+  apply(store, "validate_requirement", {}, standardResult({
+    id: "req-1",
+    status: "ready",
+    requirement_head_id: "req-head-1",
+    requirement_ids: ["req-1"],
+    dictionary_version: "v1",
+    dictionary_hash: "a".repeat(64),
+  }));
+  apply(store, "search_creators", { requirement_id: "req-1" }, standardResult({
+    id: "pool-1",
+    candidate_pool_written: true,
+    requirement_snapshot_id: "snapshot-req-1",
+    as_of_at: "2026-07-11T10:00:00+08:00",
+  }));
+  apply(store, "rank_mcns", { candidate_pool_id: "pool-1" }, standardResult({
+    id: "mcnr-1",
+    inquiry_advice: {},
+    requirement_snapshot_id: "snapshot-req-1",
+  }));
   apply(store, "select_inquiry_form_fields", { mcn_recommendation_id: "mcnr-1" }, selectionResult());
   apply(store, "create_with_distributions", { mcn_recommendation_id: "mcnr-1" }, standardResult({
     provider_project_id: "provider-project-1",
     distribution_batch_ref: "distribution-1",
-    distributions: [{ provider_distribution_id: "provider-distribution-1", supplier_id: "supplier-1", status: "sent" }],
+    send_operation_id: "send-1",
+    selection_result_id: "selection-1",
+    state_version: 1,
+    distributions: [{
+      provider_distribution_id: "provider-distribution-1",
+      supplier_id: "supplier-1",
+      token: "token-1",
+      fill_link: "https://example.invalid/fill/token-1",
+    }],
   }));
 }
 
@@ -58,6 +82,10 @@ function syncResult(lifecycle_status, response_status = "pending") {
     snapshot_id: "snapshot-1",
     lifecycle_status,
     response_status,
+    state_version: 1,
+    allowed_actions: lifecycle_status === "recovered"
+      ? ["rank_creators"]
+      : ["refresh_recovery"],
   });
 }
 
@@ -96,7 +124,15 @@ describe("mvp-v2 runtime state flow", () => {
 
     apply(store, "ingest_mcn_submissions", {
       mcn_recommendation_id: "mcnr-1", requirement_id: "req-1", trigger: "manual",
-    }, standardResult({ id: "ingest-1", accepted_count: 8, rejected_count: 2, created_submission_item_count: 8 }), { recoveryTrigger: "manual" });
+    }, standardResult({
+      id: "ingest-1",
+      accepted_count: 8,
+      rejected_count: 2,
+      created_submission_item_count: 8,
+      recovery_operation_id: "recovery-1",
+      state_version: 1,
+      allowed_actions: ["finalize_recovery"],
+    }), { recoveryTrigger: "manual" });
     assert.equal(store.get("session-1")?.phase, "recovery_sync_pending");
 
     apply(store, "sync_mcn_inquiry_status", {
@@ -104,7 +140,12 @@ describe("mvp-v2 runtime state flow", () => {
     }, syncResult("recovered", "completed"), { recoveryTrigger: "manual" });
     assert.equal(store.get("session-1")?.phase, "recovered");
 
-    apply(store, "rank_creators", { mcn_recommendation_id: "mcnr-1" }, standardResult({ run_id: "run-1", ranked_count: 30 }));
+    apply(store, "rank_creators", { mcn_recommendation_id: "mcnr-1" }, standardResult({
+      run_id: "run-1",
+      ranked_count: 30,
+      requirement_snapshot_id: "snapshot-req-1",
+      state_version: 1,
+    }));
     assert.equal(store.get("session-1")?.phase, "recommendation_ready");
     assert.equal(store.get("session-1")?.run_id, "run-1");
   });
@@ -122,7 +163,15 @@ describe("mvp-v2 runtime state flow", () => {
 
     apply(store, "ingest_mcn_submissions", {
       mcn_recommendation_id: "mcnr-1", requirement_id: "req-1", trigger: "scheduled",
-    }, standardResult({ id: "ingest-1", accepted_count: 8, rejected_count: 0, created_submission_item_count: 8 }), { trigger: "cron", recoveryTrigger: "scheduled" });
+    }, standardResult({
+      id: "ingest-1",
+      accepted_count: 8,
+      rejected_count: 0,
+      created_submission_item_count: 8,
+      recovery_operation_id: "recovery-1",
+      state_version: 1,
+      allowed_actions: ["finalize_recovery"],
+    }), { trigger: "cron", recoveryTrigger: "scheduled" });
     assert.equal(store.get("session-1")?.phase, "recovery_sync_pending");
 
     apply(store, "sync_mcn_inquiry_status", {
@@ -144,6 +193,53 @@ describe("mvp-v2 runtime state flow", () => {
     }, syncResult("recovered", "completed"), { recoveryTrigger: "manual" });
     assert.equal(state?.phase, "recovered");
     assert.equal(state?.lastSync?.lifecycle_status, "recovered");
+  });
+
+  it("unwraps content-only MCP results before enforcing the output contract", () => {
+    const store = createRuntimeStateStore({ now: () => NOW });
+    store.set("session-1", { phase: "requirement_ready", requirement_id: "req-1" });
+
+    apply(store, "search_creators", { requirement_id: "req-1" }, {
+      content: [{ type: "text", text: JSON.stringify(standardResult({
+        id: "pool-incomplete",
+        candidate_pool_written: true,
+      })) }],
+      details: { mcpServer: "ypmcn", mcpTool: "search_creators" },
+    });
+    assert.equal(store.get("session-1")?.phase, "requirement_ready");
+
+    apply(store, "search_creators", { requirement_id: "req-1" }, {
+      content: [{ type: "text", text: JSON.stringify(standardResult({
+        id: "pool-1",
+        candidate_pool_written: true,
+        requirement_snapshot_id: "snapshot-req-1",
+        as_of_at: "2026-07-11T10:00:00+08:00",
+      })) }],
+      details: { mcpServer: "ypmcn", mcpTool: "search_creators" },
+    });
+    assert.equal(store.get("session-1")?.phase, "candidate_pool_ready");
+    assert.equal(store.get("session-1")?.candidate_pool_id, "pool-1");
+  });
+
+  it("does not relabel a stale field-selection result as the current selection", () => {
+    const store = createRuntimeStateStore({ now: () => NOW });
+    const current = { key: "postcount", name: "作品数", type: "BIGINT", required: true };
+    store.set("session-1", {
+      phase: "field_selection_ready",
+      mcn_recommendation_id: "mcnr-current",
+      fieldSelection: {
+        fields: { postcount: current },
+        items: [current],
+        selected_count: 1,
+      },
+    });
+
+    apply(store, "select_inquiry_form_fields", {
+      mcn_recommendation_id: "mcnr-stale",
+    }, selectionResult());
+
+    assert.equal(store.get("session-1")?.mcn_recommendation_id, "mcnr-current");
+    assert.equal(store.get("session-1")?.fieldSelection?.items[0].key, "postcount");
   });
 
   it("expires stale projections and deletes session state explicitly", () => {

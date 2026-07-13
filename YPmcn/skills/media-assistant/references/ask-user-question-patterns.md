@@ -9,7 +9,7 @@
 3. 外发消息：确认文案 / 修改 / 停止。
 4. 字段选择：由 `select_inquiry_form_fields` 完成最后确认。
 
-三项确认在 Hook 上分别对应 `supplyConfirmed`、`mcnConfirmed`、`messageConfirmed`。不能用一次笼统“继续”替代所有证据。
+三项确认分别对应 `supplyConfirmed`、`mcnConfirmed`、`messageConfirmed`。确认完成后，由具备 `operator.write` scope 的客户端通过 `confirm_distribution_send` session action 写入当前 `mcn_recommendation_id` 的会话证据；不能从 `before_tool_call` 虚构字段，也不能用一次笼统“继续”替代所有证据。
 
 ## 回收
 

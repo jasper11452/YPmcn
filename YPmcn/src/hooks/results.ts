@@ -1,3 +1,5 @@
+import { loadContractProfile, loadContractSchema } from "../contract/loader.js";
+import type { ContractSchema, MvpContractProfile } from "../contract/types.js";
 import { validateFieldSelection } from "../contract/validator.js";
 import { normalizeYpmcnToolName } from "./guards.js";
 import type {
@@ -8,6 +10,9 @@ import type {
   RuntimeState,
   SyncEvidence,
 } from "./types.js";
+
+const ISO_WITH_TIMEZONE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -29,6 +34,20 @@ function parseJson(value: string): unknown {
   }
 }
 
+function deepEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length && left.every((entry, index) => deepEqual(entry, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key, index) =>
+      key === rightKeys[index] && hasOwn(right, key) && deepEqual(left[key], right[key]));
+}
+
 function unwrapResult(value: unknown): unknown {
   if (!isRecord(value)) return value;
   if (hasOwn(value, "result")) return unwrapResult(value.result);
@@ -43,12 +62,131 @@ function unwrapResult(value: unknown): unknown {
   return value;
 }
 
-function standardData(result: unknown): Record<string, unknown> | undefined {
-  const unwrapped = unwrapResult(result);
-  if (!isRecord(unwrapped) || unwrapped.success !== true || !isRecord(unwrapped.data)) {
+function resolveJsonPointer(root: unknown, pointer: string): unknown {
+  let current = root;
+  for (const rawPart of pointer.split("/").filter(Boolean)) {
+    if (!isRecord(current)) return undefined;
+    const part = rawPart.replace(/~1/g, "/").replace(/~0/g, "~");
+    current = current[part];
+  }
+  return current;
+}
+
+function resolveSchemaReference(
+  reference: string,
+  profile: MvpContractProfile,
+): ContractSchema | undefined {
+  if (reference.startsWith("#/")) {
+    const resolved = resolveJsonPointer(profile, reference.slice(1));
+    return isRecord(resolved) ? resolved as ContractSchema : undefined;
+  }
+  const [schemaPath, pointer = ""] = reference.split("#", 2);
+  if (!schemaPath.startsWith("schemas/")) return undefined;
+  try {
+    const document = loadContractSchema(schemaPath.slice("schemas/".length));
+    const resolved = pointer ? resolveJsonPointer(document, pointer) : document;
+    return isRecord(resolved) ? resolved as ContractSchema : undefined;
+  } catch {
     return undefined;
   }
-  return unwrapped.data;
+}
+
+function matchesSchema(
+  schema: ContractSchema,
+  value: unknown,
+  profile: MvpContractProfile,
+): boolean {
+  if (typeof schema.$ref === "string") {
+    const resolved = resolveSchemaReference(schema.$ref, profile);
+    return resolved !== undefined && matchesSchema(resolved, value, profile);
+  }
+  if (Array.isArray(schema.oneOf)) {
+    if (schema.oneOf.filter((candidate) => matchesSchema(candidate, value, profile)).length !== 1) {
+      return false;
+    }
+  }
+  const types = schema.type === undefined ? [] : Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (types.length > 0 && !types.some((type) => {
+    switch (type) {
+      case "array": return Array.isArray(value);
+      case "boolean": return typeof value === "boolean";
+      case "integer": return typeof value === "number" && Number.isInteger(value);
+      case "null": return value === null;
+      case "number": return typeof value === "number" && Number.isFinite(value);
+      case "object": return isRecord(value);
+      case "string": return typeof value === "string";
+    }
+  })) return false;
+  if (hasOwn(schema as Record<string, unknown>, "const") && !deepEqual(value, schema.const)) return false;
+  if (schema.enum && !schema.enum.some((candidate) => deepEqual(candidate, value))) return false;
+
+  if (typeof value === "string") {
+    if (schema.minLength !== undefined && value.length < schema.minLength) return false;
+    if (schema.pattern !== undefined) {
+      try {
+        if (!new RegExp(schema.pattern).test(value)) return false;
+      } catch {
+        return false;
+      }
+    }
+    if (schema.format === "date-time" &&
+      (!ISO_WITH_TIMEZONE.test(value) || !Number.isFinite(Date.parse(value)))) return false;
+  }
+  if (typeof value === "number") {
+    if (schema.minimum !== undefined && value < schema.minimum) return false;
+    if (schema.maximum !== undefined && value > schema.maximum) return false;
+  }
+  if (Array.isArray(value)) {
+    if (schema.minItems !== undefined && value.length < schema.minItems) return false;
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) return false;
+    if (schema.uniqueItems && value.some((entry, index) =>
+      value.slice(0, index).some((candidate) => deepEqual(candidate, entry)))) return false;
+    if (schema.items && !value.every((entry) => matchesSchema(schema.items as ContractSchema, entry, profile))) {
+      return false;
+    }
+  }
+  if (isRecord(value)) {
+    if (typeof schema.minProperties === "number" && Object.keys(value).length < schema.minProperties) {
+      return false;
+    }
+    if ((schema.required ?? []).some((key) => !hasOwn(value, key))) return false;
+    const properties = schema.properties ?? {};
+    for (const [key, entry] of Object.entries(value)) {
+      const property = properties[key];
+      if (property) {
+        if (!matchesSchema(property, entry, profile)) return false;
+      } else if (schema.additionalProperties === false) {
+        return false;
+      } else if (isRecord(schema.additionalProperties) &&
+        !matchesSchema(schema.additionalProperties as ContractSchema, entry, profile)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function successfulOutput(toolName: string, result: unknown): Record<string, unknown> | undefined {
+  let profile: MvpContractProfile;
+  try {
+    profile = loadContractProfile("mvp-v2");
+  } catch {
+    return undefined;
+  }
+  const contract = profile.outputContracts[toolName];
+  if (!contract) return undefined;
+  const unwrapped = unwrapResult(result);
+  if (!isRecord(unwrapped)) return undefined;
+  if (contract.successEnvelope === "standard") {
+    const envelope = profile.outputEnvelopes.standard;
+    if (!envelope || !matchesSchema(envelope, unwrapped, profile) ||
+      unwrapped.success !== true || !isRecord(unwrapped.data) || unwrapped.error !== null ||
+      !matchesSchema(contract.successSchema, unwrapped.data, profile)) {
+      return undefined;
+    }
+    return unwrapped.data;
+  }
+  return matchesSchema(contract.successSchema, unwrapped, profile) ? unwrapped : undefined;
 }
 
 function fieldSelectionProof(result: unknown): FieldSelectionProof | undefined {
@@ -150,9 +288,18 @@ function applySuccessfulResult(
   current: RuntimeState | undefined,
   context: ApplyToolResultContext,
 ): RuntimeState | undefined {
+  const output = successfulOutput(toolName, context.result);
+  if (!output) return current;
+
   if (toolName === "select_inquiry_form_fields") {
-    const selection = fieldSelectionProof(context.result);
-    if (!selection || !current || !nonemptyString(context.params.mcn_recommendation_id)) {
+    const selection = fieldSelectionProof(output);
+    if (
+      !selection ||
+      !current ||
+      current.phase !== "mcn_planning" ||
+      !nonemptyString(context.params.mcn_recommendation_id) ||
+      current.mcn_recommendation_id !== context.params.mcn_recommendation_id
+    ) {
       return current;
     }
     return {
@@ -163,8 +310,7 @@ function applySuccessfulResult(
     };
   }
 
-  const data = standardData(context.result);
-  if (!data) return current;
+  const data = output;
 
   switch (toolName) {
     case "validate_requirement":
@@ -187,6 +333,8 @@ function applySuccessfulResult(
         ...currentOrDraft(current),
         phase: "mcn_planning",
         mcn_recommendation_id: data.id,
+        fieldSelection: undefined,
+        sendConfirmation: undefined,
       };
     case "create_with_distributions":
       if (

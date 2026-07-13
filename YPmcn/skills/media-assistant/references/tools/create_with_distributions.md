@@ -21,4 +21,4 @@
 
 ## 错误与停止条件
 
-禁止 `demand_id`、`demand_version`。缺 `sessionKey`、`toolCallId`、角色、三项确认、未来时间或字段证明时阻断。写结果未知只对账，不重复创建。
+禁止 `demand_id`、`demand_version`。缺 `sessionKey`、`toolCallId`、由 `confirm_distribution_send` session action 绑定到当前推荐的角色/三项确认、未来时间或字段证明时阻断。写结果未知只对账，不重复创建。

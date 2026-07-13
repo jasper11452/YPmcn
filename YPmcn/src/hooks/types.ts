@@ -29,6 +29,15 @@ export interface FieldSelectionProof {
   selected_count: number;
 }
 
+export interface SendConfirmationProof {
+  mcn_recommendation_id: string;
+  operatorRole: "media" | "procurement";
+  supplyConfirmed: boolean;
+  mcnConfirmed: boolean;
+  messageConfirmed: boolean;
+  confirmedAt: number;
+}
+
 export interface SyncEvidence {
   at: number;
   lifecycle_status: string;
@@ -60,6 +69,7 @@ export interface RuntimeState {
   batch_no?: number;
   manual_batch_ids?: string[];
   fieldSelection?: FieldSelectionProof;
+  sendConfirmation?: SendConfirmationProof;
   manualRecoveryConfirmedAt?: number;
   lastSync?: SyncEvidence;
   lastIngest?: IngestEvidence;
@@ -76,22 +86,14 @@ export interface RuntimeStateStore {
   clear(): void;
 }
 
-export interface GateState {
-  supplyConfirmed?: boolean;
-  mcnConfirmed?: boolean;
-  messageConfirmed?: boolean;
-}
-
 export interface GuardContext {
   toolName: string;
   params: Record<string, unknown>;
   sessionKey?: string;
   toolCallId?: string;
-  operatorRole?: string;
   nowMs?: number;
   trigger?: string;
   recoveryTrigger?: RecoveryTrigger;
-  gateState?: GateState;
   store: RuntimeStateStore;
 }
 
@@ -110,4 +112,3 @@ export interface ApplyToolResultContext {
   recoveryTrigger?: RecoveryTrigger;
   store: RuntimeStateStore;
 }
-

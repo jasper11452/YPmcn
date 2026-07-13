@@ -28,18 +28,35 @@ function readyDistributionParams(overrides = {}) {
 
 function sendContext(store, overrides = {}) {
   return {
-    toolName: "create_with_distributions",
+    toolName: "ypmcn__create_with_distributions",
     params: readyDistributionParams(),
     sessionKey: "session-1",
     toolCallId: "call-1",
-    operatorRole: "media",
     nowMs: NOW,
-    gateState: {
+    store,
+    ...overrides,
+  };
+}
+
+function readyDistributionState(overrides = {}) {
+  return {
+    phase: "field_selection_ready",
+    requirement_id: "req-1",
+    candidate_pool_id: "pool-1",
+    mcn_recommendation_id: "mcnr-1",
+    fieldSelection: {
+      fields: { friendcount: fieldDefinition() },
+      items: [fieldDefinition()],
+      selected_count: 1,
+    },
+    sendConfirmation: {
+      mcn_recommendation_id: "mcnr-1",
+      operatorRole: "media",
       supplyConfirmed: true,
       mcnConfirmed: true,
       messageConfirmed: true,
+      confirmedAt: NOW,
     },
-    store,
     ...overrides,
   };
 }
@@ -53,45 +70,47 @@ describe("mvp-v2 before-tool guards", () => {
     });
 
     const allowed = await runBeforeToolCallGuards({
-      toolName: "search_creators",
+      toolName: "ypmcn__search_creators",
       params: { requirement_id: "req-1" },
       sessionKey: "session-1",
       toolCallId: "call-search",
-      operatorRole: "media",
       nowMs: NOW,
       store,
     });
     assert.equal(allowed, undefined);
 
     const blocked = await runBeforeToolCallGuards({
-      toolName: "search_creators",
+      toolName: "ypmcn__search_creators",
       params: { id: "req-1", demand_id: "legacy", demand_version: 1 },
       sessionKey: "session-1",
       toolCallId: "call-search-legacy",
-      operatorRole: "media",
       nowMs: NOW,
       store,
     });
     assert.equal(blocked?.block, true);
     assert.match(blocked?.blockReason ?? "", /SCHEMA_MISMATCH/);
+
+    const bare = await runBeforeToolCallGuards({
+      toolName: "search_creators",
+      params: { id: "req-1", demand_id: "legacy", demand_version: 1 },
+      sessionKey: "session-1",
+      toolCallId: "call-search-bare",
+      nowMs: NOW,
+      store,
+    });
+    assert.equal(bare, undefined);
   });
 
-  it("fails a distribution closed when session, call ID, or role evidence is missing", async () => {
-    for (const missing of ["sessionKey", "toolCallId", "operatorRole"]) {
+  it("fails a distribution closed when session, call ID, or host confirmation is missing", async () => {
+    for (const missing of ["sessionKey", "toolCallId", "sendConfirmation"]) {
       const store = createRuntimeStateStore({ now: () => NOW });
-      store.set("session-1", {
-        phase: "field_selection_ready",
-        requirement_id: "req-1",
-        candidate_pool_id: "pool-1",
-        mcn_recommendation_id: "mcnr-1",
-        fieldSelection: {
-          fields: { friendcount: fieldDefinition() },
-          items: [fieldDefinition()],
-          selected_count: 1,
-        },
-      });
+      store.set("session-1", readyDistributionState());
       const ctx = sendContext(store);
-      delete ctx[missing];
+      if (missing === "sendConfirmation") {
+        store.set("session-1", readyDistributionState({ sendConfirmation: undefined }));
+      } else {
+        delete ctx[missing];
+      }
       const result = await runBeforeToolCallGuards(ctx);
       assert.equal(result?.block, true, missing);
       assert.match(result?.blockReason ?? "", /CONFIRMATION_REQUIRED|INVALID_INPUT/, missing);
@@ -100,27 +119,23 @@ describe("mvp-v2 before-tool guards", () => {
 
   it("requires every send confirmation and current field-selection proof", async () => {
     const cases = [
-      { gateState: { supplyConfirmed: false, mcnConfirmed: true, messageConfirmed: true } },
-      { gateState: { supplyConfirmed: true, mcnConfirmed: false, messageConfirmed: true } },
-      { gateState: { supplyConfirmed: true, mcnConfirmed: true, messageConfirmed: false } },
+      { confirmation: { supplyConfirmed: false } },
+      { confirmation: { mcnConfirmed: false } },
+      { confirmation: { messageConfirmed: false } },
+      { confirmation: { mcn_recommendation_id: "mcnr-stale" } },
       { columns: [fieldDefinition("postcount", "作品数")] },
     ];
 
     for (const testCase of cases) {
       const store = createRuntimeStateStore({ now: () => NOW });
-      store.set("session-1", {
-        phase: "field_selection_ready",
-        requirement_id: "req-1",
-        candidate_pool_id: "pool-1",
-        mcn_recommendation_id: "mcnr-1",
-        fieldSelection: {
-          fields: { friendcount: fieldDefinition() },
-          items: [fieldDefinition()],
-          selected_count: 1,
+      const base = readyDistributionState();
+      store.set("session-1", readyDistributionState({
+        sendConfirmation: {
+          ...base.sendConfirmation,
+          ...testCase.confirmation,
         },
-      });
+      }));
       const result = await runBeforeToolCallGuards(sendContext(store, {
-        gateState: testCase.gateState ?? sendContext(store).gateState,
         params: readyDistributionParams(testCase.columns ? { columns: testCase.columns } : {}),
       }));
       assert.equal(result?.block, true);
@@ -130,17 +145,7 @@ describe("mvp-v2 before-tool guards", () => {
 
   it("rejects preview sends and past reminder timestamps", async () => {
     const store = createRuntimeStateStore({ now: () => NOW });
-    store.set("session-1", {
-      phase: "field_selection_ready",
-      requirement_id: "req-1",
-      candidate_pool_id: "pool-1",
-      mcn_recommendation_id: "mcnr-1",
-      fieldSelection: {
-        fields: { friendcount: fieldDefinition() },
-        items: [fieldDefinition()],
-        selected_count: 1,
-      },
-    });
+    store.set("session-1", readyDistributionState());
 
     const preview = await runBeforeToolCallGuards(sendContext(store, {
       params: readyDistributionParams({ preview_only: true }),
@@ -162,7 +167,6 @@ describe("mvp-v2 before-tool guards", () => {
       params: { command: "curl https://example.invalid/api/projects/create-with-distributions" },
       sessionKey: "session-1",
       toolCallId: "call-shell",
-      operatorRole: "media",
       nowMs: NOW,
       store,
     });
@@ -180,11 +184,10 @@ describe("mvp-v2 before-tool guards", () => {
       lastSync: { at: NOW, lifecycle_status: "waiting_return", response_status: "partial", trigger: "manual" },
     });
     const manual = await runBeforeToolCallGuards({
-      toolName: "ingest_mcn_submissions",
+      toolName: "ypmcn__ingest_mcn_submissions",
       params: { mcn_recommendation_id: "mcnr-1", requirement_id: "req-1", trigger: "manual" },
       sessionKey: "session-1",
       toolCallId: "call-ingest-manual",
-      operatorRole: "media",
       recoveryTrigger: "manual",
       nowMs: NOW,
       store: manualStore,
@@ -199,11 +202,10 @@ describe("mvp-v2 before-tool guards", () => {
       lastSync: { at: NOW, lifecycle_status: "waiting_return", response_status: "partial", trigger: "scheduled" },
     });
     const scheduled = await runBeforeToolCallGuards({
-      toolName: "ingest_mcn_submissions",
+      toolName: "ypmcn__ingest_mcn_submissions",
       params: { mcn_recommendation_id: "mcnr-1", requirement_id: "req-1", trigger: "scheduled" },
       sessionKey: "session-2",
       toolCallId: "call-ingest-scheduled",
-      operatorRole: "media",
       trigger: "cron",
       nowMs: NOW,
       store: scheduledStore,
@@ -211,11 +213,10 @@ describe("mvp-v2 before-tool guards", () => {
     assert.equal(scheduled, undefined);
 
     const outsideCron = await runBeforeToolCallGuards({
-      toolName: "ingest_mcn_submissions",
+      toolName: "ypmcn__ingest_mcn_submissions",
       params: { mcn_recommendation_id: "mcnr-1", requirement_id: "req-1", trigger: "scheduled" },
       sessionKey: "session-2",
       toolCallId: "call-ingest-invalid",
-      operatorRole: "media",
       nowMs: NOW,
       store: scheduledStore,
     });
@@ -233,11 +234,10 @@ describe("mvp-v2 before-tool guards", () => {
       lastIngest: { at: NOW, ingest_batch_id: "ingest-1", trigger: "manual" },
     });
     const result = await runBeforeToolCallGuards({
-      toolName: "rank_creators",
+      toolName: "ypmcn__rank_creators",
       params: { mcn_recommendation_id: "mcnr-1" },
       sessionKey: "session-1",
       toolCallId: "call-rank",
-      operatorRole: "media",
       nowMs: NOW,
       store,
     });

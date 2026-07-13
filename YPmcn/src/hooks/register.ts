@@ -5,7 +5,6 @@ import {
   markManualRecoveryConfirmed,
 } from "./runtime-state.js";
 import type {
-  GateState,
   RecoveryTrigger,
   RuntimeState,
   RuntimeStateStore,
@@ -17,11 +16,30 @@ type HookHandler = (
 ) => unknown;
 
 export interface HookApi {
+  session?: {
+    controls?: {
+      registerSessionAction(action: SessionActionRegistration): void;
+    };
+  };
   on(
     name: string,
     handler: HookHandler,
     options?: Record<string, unknown>,
   ): void;
+}
+
+interface SessionActionContext {
+  sessionKey?: string;
+  payload?: unknown;
+  client?: { scopes: string[] };
+}
+
+interface SessionActionRegistration {
+  id: string;
+  description: string;
+  schema: Record<string, unknown>;
+  requiredScopes: string[];
+  handler(context: SessionActionContext): Record<string, unknown>;
 }
 
 export interface RegisterHooksOptions {
@@ -71,33 +89,6 @@ function paramsFromEvent(event: Record<string, unknown>): Record<string, unknown
   if (isRecord(event.arguments)) return event.arguments;
   if (isRecord(event.input)) return event.input;
   return {};
-}
-
-function booleanFrom(source: Record<string, unknown> | undefined, ...keys: string[]): boolean | undefined {
-  if (!source) return undefined;
-  for (const key of keys) {
-    if (typeof source[key] === "boolean") return source[key] as boolean;
-  }
-  return undefined;
-}
-
-function gateStateFrom(
-  event: Record<string, unknown>,
-  context?: Record<string, unknown>,
-): GateState | undefined {
-  const source = isRecord(event.gateState)
-    ? event.gateState
-    : isRecord(context?.gateState)
-      ? context.gateState
-      : isRecord(context?.confirmations)
-        ? context.confirmations
-        : undefined;
-  if (!source) return undefined;
-  return {
-    supplyConfirmed: booleanFrom(source, "supplyConfirmed", "supply_confirmed"),
-    mcnConfirmed: booleanFrom(source, "mcnConfirmed", "mcn_confirmed"),
-    messageConfirmed: booleanFrom(source, "messageConfirmed", "message_confirmed"),
-  };
 }
 
 function recoveryTriggerFrom(
@@ -161,6 +152,71 @@ export function registerHooks(api: HookApi, options: RegisterHooksOptions = {}):
   const now = options.now ?? Date.now;
   const store = options.store ?? createRuntimeStateStore({ now });
 
+  api.session?.controls?.registerSessionAction({
+    id: "confirm_distribution_send",
+    description: "Record scoped operator confirmation before a YPmcn provider distribution write.",
+    requiredScopes: ["operator.write"],
+    schema: {
+      type: "object",
+      required: [
+        "mcn_recommendation_id",
+        "operatorRole",
+        "supplyConfirmed",
+        "mcnConfirmed",
+        "messageConfirmed",
+      ],
+      properties: {
+        mcn_recommendation_id: { type: "string", minLength: 1 },
+        operatorRole: { enum: ["media", "procurement"] },
+        supplyConfirmed: { const: true },
+        mcnConfirmed: { const: true },
+        messageConfirmed: { const: true },
+      },
+      additionalProperties: false,
+    },
+    handler(context) {
+      if (!nonemptyString(context.sessionKey) || !isRecord(context.payload)) {
+        return { ok: false, code: "INVALID_INPUT", error: "Session and confirmation payload are required." };
+      }
+      const payload = context.payload;
+      if (
+        !nonemptyString(payload.mcn_recommendation_id) ||
+        (payload.operatorRole !== "media" && payload.operatorRole !== "procurement") ||
+        payload.supplyConfirmed !== true ||
+        payload.mcnConfirmed !== true ||
+        payload.messageConfirmed !== true
+      ) {
+        return { ok: false, code: "CONFIRMATION_REQUIRED", error: "All scoped send confirmations are required." };
+      }
+      const current = store.get(context.sessionKey);
+      if (
+        !current ||
+        current.mcn_recommendation_id !== payload.mcn_recommendation_id ||
+        (current.phase !== "mcn_planning" && current.phase !== "field_selection_ready")
+      ) {
+        return { ok: false, code: "STATE_CONFLICT", error: "Confirmation does not match the current MCN plan." };
+      }
+      store.set(context.sessionKey, {
+        ...current,
+        sendConfirmation: {
+          mcn_recommendation_id: payload.mcn_recommendation_id,
+          operatorRole: payload.operatorRole,
+          supplyConfirmed: true,
+          mcnConfirmed: true,
+          messageConfirmed: true,
+          confirmedAt: now(),
+        },
+      });
+      return {
+        ok: true,
+        result: {
+          recorded: true,
+          mcn_recommendation_id: payload.mcn_recommendation_id,
+        },
+      };
+    },
+  });
+
   api.on(
     "before_tool_call",
     async (event, context) => {
@@ -175,16 +231,9 @@ export function registerHooks(api: HookApi, options: RegisterHooksOptions = {}):
           context?.toolCallId,
           context?.tool_call_id,
         ),
-        operatorRole: firstString(
-          event.operatorRole,
-          event.operator_role,
-          context?.operatorRole,
-          context?.operator_role,
-        ),
         nowMs: now(),
         trigger: firstString(event.trigger, context?.trigger),
         recoveryTrigger: recoveryTriggerFrom(event, context),
-        gateState: gateStateFrom(event, context),
         store,
       });
     },
@@ -250,4 +299,3 @@ export function registerHooks(api: HookApi, options: RegisterHooksOptions = {}):
 
   return store;
 }
-

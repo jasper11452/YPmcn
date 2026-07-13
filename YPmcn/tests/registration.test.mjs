@@ -8,8 +8,17 @@ const NOW = Date.parse("2026-07-11T10:00:00+08:00");
 
 function fakeApi() {
   const handlers = new Map();
+  const actions = new Map();
   return {
     handlers,
+    actions,
+    session: {
+      controls: {
+        registerSessionAction(action) {
+          actions.set(action.id, action);
+        },
+      },
+    },
     on(name, handler) {
       handlers.set(name, handler);
     },
@@ -29,6 +38,71 @@ describe("OpenClaw v2 hook registration", () => {
       "session_end",
       "tool_result_persist",
     ]);
+    assert.deepEqual([...api.actions.keys()], ["confirm_distribution_send"]);
+  });
+
+  it("records send confirmation only through the scoped host session action", async () => {
+    const api = fakeApi();
+    const store = createRuntimeStateStore({ now: () => NOW });
+    store.set("session-1", {
+      phase: "field_selection_ready",
+      mcn_recommendation_id: "mcnr-1",
+    });
+    registerHooks(api, { store, now: () => NOW });
+
+    const action = api.actions.get("confirm_distribution_send");
+    assert.deepEqual(action.requiredScopes, ["operator.write"]);
+    const result = await action.handler({
+      sessionKey: "session-1",
+      client: { scopes: ["operator.write"] },
+      payload: {
+        mcn_recommendation_id: "mcnr-1",
+        operatorRole: "media",
+        supplyConfirmed: true,
+        mcnConfirmed: true,
+        messageConfirmed: true,
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(store.get("session-1")?.sendConfirmation, {
+      mcn_recommendation_id: "mcnr-1",
+      operatorRole: "media",
+      supplyConfirmed: true,
+      mcnConfirmed: true,
+      messageConfirmed: true,
+      confirmedAt: NOW,
+    });
+
+    const stale = await action.handler({
+      sessionKey: "session-1",
+      client: { scopes: ["operator.write"] },
+      payload: {
+        mcn_recommendation_id: "mcnr-stale",
+        operatorRole: "media",
+        supplyConfirmed: true,
+        mcnConfirmed: true,
+        messageConfirmed: true,
+      },
+    });
+    assert.equal(stale.ok, false);
+    assert.equal(store.get("session-1")?.sendConfirmation?.mcn_recommendation_id, "mcnr-1");
+  });
+
+  it("routes the real bundle-MCP host name through the registered before hook", async () => {
+    const api = fakeApi();
+    const store = createRuntimeStateStore({ now: () => NOW });
+    store.set("session-1", { phase: "requirement_ready", requirement_id: "req-1" });
+    registerHooks(api, { store, now: () => NOW });
+
+    const result = await api.handlers.get("before_tool_call")({
+      toolName: "ypmcn__search_creators",
+      params: { demand_id: "legacy" },
+      toolCallId: "call-1",
+    }, { sessionKey: "session-1" });
+
+    assert.equal(result.block, true);
+    assert.match(result.blockReason, /SCHEMA_MISMATCH/);
   });
 
   it("keeps waiting state for ordinary messages and records only explicit recovery intent", async () => {

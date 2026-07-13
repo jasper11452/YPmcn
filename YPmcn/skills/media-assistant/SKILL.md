@@ -50,7 +50,7 @@ validate_requirement
 
 - `rank_mcns` 后先展示供需关系、MCN 建议和询价文案，等待修改或确认。
 - 字段选择是发送前最后确认点；选择结果的 `fields/items/selected_count` 必须一致。
-- 发送必须同时具备 `sessionKey`、`toolCallId`、已知媒介角色，以及 `supplyConfirmed`、`mcnConfirmed`、`messageConfirmed`。
+- 发送必须先通过 OpenClaw `confirm_distribution_send` session action 记录当前推荐的已知媒介角色，以及 `supplyConfirmed`、`mcnConfirmed`、`messageConfirmed`；调用时仍须具备 `sessionKey`、`toolCallId`。
 - `columns` 必须与字段选择的有序 `items` 完全一致。
 - `deadline`、`remindAt` 必须是未来且带时区；`usageScope=project`；供应商列表非空。
 - v2 只接受 `preview_only=false`。用户确认前不得创建 provider 项目、分发或企微通知。
