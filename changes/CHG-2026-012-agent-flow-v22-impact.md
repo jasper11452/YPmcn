@@ -40,4 +40,3 @@ lane: standard-high
 - revert 代码、契约、测试和文档提交。
 - 删除该任务在 Git common dir 下的运行态和结果不会影响 Git 历史或业务数据。
 - 不涉及数据库、发布、外部写或凭据迁移。
-
