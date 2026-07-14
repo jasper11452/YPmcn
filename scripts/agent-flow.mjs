@@ -3,9 +3,12 @@
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   readlinkSync,
@@ -22,7 +25,14 @@ import { parse as parseYaml } from "yaml";
 
 const defaultRepoRoot = fileURLToPath(new URL("..", import.meta.url));
 const defaultProfilePath = join(defaultRepoRoot, "workflows/codex-profiles.json");
-const maxParallelWriters = 2;
+const maxParallelWriters = 5;
+const v22SchemaVersion = "2.2";
+const lanes = new Set(["fast", "standard-low", "standard-high", "critical"]);
+const legacyProfileNames = new Set([
+  "executor-sol-max-fast",
+  "executor-terra-max-fast",
+  "executor-terra-medium-fast",
+]);
 const activeWriterStatuses = new Set(["DISPATCHED", "EXECUTING"]);
 const completedDependencyStatuses = new Set(["MERGED", "ARCHIVED"]);
 const runStatuses = new Set([
@@ -44,7 +54,7 @@ const transitions = {
   READY: new Set(["DISPATCHED", "BLOCKED"]),
   DISPATCHED: new Set(["EXECUTING", "BLOCKED"]),
   EXECUTING: new Set(["EXECUTOR_DONE", "FAIL", "BLOCKED"]),
-  EXECUTOR_DONE: new Set(["VERIFYING", "REWORK_READY", "BLOCKED"]),
+  EXECUTOR_DONE: new Set(["VERIFYING", "PASS", "REWORK_READY", "BLOCKED"]),
   VERIFYING: new Set(["PASS", "FAIL", "BLOCKED"]),
   PASS: new Set(["MERGE_READY", "BLOCKED"]),
   FAIL: new Set(["REWORK_READY", "BLOCKED"]),
@@ -56,23 +66,9 @@ const transitions = {
 };
 
 export const pinnedCodexProfiles = Object.freeze({
-  "executor-sol-max-fast": Object.freeze({
+  "executor-sol-low": Object.freeze({
     model: "gpt-5.6-sol",
-    model_reasoning_effort: "max",
-    service_tier: "fast",
-    sandbox_mode: "workspace-write",
-    approval_policy: "never",
-  }),
-  "executor-terra-max-fast": Object.freeze({
-    model: "gpt-5.6-terra",
-    model_reasoning_effort: "max",
-    service_tier: "fast",
-    sandbox_mode: "workspace-write",
-    approval_policy: "never",
-  }),
-  "executor-terra-medium-fast": Object.freeze({
-    model: "gpt-5.6-terra",
-    model_reasoning_effort: "medium",
+    model_reasoning_effort: "low",
     service_tier: "fast",
     sandbox_mode: "workspace-write",
     approval_policy: "never",
@@ -86,8 +82,24 @@ function readJson(path) {
 function atomicWrite(path, source) {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(temporary, source, { mode: 0o600 });
+  const descriptor = openSync(temporary, "wx", 0o600);
+  try {
+    writeFileSync(descriptor, source);
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
   renameSync(temporary, path);
+  try {
+    const directory = openSync(dirname(path), "r");
+    try {
+      fsyncSync(directory);
+    } finally {
+      closeSync(directory);
+    }
+  } catch {
+    // Some filesystems do not support directory fsync; the atomic rename still holds.
+  }
 }
 
 function asError(error) {
@@ -198,11 +210,16 @@ export function assertProjectIdentity(repoRoot = defaultRepoRoot) {
   const packageJson = readJson(join(repoRoot, "package.json"));
   const manifest = readJson(join(repoRoot, "spec/manifest.json"));
   const orchestratorSource = readFileSync(join(repoRoot, "CLAUDE.md"), "utf8");
+  const projectSettingsPath = join(repoRoot, ".claude/settings.json");
+  const projectSettings = existsSync(projectSettingsPath) ? readJson(projectSettingsPath) : {};
   if (packageJson.name !== "ypmcn-contract-first-automation"
     || manifest.schemaVersion !== 1
     || manifest.profile !== "mvp-v2"
     || manifest.status !== "approved"
-    || !orchestratorSource.includes("npm run agent-flow -- status --json")) {
+    || !orchestratorSource.includes("npm run agent-flow -- status --json")
+    || projectSettings.model !== "fable"
+    || projectSettings.effortLevel !== "medium"
+    || projectSettings.env?.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME !== "gpt-5.6-sol") {
     throw new Error("agent-flow project identity check failed");
   }
   return {
@@ -219,8 +236,8 @@ function tomlString(value) {
 
 export function loadProfileWhitelist(profilePath = defaultProfilePath) {
   const source = readJson(profilePath);
-  if (source.schema_version !== 1 || !source.profiles || typeof source.profiles !== "object") {
-    throw new Error(`${profilePath} must define schema_version=1 and profiles`);
+  if (source.schema_version !== v22SchemaVersion || !source.profiles || typeof source.profiles !== "object") {
+    throw new Error(`${profilePath} must define schema_version=${v22SchemaVersion} and profiles`);
   }
   const expectedNames = Object.keys(pinnedCodexProfiles);
   const actualNames = Object.keys(source.profiles);
@@ -405,6 +422,7 @@ export function validateTaskDefinition(
   } = {},
 ) {
   const errors = [];
+  const isV22 = task.schema_version === v22SchemaVersion;
   for (const key of [
     "task_id",
     "change_id",
@@ -428,6 +446,40 @@ export function validateTaskDefinition(
   }
   for (const key of ["allowed_paths", "forbidden_paths", "acceptance", "verification"]) {
     if (!isStringArray(task[key], { nonempty: true })) errors.push(`${key} must be a nonempty array of strings`);
+  }
+  if (isV22) {
+    if (!lanes.has(task.lane)) errors.push(`unknown lane: ${String(task.lane)}`);
+    if (!task.route_reason || !isStringArray(task.route_reason.matched, { nonempty: true })
+      || !isStringArray(task.route_reason.excluded)) {
+      errors.push("route_reason must contain nonempty matched and array excluded");
+    }
+    if (!isStringArray(task.upgrade_triggers, { nonempty: true })) {
+      errors.push("upgrade_triggers must be a nonempty array of strings");
+    }
+    if (!new Set(["none", "on_trigger", "required"]).has(task.independent_verifier)) {
+      errors.push(`unknown independent_verifier: ${String(task.independent_verifier)}`);
+    }
+    if (!new Set(["not_required", "approved"]).has(task.human_approval)) {
+      errors.push(`unknown human_approval: ${String(task.human_approval)}`);
+    }
+    if (!Array.isArray(task.required_context) || task.required_context.length === 0
+      || task.required_context.some((entry) => !entry || !isSafeRepoPattern(String(entry.ref ?? "")) || typeof entry.required !== "boolean")) {
+      errors.push("required_context must contain repository-relative ref/required entries");
+    }
+    if (!isStringArray(task.stop_conditions, { nonempty: true })) {
+      errors.push("stop_conditions must be a nonempty array of strings");
+    }
+    if (["standard-high", "critical"].includes(task.lane) && task.independent_verifier !== "required") {
+      errors.push(`${task.lane} requires independent_verifier=required`);
+    }
+    if (task.lane === "critical" && task.human_approval !== "approved") {
+      errors.push("critical requires human_approval=approved");
+    }
+    if (task.execution_profile !== "executor-sol-low") {
+      errors.push("V2.2 tasks require execution_profile=executor-sol-low");
+    }
+  } else if (task.schema_version !== undefined) {
+    errors.push(`unsupported schema_version: ${String(task.schema_version)}`);
   }
   for (const key of ["allowed_paths", "forbidden_paths"]) {
     if (Array.isArray(task[key]) && task[key].some((pattern) => !isSafeRepoPattern(pattern))) {
@@ -465,7 +517,8 @@ export function validateTaskDefinition(
   }
   try {
     const whitelist = loadProfileWhitelist(profilePath);
-    if (!Object.hasOwn(whitelist.profiles, task.execution_profile)) {
+    if (!Object.hasOwn(whitelist.profiles, task.execution_profile)
+      && !(task.schema_version === undefined && legacyProfileNames.has(task.execution_profile))) {
       errors.push(`unknown execution_profile: ${String(task.execution_profile)}`);
     }
   } catch (error) {
@@ -601,15 +654,48 @@ export function readRuntimeState(repoRoot, taskId) {
   return existsSync(path) ? readJson(path) : null;
 }
 
-export function writeRuntimeState(repoRoot, taskId, state) {
-  const next = {
-    ...state,
-    task_id: taskId,
-    updated_at: new Date().toISOString(),
+function appendStateEvent(repoRoot, state, previousStatus) {
+  const event = {
+    schema_version: v22SchemaVersion,
+    event_id: `evt-${state.task_id}-${String(state.state_revision)}`,
+    task_id: state.task_id,
+    task_revision: state.state_revision,
+    sequence: state.state_revision,
+    event_type: previousStatus === state.run_status ? "state.updated" : "state.transitioned",
+    previous_status: previousStatus ?? null,
+    run_status: state.run_status,
+    occurred_at: state.updated_at,
   };
-  if (!runStatuses.has(next.run_status)) throw new Error(`unknown run_status: ${String(next.run_status)}`);
-  atomicWrite(runtimeStatePath(repoRoot, taskId), `${JSON.stringify(next, null, 2)}\n`);
-  return next;
+  const eventPath = join(runtimeStateRoot(repoRoot), "events", "task-events.jsonl");
+  mkdirSync(dirname(eventPath), { recursive: true });
+  appendFileSync(eventPath, `${JSON.stringify(event)}\n`, { mode: 0o600 });
+}
+
+export function writeRuntimeState(repoRoot, taskId, state, { expectedRevision = null } = {}) {
+  const release = acquireControlLock(repoRoot, "state");
+  try {
+    const current = readRuntimeState(repoRoot, taskId);
+    const currentRevision = current?.state_revision ?? 0;
+    const assertedRevision = expectedRevision ?? (Number.isInteger(state.state_revision) ? state.state_revision : null);
+    if (assertedRevision !== null && assertedRevision !== currentRevision) {
+      throw new Error(`stale state revision for ${taskId}: expected ${String(assertedRevision)}, got ${String(currentRevision)}`);
+    }
+    const nextRevision = currentRevision + 1;
+    const next = {
+      ...state,
+      schema_version: v22SchemaVersion,
+      task_id: taskId,
+      state_revision: nextRevision,
+      last_event_sequence: nextRevision,
+      updated_at: new Date().toISOString(),
+    };
+    if (!runStatuses.has(next.run_status)) throw new Error(`unknown run_status: ${String(next.run_status)}`);
+    atomicWrite(runtimeStatePath(repoRoot, taskId), `${JSON.stringify(next, null, 2)}\n`);
+    appendStateEvent(repoRoot, next, current?.run_status ?? null);
+    return next;
+  } finally {
+    release();
+  }
 }
 
 function initialRuntimeState(repoRoot, task) {
@@ -626,7 +712,10 @@ function initialRuntimeState(repoRoot, task) {
       throw new Error(`invalid archived verification artifact: ${artifactPath}${artifactErrors.length ? ` (${artifactErrors.join("; ")})` : ""}`);
     }
     return {
+      schema_version: v22SchemaVersion,
       task_id: task.task_id,
+      state_revision: 0,
+      last_event_sequence: 0,
       run_status: "ARCHIVED",
       attempt: task.attempt,
       codex_session_id: null,
@@ -640,7 +729,10 @@ function initialRuntimeState(repoRoot, task) {
     };
   }
   return {
+    schema_version: v22SchemaVersion,
     task_id: task.task_id,
+    state_revision: 0,
+    last_event_sequence: 0,
     run_status: task.run_status,
     attempt: task.attempt,
     codex_session_id: null,
@@ -666,7 +758,25 @@ export function transitionRuntimeState(repoRoot, task, nextStatus, patch = {}) {
     ...current,
     ...patch,
     run_status: nextStatus,
-  });
+  }, { expectedRevision: current.state_revision ?? 0 });
+}
+
+function immutableResultRoot(repoRoot, taskId) {
+  return join(runtimeStateRoot(repoRoot), "results", safeTaskId(taskId));
+}
+
+export function persistImmutableResult(repoRoot, taskId, role, result) {
+  if (!/^(executor|verifier|controller)$/.test(role)) throw new Error(`unsafe result role: ${role}`);
+  const source = `${JSON.stringify(result, null, 2)}\n`;
+  const sha256 = createHash("sha256").update(source).digest("hex");
+  const resultId = `${role}-${sha256.slice(0, 20)}`;
+  const path = join(immutableResultRoot(repoRoot, taskId), `${resultId}.json`);
+  if (existsSync(path)) {
+    if (readFileSync(path, "utf8") !== source) throw new Error(`immutable result collision: ${resultId}`);
+  } else {
+    atomicWrite(path, source);
+  }
+  return { result_id: resultId, sha256, path };
 }
 
 function walkEvidence(root) {
@@ -711,13 +821,17 @@ export function compareVerifierSnapshots(before, after) {
   return changes;
 }
 
-export function buildCodexExecArgs({ task, prompt, outputSchemaPath, outputPath }) {
+export function buildCodexExecArgs({ task, profile, prompt, outputSchemaPath, outputPath }) {
   return [
     "exec",
     "-C",
     task.worktree,
-    "--profile",
-    task.execution_profile,
+    "-m",
+    profile.model,
+    "-c",
+    `model_reasoning_effort=${tomlString(profile.model_reasoning_effort)}`,
+    "-c",
+    `service_tier=${tomlString(profile.service_tier)}`,
     "--strict-config",
     "--sandbox",
     "workspace-write",
@@ -757,23 +871,25 @@ export function buildCodexResumeArgs({ sessionId, profile, prompt, outputSchemaP
   ];
 }
 
-export function buildOpenCodeInvocation({ repoRoot, prompt, model }) {
+export function buildOpenCodeInvocation({ repoRoot, prompt, model, variant = null }) {
   if (!model.startsWith("yuepu/")) throw new Error("OpenCode verifier model must remain under yuepu/");
+  const args = [
+    "run",
+    "--pure",
+    "--dir",
+    repoRoot,
+    "--agent",
+    "plan",
+    "--model",
+    model,
+    "--format",
+    "json",
+  ];
+  if (variant) args.push("--variant", variant);
+  args.push(prompt);
   return {
     command: "opencode",
-    args: [
-      "run",
-      "--pure",
-      "--dir",
-      repoRoot,
-      "--agent",
-      "plan",
-      "--model",
-      model,
-      "--format",
-      "json",
-      prompt,
-    ],
+    args,
     env: { OPENCODE_DISABLE_EXTERNAL_SKILLS: "1" },
   };
 }
@@ -783,7 +899,7 @@ function renderList(values) {
 }
 
 export function renderExecutorPrompt(task) {
-  return `You are the primary Codex Executor.\n\nTask ID:\n${task.task_id}\n\nGoal:\n${task.goal}\n\nAllowed paths:\n${renderList(task.allowed_paths)}\n\nForbidden paths:\n${renderList(task.forbidden_paths)}\n\nAcceptance criteria:\n${renderList(task.acceptance)}\n\nVerification commands:\n${renderList(task.verification)}\n\nThis task packet is complete and pre-approved within allowed_paths. Do not ask for confirmation or clarification for actions inside the declared scope. Make reasonable implementation assumptions that do not alter the approved Spec. If proceeding requires changing the Spec, accessing forbidden paths, performing external writes, or making an irreversible decision, return BLOCKED once with concrete evidence. Otherwise continue autonomously through implementation, tests, and commit. Make the smallest correct change. Do not perform unrelated refactors. Return JSON matching the supplied output schema.`;
+  return `You are the primary Codex Executor.\n\nSchema: ${task.schema_version ?? "legacy"}\nTask ID:\n${task.task_id}\nLane: ${task.lane ?? "legacy-standard-high"}\nGoal:\n${task.goal}\n\nAllowed paths:\n${renderList(task.allowed_paths)}\n\nForbidden paths:\n${renderList(task.forbidden_paths)}\n\nAcceptance criteria:\n${renderList(task.acceptance)}\n\nVerification commands:\n${renderList(task.verification)}\n\nRequired context:\n${renderList((task.required_context ?? []).map((entry) => entry.ref)) || "- See approved Change Proposal"}\n\nStop conditions:\n${renderList(task.stop_conditions ?? ["Spec conflict", "forbidden path required"])}\n\nStart with only the listed context. Expand in the order exact symbol, adjacent definition/caller, tests/contract, then module; record each expansion as reason + source_ref. This task packet is complete and pre-approved within allowed_paths. Do not ask for confirmation or clarification for actions inside the declared scope. Make reasonable implementation assumptions that do not alter the approved Spec. If proceeding requires changing the Spec, accessing forbidden paths, performing external writes, or making an irreversible decision, return BLOCKED once with concrete evidence. Otherwise continue autonomously through implementation, tests, and commit. Make the smallest correct change. Do not perform unrelated refactors. Return schema_version=2.2 JSON matching the supplied output schema, including evidence_paths and context_expansions.`;
 }
 
 export function renderResumePrompt(task, state) {
@@ -836,6 +952,20 @@ export function parseCodexJsonl(source) {
     if (item?.type === "agent_message" && typeof item.text === "string") lastMessage = item.text;
   }
   return { events, sessionId, lastMessage };
+}
+
+export function extractUsageMetrics(events) {
+  let observed = null;
+  for (const event of events) {
+    const usage = event.usage ?? event.data?.usage ?? event.response?.usage;
+    if (usage && typeof usage === "object") observed = usage;
+  }
+  return {
+    input_tokens: observed?.input_tokens ?? observed?.inputTokens ?? null,
+    output_tokens: observed?.output_tokens ?? observed?.outputTokens ?? null,
+    cached_input_tokens: observed?.cached_input_tokens ?? observed?.cachedInputTokens ?? null,
+    authority: observed ? "provider_event" : "not_observed",
+  };
 }
 
 function parseEmbeddedJson(value) {
@@ -894,12 +1024,76 @@ function evidenceDirectory(repoRoot, task, attempt = task.attempt) {
   return join(runtimeStateRoot(repoRoot), "runs", safeTaskId(task.task_id), `attempt-${String(attempt)}`);
 }
 
+function repoRealpathForCandidate(repoRoot, candidate) {
+  const absolute = resolve(repoRoot, candidate);
+  let existing = absolute;
+  while (!existsSync(existing) && existing !== dirname(existing)) existing = dirname(existing);
+  const resolvedExisting = realpathSync(existing);
+  const suffix = relative(existing, absolute);
+  return resolve(resolvedExisting, suffix);
+}
+
+function isInsideRoot(root, candidate) {
+  const fromRoot = relative(realpathSync(root), candidate);
+  return fromRoot === "" || (!fromRoot.startsWith("..") && !isAbsolute(fromRoot));
+}
+
+export function validateTaskRealpaths(repoRoot, task) {
+  const errors = [];
+  for (const pattern of [...task.allowed_paths, ...task.forbidden_paths]) {
+    const prefix = staticPrefix(pattern).replace(/\/$/, "") || ".";
+    const resolved = repoRealpathForCandidate(repoRoot, prefix);
+    if (!isInsideRoot(repoRoot, resolved)) errors.push(`${pattern} resolves outside task worktree: ${resolved}`);
+  }
+  return errors;
+}
+
+export function createTaskContextSnapshot(repoRoot, task) {
+  const refs = [
+    { ref: task.change_proposal, required: true },
+    { ref: task.impact_analysis, required: true },
+    ...(task.required_context ?? []),
+  ];
+  const sources = [];
+  for (const entry of refs) {
+    const fileRef = String(entry.ref).split("#", 1)[0];
+    if (!isSafeRepoPattern(fileRef)) throw new Error(`unsafe context ref: ${entry.ref}`);
+    const path = resolve(repoRoot, fileRef);
+    const resolved = repoRealpathForCandidate(repoRoot, fileRef);
+    if (!isInsideRoot(repoRoot, resolved)) throw new Error(`context ref escapes repository: ${entry.ref}`);
+    if (!existsSync(path)) {
+      if (entry.required) throw new Error(`required context does not exist: ${entry.ref}`);
+      continue;
+    }
+    const source = readFileSync(path);
+    sources.push({
+      ref: entry.ref,
+      content_sha256: createHash("sha256").update(source).digest("hex"),
+      size_bytes: source.length,
+    });
+  }
+  const snapshot = {
+    schema_version: v22SchemaVersion,
+    snapshot_id: null,
+    task_id: task.task_id,
+    task_revision: task.attempt,
+    created_at: new Date().toISOString(),
+    sources,
+    provider_prompt_cache: { authority: false, observed_cached_input_tokens: null },
+  };
+  const hash = createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+  snapshot.snapshot_id = `ctx-${hash.slice(0, 20)}`;
+  const path = join(runtimeStateRoot(repoRoot), "context", safeTaskId(task.task_id), `${snapshot.snapshot_id}.json`);
+  if (!existsSync(path)) atomicWrite(path, `${JSON.stringify(snapshot, null, 2)}\n`);
+  return { ...snapshot, path };
+}
+
 function changedFiles(repoRoot, baseSha, headSha) {
   const source = git(repoRoot, ["diff", "--name-only", "--diff-filter=ACMRD", `${baseSha}..${headSha}`]).stdout;
   return source.split(/\r?\n/).filter(Boolean).sort();
 }
 
-function validateChangedFiles(task, files) {
+function validateChangedFiles(task, files, worktree = null) {
   const errors = [];
   for (const file of files) {
     if (!task.allowed_paths.some((pattern) => pathMatchesPattern(file, pattern))) {
@@ -907,6 +1101,10 @@ function validateChangedFiles(task, files) {
     }
     if (task.forbidden_paths.some((pattern) => pathMatchesPattern(file, pattern))) {
       errors.push(`${file} matches forbidden_paths`);
+    }
+    if (worktree) {
+      const resolved = repoRealpathForCandidate(worktree, file);
+      if (!isInsideRoot(worktree, resolved)) errors.push(`${file} resolves outside task worktree: ${resolved}`);
     }
   }
   return errors;
@@ -967,6 +1165,7 @@ function parseExecutorResult(path) {
 
 export function validateExecutorResult(result, { task, baseSha, headSha, files }) {
   const errors = [];
+  if (result.schema_version !== v22SchemaVersion) errors.push(`executor schema_version must be ${v22SchemaVersion}`);
   if (result.task_id !== task.task_id) errors.push(`executor task_id mismatch: ${String(result.task_id)}`);
   if (result.status !== "PASS") return errors;
   if (result.base_sha !== baseSha) errors.push(`executor base_sha mismatch: ${String(result.base_sha)}`);
@@ -977,6 +1176,8 @@ export function validateExecutorResult(result, { task, baseSha, headSha, files }
   if (!Array.isArray(result.tests) || result.tests.length === 0) errors.push("executor PASS requires test evidence");
   else if (result.tests.some((test) => test?.result !== "PASS")) errors.push("executor PASS contains failed or unrun tests");
   if (!Array.isArray(result.known_risks)) errors.push("executor known_risks must be an array");
+  if (!Array.isArray(result.evidence_paths)) errors.push("executor evidence_paths must be an array");
+  if (!Array.isArray(result.context_expansions)) errors.push("executor context_expansions must be an array");
   if (result.blocked_reason !== null) errors.push("executor PASS must have blocked_reason=null");
   return errors;
 }
@@ -1029,6 +1230,7 @@ function moveToExecuting(repoRoot, task, current, { resume }) {
 }
 
 async function executeCodex({ repoRoot, task, resume = false, dryRun = false }) {
+  const startedAt = Date.now();
   const errors = validateTaskDefinition(task, { repoRoot });
   if (errors.length > 0) throw new Error(errors.join("\n"));
   const tasks = loadTasks(repoRoot);
@@ -1036,6 +1238,7 @@ async function executeCodex({ repoRoot, task, resume = false, dryRun = false }) 
   if (graphErrors.length > 0) throw new Error(graphErrors.join("\n"));
   const whitelist = loadProfileWhitelist(join(repoRoot, "workflows/codex-profiles.json"));
   const profile = whitelist.profiles[task.execution_profile];
+  if (!profile) throw new Error(`legacy execution profile ${task.execution_profile} is read-only under V2.2; create a V2.2 task revision`);
   let current;
   let baseSha;
   let evidenceRoot;
@@ -1098,6 +1301,7 @@ async function executeCodex({ repoRoot, task, resume = false, dryRun = false }) 
       })
       : buildCodexExecArgs({
         task,
+        profile,
         prompt,
         outputSchemaPath: join(repoRoot, "workflows/executor-result.schema.json"),
         outputPath,
@@ -1105,11 +1309,19 @@ async function executeCodex({ repoRoot, task, resume = false, dryRun = false }) 
     if (dryRun) return { command: "codex", args, cwd: resume ? task.worktree : repoRoot };
 
     ensureWorktree(repoRoot, task, baseSha);
+    const realpathErrors = validateTaskRealpaths(task.worktree, task);
+    if (realpathErrors.length > 0) throw new Error(realpathErrors.join("\n"));
     assertTaskWorktree(task, baseSha, {
       allowDirty: resume,
       requireBaseHead: !resume && current.run_status === "READY",
     });
-    moveToExecuting(repoRoot, task, current, { resume });
+    const contextSnapshot = createTaskContextSnapshot(repoRoot, task);
+    const executingState = moveToExecuting(repoRoot, task, current, { resume });
+    writeRuntimeState(repoRoot, task.task_id, {
+      ...executingState,
+      context_snapshot_id: contextSnapshot.snapshot_id,
+      context_snapshot_sha256: createHash("sha256").update(JSON.stringify(contextSnapshot.sources)).digest("hex"),
+    }, { expectedRevision: executingState.state_revision });
   } finally {
     releaseDispatchLock?.();
   }
@@ -1141,12 +1353,21 @@ async function executeCodex({ repoRoot, task, resume = false, dryRun = false }) 
   }
   atomicWrite(join(evidenceRoot, "codex.stderr.log"), result.stderr ?? "");
   const parsed = parseCodexJsonl(result.stdout ?? "");
+  const usage = extractUsageMetrics(parsed.events);
   const executing = effectiveState(repoRoot, task);
   writeRuntimeState(repoRoot, task.task_id, {
     ...executing,
     codex_session_id: parsed.sessionId ?? executing.codex_session_id,
     controller_pid: null,
     codex_process_pid: null,
+    metrics: {
+      ...(executing.metrics ?? {}),
+      executor: {
+        usage,
+        wall_clock_seconds: (Date.now() - startedAt) / 1000,
+        attempt: executing.attempt,
+      },
+    },
   });
   if (result.status !== 0 || result.signal) {
     return transitionRuntimeState(repoRoot, task, "BLOCKED", {
@@ -1171,7 +1392,7 @@ async function executeCodex({ repoRoot, task, resume = false, dryRun = false }) 
   const headSha = gitText(task.worktree, ["rev-parse", "HEAD"]);
   const dirty = git(task.worktree, ["status", "--short", "--untracked-files=all"]).stdout.trim();
   const files = changedFiles(task.worktree, baseSha, headSha);
-  const boundaryErrors = validateChangedFiles(task, files);
+  const boundaryErrors = validateChangedFiles(task, files, task.worktree);
   const evidenceErrors = validateExecutorResult(executorResult, { task, baseSha, headSha, files });
   if (dirty || headSha === baseSha || boundaryErrors.length > 0 || evidenceErrors.length > 0 || executorResult.status !== "PASS") {
     return transitionRuntimeState(repoRoot, task, "BLOCKED", {
@@ -1188,11 +1409,13 @@ async function executeCodex({ repoRoot, task, resume = false, dryRun = false }) 
       next_action: "resume",
     });
   }
+  const immutableResult = persistImmutableResult(repoRoot, task.task_id, "executor", executorResult);
   return transitionRuntimeState(repoRoot, task, "EXECUTOR_DONE", {
     checkpoint_sha: headSha,
     head_sha: headSha,
     changed_files: files,
     executor_result: executorResult,
+    accepted_executor_result: immutableResult,
     next_action: "verify",
   });
 }
@@ -1212,11 +1435,18 @@ export function validateVerificationResult(result, { task, state }) {
   if (result.head_sha !== state.head_sha) errors.push(`verifier head_sha mismatch: ${String(result.head_sha)}`);
   if (!/^[0-9a-f]{40}$/.test(result.base_sha ?? "")) errors.push("verifier base_sha must be a full lowercase SHA");
   if (!/^[0-9a-f]{40}$/.test(result.head_sha ?? "")) errors.push("verifier head_sha must be a full lowercase SHA");
-  if (result.verifier?.tool !== "OpenCode"
-    || !isNonemptyString(result.verifier?.model)
-    || !result.verifier.model.startsWith("yuepu/")
-    || result.verifier?.mode !== "read-only") {
-    errors.push("verifier identity must be OpenCode + yuepu/* + read-only");
+  const isControllerSelfCheck = result.verifier?.tool === "Controller"
+    && result.verifier?.model === "deterministic"
+    && result.verifier?.mode === "self";
+  const isOpenCode = result.verifier?.tool === "OpenCode"
+    && isNonemptyString(result.verifier?.model)
+    && result.verifier.model.startsWith("yuepu/")
+    && result.verifier?.mode === "read-only";
+  if (!isOpenCode && !isControllerSelfCheck) {
+    errors.push("verifier identity must be OpenCode/yuepu/read-only or Controller/deterministic/self");
+  }
+  if (isControllerSelfCheck && requiresIndependentVerifier(task, state)) {
+    errors.push(`${task.lane ?? "legacy"} requires independent OpenCode verification`);
   }
   if (!["PASS", "FAIL", "BLOCKED"].includes(result.status)) errors.push(`invalid verifier status: ${String(result.status)}`);
   for (const key of ["commands", "findings", "evidence", "known_risks", "unexpected_writes"]) {
@@ -1243,12 +1473,53 @@ export function validateVerificationResult(result, { task, state }) {
   return errors;
 }
 
+export function requiresIndependentVerifier(task, state = {}) {
+  if (task.schema_version !== v22SchemaVersion) return true;
+  if (["standard-high", "critical"].includes(task.lane)) return true;
+  if (task.independent_verifier === "required") return true;
+  if (task.independent_verifier === "none") return false;
+  return Boolean(state.upgrade_triggered)
+    || (state.attempt ?? task.attempt) >= 2
+    || (state.executor_result?.context_expansions?.length ?? 0) >= 2;
+}
+
+function selfVerification(task, state) {
+  return {
+    schema_version: v22SchemaVersion,
+    task_id: task.task_id,
+    base_sha: state.base_sha,
+    head_sha: state.head_sha,
+    verifier: { tool: "Controller", model: "deterministic", mode: "self" },
+    status: "PASS",
+    commands: (state.executor_result?.tests ?? []).map((test) => ({
+      command: test.command,
+      result: test.result,
+      evidence: test.evidence,
+    })),
+    findings: [],
+    evidence: ["L1/L2 executor evidence and frozen Git diff passed deterministic controller checks"],
+    known_risks: state.executor_result?.known_risks ?? [],
+    unexpected_writes: [],
+  };
+}
+
 function verifyTaskUnlocked({ repoRoot, task, dryRun = false }) {
   const state = effectiveState(repoRoot, task);
   if (!["EXECUTOR_DONE", "VERIFYING"].includes(state.run_status)) {
     throw new Error(`verify requires EXECUTOR_DONE/VERIFYING, got ${state.run_status}`);
   }
   if (!state.base_sha || !state.head_sha) throw new Error("verify requires frozen base_sha and head_sha");
+  if (!requiresIndependentVerifier(task, state)) {
+    const verification = selfVerification(task, state);
+    if (dryRun) return verification;
+    const immutableResult = persistImmutableResult(repoRoot, task.task_id, "controller", verification);
+    return transitionRuntimeState(repoRoot, task, "PASS", {
+      verification,
+      accepted_verifier_result: immutableResult,
+      next_action: "integrate",
+    });
+  }
+  const startedAt = Date.now();
   const model = process.env.OPENCODE_VERIFIER_MODEL || "yuepu/Deepseek-V4-Pro";
   const prompt = renderVerifierPrompt(task, state, state.executor_result ?? {}, model);
   const invocation = buildOpenCodeInvocation({ repoRoot: task.worktree, prompt, model });
@@ -1259,28 +1530,60 @@ function verifyTaskUnlocked({ repoRoot, task, dryRun = false }) {
   if (state.run_status === "EXECUTOR_DONE") transitionRuntimeState(repoRoot, task, "VERIFYING");
   const evidenceRoot = evidenceDirectory(repoRoot, task, state.attempt);
   mkdirSync(evidenceRoot, { recursive: true });
-  const result = run(invocation.command, invocation.args, {
+  let result = run(invocation.command, invocation.args, {
     cwd: task.worktree,
     env: invocation.env,
     allowFailure: true,
     timeout: Number(process.env.AGENT_FLOW_VERIFIER_TIMEOUT_MS || 1_200_000),
   });
-  atomicWrite(join(evidenceRoot, "opencode.jsonl"), result.stdout ?? "");
-  atomicWrite(join(evidenceRoot, "opencode.stderr.log"), result.stderr ?? "");
-  const after = snapshotVerifierState({ repoRoot: task.worktree, planRoots });
-  const unexpectedWrites = compareVerifierSnapshots(before, after);
+  atomicWrite(join(evidenceRoot, "opencode-primary.jsonl"), result.stdout ?? "");
+  atomicWrite(join(evidenceRoot, "opencode-primary.stderr.log"), result.stderr ?? "");
   let verification;
+  let extractionError = null;
   try {
     verification = extractOpenCodeResult(result.stdout ?? "");
   } catch (error) {
+    extractionError = asError(error);
+  }
+  let usedFallback = false;
+  if ((result.status !== 0 || result.error || extractionError) && task.lane !== "critical") {
+    const fallbackModel = process.env.OPENCODE_FALLBACK_MODEL || "yuepu/gpt-5.6-sol";
+    const fallbackPrompt = renderVerifierPrompt(task, state, state.executor_result ?? {}, fallbackModel);
+    const fallback = buildOpenCodeInvocation({
+      repoRoot: task.worktree,
+      prompt: fallbackPrompt,
+      model: fallbackModel,
+      variant: "medium",
+    });
+    result = run(fallback.command, fallback.args, {
+      cwd: task.worktree,
+      env: fallback.env,
+      allowFailure: true,
+      timeout: Number(process.env.AGENT_FLOW_VERIFIER_TIMEOUT_MS || 1_200_000),
+    });
+    atomicWrite(join(evidenceRoot, "opencode-fallback.jsonl"), result.stdout ?? "");
+    atomicWrite(join(evidenceRoot, "opencode-fallback.stderr.log"), result.stderr ?? "");
+    usedFallback = true;
+    extractionError = null;
+    try {
+      verification = extractOpenCodeResult(result.stdout ?? "");
+    } catch (error) {
+      extractionError = asError(error);
+    }
+  }
+  const after = snapshotVerifierState({ repoRoot: task.worktree, planRoots });
+  const unexpectedWrites = compareVerifierSnapshots(before, after);
+  const effectiveModel = usedFallback ? (process.env.OPENCODE_FALLBACK_MODEL || "yuepu/gpt-5.6-sol") : model;
+  if (!verification) {
     verification = {
+      schema_version: v22SchemaVersion,
       task_id: task.task_id,
       base_sha: state.base_sha,
       head_sha: state.head_sha,
-      verifier: { tool: "OpenCode", model, mode: "read-only" },
+      verifier: { tool: "OpenCode", model: effectiveModel, mode: "read-only" },
       status: "FAIL",
       commands: [],
-      findings: [asError(error).message],
+      findings: [extractionError?.message ?? "OpenCode verification failed without a result"],
       evidence: [],
       known_risks: [],
       unexpected_writes: [],
@@ -1289,10 +1592,11 @@ function verifyTaskUnlocked({ repoRoot, task, dryRun = false }) {
   const verifierErrors = validateVerificationResult(verification, { task, state });
   verification = {
     ...verification,
+    schema_version: v22SchemaVersion,
     task_id: task.task_id,
     base_sha: state.base_sha,
     head_sha: state.head_sha,
-    verifier: { tool: "OpenCode", model, mode: "read-only" },
+    verifier: { tool: "OpenCode", model: effectiveModel, mode: "read-only" },
     commands: Array.isArray(verification.commands) ? verification.commands : [],
     findings: [...(Array.isArray(verification.findings) ? verification.findings : []), ...verifierErrors],
     evidence: Array.isArray(verification.evidence) ? verification.evidence : [],
@@ -1311,8 +1615,19 @@ function verifyTaskUnlocked({ repoRoot, task, dryRun = false }) {
   }
   if (verification.unexpected_writes.length > 0 || verifierErrors.length > 0) verification.status = "FAIL";
   const nextStatus = ["PASS", "FAIL", "BLOCKED"].includes(verification.status) ? verification.status : "FAIL";
+  const immutableResult = persistImmutableResult(repoRoot, task.task_id, "verifier", verification);
   return transitionRuntimeState(repoRoot, task, nextStatus, {
     verification,
+    accepted_verifier_result: immutableResult,
+    metrics: {
+      ...(state.metrics ?? {}),
+      verifier: {
+        primary_model: model,
+        fallback_model: usedFallback ? (process.env.OPENCODE_FALLBACK_MODEL || "yuepu/gpt-5.6-sol") : null,
+        fallback_reasoning: usedFallback ? "medium" : null,
+        wall_clock_seconds: (Date.now() - startedAt) / 1000,
+      },
+    },
     blocked_reason: nextStatus === "BLOCKED" ? verification.findings?.join("; ") : null,
     next_action: nextStatus === "PASS" ? "integrate" : "rework",
   });
@@ -1330,6 +1645,7 @@ function verifyTask(options) {
 
 function verificationArtifact(task, state) {
   return {
+    schema_version: v22SchemaVersion,
     task_id: task.task_id,
     base_sha: state.base_sha,
     head_sha: state.head_sha,
@@ -1359,7 +1675,7 @@ function integrateTaskUnlocked({ repoRoot, task, dryRun = false }) {
   if (mainStatus) throw new Error(`integration root must be clean: ${mainStatus}`);
   const mainHead = gitText(repoRoot, ["rev-parse", "HEAD"]);
   const taskFiles = state.changed_files ?? changedFiles(task.worktree, state.base_sha, state.head_sha);
-  const boundaryErrors = validateChangedFiles(task, taskFiles);
+  const boundaryErrors = validateChangedFiles(task, taskFiles, task.worktree);
   if (boundaryErrors.length > 0) throw new Error(boundaryErrors.join("\n"));
   const mainFiles = changedFiles(repoRoot, state.base_sha, mainHead);
   const overlaps = taskFiles.filter((path) => mainFiles.includes(path));
@@ -1483,6 +1799,7 @@ function statusCommand(repoRoot, taskIds, jsonMode) {
     tasks: tasks.map((task) => ({
       task_id: task.task_id,
       goal: task.goal,
+      lane: task.lane ?? "legacy",
       execution_profile: task.execution_profile,
       definition_status: task.run_status,
       runtime: effectiveState(repoRoot, task),
@@ -1519,7 +1836,8 @@ function planCommand(repoRoot, taskIds, jsonMode) {
     errors,
     conflicts,
     active_writers: active.map((task) => task.task_id),
-    next_batch: batch.map((task) => ({ task_id: task.task_id, profile: task.execution_profile })),
+    max_parallel_writers: maxParallelWriters,
+    next_batch: batch.map((task) => ({ task_id: task.task_id, lane: task.lane ?? "legacy", profile: task.execution_profile })),
   };
   output(result, jsonMode);
   if (result.status !== "PASS") process.exitCode = 1;

@@ -1,3 +1,4 @@
+schema_version: "2.2"
 task_id: CHG-YYYY-NNN-DOMAIN
 change_id: CHG-YYYY-NNN
 change_type: feature
@@ -8,8 +9,19 @@ approved_spec_version: "mvp-v2 / schemaVersion 1"
 change_proposal: "changes/CHG-YYYY-NNN-slug.md"
 impact_analysis: "changes/CHG-YYYY-NNN-slug-impact.md"
 risk_level: medium
-execution_profile: CHOOSE_ONE_EXACT_PROFILE
-profile_reason: "说明为什么选择该白名单 Profile"
+lane: standard-low
+route_reason:
+  matched:
+    - "局部、可回滚且已有精确测试"
+  excluded:
+    - "无权限、持久化、并发或公开契约变化"
+upgrade_triggers:
+  - "diff 跨出最初模块"
+  - "相关测试失败、缺失或被跳过"
+independent_verifier: on_trigger
+human_approval: not_required
+execution_profile: executor-sol-low
+profile_reason: "说明为什么该任务适合固定的 Sol/low Executor"
 depends_on: []
 conflicts_with: []
 allowed_paths:
@@ -20,6 +32,12 @@ acceptance:
   - "可观察、可复现的完成条件"
 verification:
   - "npm run verify"
+required_context:
+  - ref: "changes/CHG-YYYY-NNN-slug.md"
+    required: true
+stop_conditions:
+  - "需要修改 forbidden_paths"
+  - "正式契约与实现冲突"
 rollback: "明确的代码和数据回滚方式"
 attempt: 1
 branch: "codex/CHG-YYYY-NNN-domain"

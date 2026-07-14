@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,6 +20,7 @@ const profilePath = join(repoRoot, "workflows/codex-profiles.json");
 const agentFlowSchemaPath = join(repoRoot, "workflows/agent-flow.schema.json");
 const executorSchemaPath = join(repoRoot, "workflows/executor-result.schema.json");
 const controllerPath = join(repoRoot, "scripts/agent-flow.mjs");
+const hookPath = join(repoRoot, "scripts/agent-flow-hook.mjs");
 
 function json(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -46,6 +48,7 @@ function createGitFixture(t) {
 
 function task(overrides = {}) {
   return {
+    schema_version: "2.2",
     task_id: "CHG-2099-001-UNIT",
     change_id: "CHG-2099-001",
     change_type: "developer-tooling",
@@ -56,7 +59,12 @@ function task(overrides = {}) {
     change_proposal: "changes/CHG-2099-001.md",
     impact_analysis: "changes/CHG-2099-001-impact.md",
     risk_level: "low",
-    execution_profile: "executor-sol-max-fast",
+    lane: "standard-low",
+    route_reason: { matched: ["test fixture"], excluded: [] },
+    upgrade_triggers: ["test failure"],
+    independent_verifier: "on_trigger",
+    human_approval: "not_required",
+    execution_profile: "executor-sol-low",
     profile_reason: "test fixture",
     depends_on: [],
     conflicts_with: [],
@@ -64,6 +72,8 @@ function task(overrides = {}) {
     forbidden_paths: ["spec/**"],
     acceptance: ["controller returns deterministic evidence"],
     verification: ["node --test tests/agent_flow.test.mjs"],
+    required_context: [{ ref: "README.md", required: true }],
+    stop_conditions: ["scope expansion required"],
     rollback: "revert fixture",
     attempt: 1,
     branch: "codex/chg-2099-001-unit",
@@ -75,38 +85,22 @@ function task(overrides = {}) {
 }
 
 describe("cross-session agent control plane", () => {
-  it("pins exactly three case-sensitive Codex execution profiles", () => {
+  it("pins the project-only Claude model and single Codex execution profile", () => {
     const source = json(profilePath);
     const claudeInstructions = readFileSync(join(repoRoot, "CLAUDE.md"), "utf8");
-    assert.equal(source.schema_version, 1);
+    const claudeSettings = json(join(repoRoot, ".claude/settings.json"));
+    assert.equal(source.schema_version, "2.2");
     assert.deepEqual(source.profiles, {
-      "executor-sol-max-fast": {
+      "executor-sol-low": {
         model: "gpt-5.6-sol",
-        model_reasoning_effort: "max",
-        service_tier: "fast",
-        sandbox_mode: "workspace-write",
-        approval_policy: "never",
-      },
-      "executor-terra-max-fast": {
-        model: "gpt-5.6-terra",
-        model_reasoning_effort: "max",
-        service_tier: "fast",
-        sandbox_mode: "workspace-write",
-        approval_policy: "never",
-      },
-      "executor-terra-medium-fast": {
-        model: "gpt-5.6-terra",
-        model_reasoning_effort: "medium",
+        model_reasoning_effort: "low",
         service_tier: "fast",
         sandbox_mode: "workspace-write",
         approval_policy: "never",
       },
     });
-    assert.equal(
-      source.profiles["executor-terra-max-fast"].model,
-      source.profiles["executor-terra-medium-fast"].model,
-      "Terra max and medium must use the same lowercase model slug",
-    );
+    assert.deepEqual({ model: claudeSettings.model, effortLevel: claudeSettings.effortLevel }, { model: "fable", effortLevel: "medium" });
+    assert.equal(claudeSettings.env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME, "gpt-5.6-sol");
     for (const [name, profile] of Object.entries(source.profiles)) {
       assert.match(claudeInstructions, new RegExp(`${name}.*${profile.model}`));
     }
@@ -121,6 +115,7 @@ describe("cross-session agent control plane", () => {
     assert.ok(flowSchema.$defs.verificationResult);
     assert.equal(executorSchema.additionalProperties, false);
     assert.deepEqual(executorSchema.required, [
+      "schema_version",
       "task_id",
       "status",
       "session_id",
@@ -129,6 +124,8 @@ describe("cross-session agent control plane", () => {
       "commit",
       "changed_files",
       "tests",
+      "evidence_paths",
+      "context_expansions",
       "known_risks",
       "blocked_reason",
     ]);
@@ -148,7 +145,7 @@ describe("cross-session agent control plane", () => {
 
     const whitelist = loadProfileWhitelist(profilePath);
     const installed = installCodexProfiles({ codexHome, profilePath });
-    assert.equal(installed.length, 3);
+    assert.equal(installed.length, 1);
     assert.equal(readFileSync(sentinel, "utf8"), "model = \"keep-me\"\n");
     for (const [profileName, config] of Object.entries(whitelist.profiles)) {
       const installedPath = join(codexHome, `${profileName}.config.toml`);
@@ -161,19 +158,15 @@ describe("cross-session agent control plane", () => {
       ...whitelist,
       profiles: {
         ...whitelist.profiles,
-        "executor-unapproved": whitelist.profiles["executor-sol-max-fast"],
+        "executor-unapproved": whitelist.profiles["executor-sol-low"],
       },
     })}\n`);
     assert.throws(() => loadProfileWhitelist(driftedPath), /must contain exactly/);
 
     const catalogStatus = assessProfileCatalog([
-      { slug: "gpt-5.6-sol", supported_reasoning_levels: [{ effort: "max" }] },
-      { slug: "gpt-5.6-terra", supported_reasoning_levels: [{ effort: "max" }, { effort: "medium" }] },
+      { slug: "gpt-5.6-sol", supported_reasoning_levels: [{ effort: "low" }] },
     ], whitelist);
-    assert.equal(catalogStatus["executor-sol-max-fast"].reasoning_supported, true);
-    assert.equal(catalogStatus["executor-terra-max-fast"].reasoning_supported, true);
-    assert.equal(catalogStatus["executor-terra-medium-fast"].listed_exactly, true);
-    assert.equal(catalogStatus["executor-terra-medium-fast"].reasoning_supported, true);
+    assert.equal(catalogStatus["executor-sol-low"].reasoning_supported, true);
   });
 
   it("validates task definitions and rejects unknown profiles or unsafe states", async (t) => {
@@ -186,6 +179,14 @@ describe("cross-session agent control plane", () => {
     assert.match(
       validateTaskDefinition(task({ change_status: "DRAFT" })).join("\n"),
       /change_status must be SPEC_APPROVED/,
+    );
+    assert.match(
+      validateTaskDefinition(task({ lane: "critical", human_approval: "not_required", independent_verifier: "required" })).join("\n"),
+      /critical requires human_approval=approved/,
+    );
+    assert.match(
+      validateTaskDefinition(task({ lane: "standard-high", independent_verifier: "on_trigger" })).join("\n"),
+      /standard-high requires independent_verifier=required/,
     );
     assert.match(
       validateTaskDefinition(task({ allowed_paths: ["spec/**"] })).join("\n"),
@@ -241,6 +242,7 @@ describe("cross-session agent control plane", () => {
     const profile = loadProfileWhitelist(profilePath).profiles[currentTask.execution_profile];
     const execArgs = buildCodexExecArgs({
       task: currentTask,
+      profile,
       prompt: "bounded prompt",
       outputSchemaPath: "/repo/workflows/executor-result.schema.json",
       outputPath: "/state/executor.json",
@@ -249,8 +251,8 @@ describe("cross-session agent control plane", () => {
       "exec",
       "-C",
       currentTask.worktree,
-      "--profile",
-      currentTask.execution_profile,
+      "-m",
+      "gpt-5.6-sol",
     ]);
     assert.ok(execArgs.includes("workspace-write"));
     assert.ok(execArgs.includes('approval_policy="never"'));
@@ -270,7 +272,7 @@ describe("cross-session agent control plane", () => {
       "01900000-0000-7000-8000-000000000001",
     ]);
     assert.ok(resumeArgs.includes("gpt-5.6-sol"));
-    assert.ok(resumeArgs.includes('model_reasoning_effort="max"'));
+    assert.ok(resumeArgs.includes('model_reasoning_effort="low"'));
     assert.ok(resumeArgs.includes('service_tier="fast"'));
     assert.ok(resumeArgs.includes('sandbox_mode="workspace-write"'));
     assert.ok(resumeArgs.includes('approval_policy="never"'));
@@ -304,6 +306,7 @@ describe("cross-session agent control plane", () => {
     const baseSha = "0123456789012345678901234567890123456789";
     const headSha = "abcdefabcdefabcdefabcdefabcdefabcdefabcd";
     const executor = {
+      schema_version: "2.2",
       task_id: currentTask.task_id,
       status: "PASS",
       session_id: "session-1",
@@ -312,6 +315,8 @@ describe("cross-session agent control plane", () => {
       commit: headSha,
       changed_files: ["scripts/agent-flow.mjs"],
       tests: [{ command: "node --test", result: "PASS", evidence: "green" }],
+      evidence_paths: ["tests/agent_flow.test.mjs"],
+      context_expansions: [],
       known_risks: [],
       blocked_reason: null,
     };
@@ -369,11 +374,21 @@ describe("cross-session agent control plane", () => {
       checkpoint_sha: git(fixture, "rev-parse", "HEAD"),
       attempt: 1,
     };
-    writeRuntimeState(fixture, state.task_id, state);
+    const written = writeRuntimeState(fixture, state.task_id, state);
     const root = runtimeStateRoot(fixture);
     const commonDir = git(fixture, "rev-parse", "--path-format=absolute", "--git-common-dir");
     assert.equal(realpathSync(dirname(root)), realpathSync(commonDir), root);
     assert.equal(readRuntimeState(fixture, state.task_id).run_status, "EXECUTING");
+    assert.equal(written.schema_version, "2.2");
+    assert.equal(written.state_revision, 1);
+    assert.throws(
+      () => writeRuntimeState(fixture, state.task_id, { ...written, run_status: "BLOCKED" }, { expectedRevision: 0 }),
+      /stale state revision/,
+    );
+    assert.match(
+      readFileSync(join(root, "events/task-events.jsonl"), "utf8"),
+      /"event_type":"state.transitioned"/,
+    );
     assert.equal(git(fixture, "status", "--short"), "", "runtime state must not dirty the worktree");
 
     const archivedTask = task({ task_id: "CHG-2099-002-ARCHIVED" });
@@ -392,6 +407,36 @@ describe("cross-session agent control plane", () => {
       unexpected_writes: [],
     })}\n`);
     assert.equal(effectiveState(fixture, archivedTask).run_status, "ARCHIVED");
+  });
+
+  it("hashes context, preserves immutable results, and rejects realpath escape", async (t) => {
+    const {
+      createTaskContextSnapshot,
+      persistImmutableResult,
+      validateTaskRealpaths,
+    } = await controller();
+    const fixture = createGitFixture(t);
+    const boundedTask = task({
+      task_id: "CHG-2099-003-CONTEXT",
+      change_proposal: "README.md",
+      impact_analysis: "README.md",
+      required_context: [{ ref: "README.md", required: true }],
+      allowed_paths: ["src/**"],
+    });
+    const snapshot = createTaskContextSnapshot(fixture, boundedTask);
+    assert.match(snapshot.snapshot_id, /^ctx-/);
+    assert.equal(snapshot.sources.every((source) => /^[0-9a-f]{64}$/.test(source.content_sha256)), true);
+    const first = persistImmutableResult(fixture, boundedTask.task_id, "executor", { status: "PASS" });
+    const second = persistImmutableResult(fixture, boundedTask.task_id, "executor", { status: "PASS" });
+    assert.equal(first.result_id, second.result_id);
+
+    const outside = mkdtempSync(join(tmpdir(), "ypmcn-agent-outside-"));
+    t.after(() => rmSync(outside, { recursive: true, force: true }));
+    symlinkSync(outside, join(fixture, "escape"));
+    assert.match(
+      validateTaskRealpaths(fixture, { ...boundedTask, allowed_paths: ["escape/**"] }).join("\n"),
+      /outside task worktree/,
+    );
   });
 
   it("serializes state-changing controller decisions with recoverable locks", async (t) => {
@@ -422,8 +467,28 @@ describe("cross-session agent control plane", () => {
     assert.match(compareVerifierSnapshots(before, afterGitMutation).join("\n"), /Git status changed/);
   });
 
+  it("applies the project-only Claude PreToolUse write gate", () => {
+    function invokeHook(payload) {
+      return spawnSync(process.execPath, [hookPath], {
+        cwd: repoRoot,
+        env: { ...process.env, CLAUDE_PROJECT_DIR: repoRoot },
+        input: JSON.stringify(payload),
+        encoding: "utf8",
+      });
+    }
+    const deniedFile = invokeHook({ tool_name: "Write", tool_input: { file_path: join(repoRoot, "src/forbidden.mjs") } });
+    assert.equal(deniedFile.status, 0, deniedFile.stderr);
+    assert.equal(JSON.parse(deniedFile.stdout).hookSpecificOutput.permissionDecision, "deny");
+    const allowedTask = invokeHook({ tool_name: "Write", tool_input: { file_path: join(repoRoot, "workflows/tasks/new.yaml") } });
+    assert.equal(allowedTask.stdout, "");
+    const deniedShell = invokeHook({ tool_name: "Bash", tool_input: { command: "git commit -am unsafe" } });
+    assert.equal(JSON.parse(deniedShell.stdout).hookSpecificOutput.permissionDecision, "deny");
+    const allowedShell = invokeHook({ tool_name: "Bash", tool_input: { command: "git status --short" } });
+    assert.equal(allowedShell.stdout, "");
+  });
+
   it("uses the native pure OpenCode plan invocation with a yuepu verifier", async () => {
-    const { buildOpenCodeInvocation } = await controller();
+    const { buildOpenCodeInvocation, requiresIndependentVerifier } = await controller();
     const invocation = buildOpenCodeInvocation({
       repoRoot: "/repo",
       prompt: "verify frozen diff",
@@ -442,6 +507,16 @@ describe("cross-session agent control plane", () => {
     assert.ok(invocation.args.includes("json"));
     assert.equal(invocation.args.includes("--auto"), false);
     assert.equal(invocation.env.OPENCODE_DISABLE_EXTERNAL_SKILLS, "1");
+    const fallback = buildOpenCodeInvocation({
+      repoRoot: "/repo",
+      prompt: "fallback verify",
+      model: "yuepu/gpt-5.6-sol",
+      variant: "medium",
+    });
+    assert.deepEqual(fallback.args.slice(-3, -1), ["--variant", "medium"]);
+    assert.equal(requiresIndependentVerifier(task(), { attempt: 1 }), false);
+    assert.equal(requiresIndependentVerifier(task(), { attempt: 2 }), true);
+    assert.equal(requiresIndependentVerifier(task({ lane: "standard-high", independent_verifier: "required" }), {}), true);
     assert.throws(
       () => buildOpenCodeInvocation({ repoRoot: "/repo", prompt: "x", model: "openai/gpt" }),
       /must remain under yuepu/,
@@ -454,10 +529,9 @@ describe("cross-session agent control plane", () => {
       encoding: "utf8",
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(Object.keys(JSON.parse(result.stdout).profiles), [
-      "executor-sol-max-fast",
-      "executor-terra-max-fast",
-      "executor-terra-medium-fast",
+    const profileResult = JSON.parse(result.stdout);
+    assert.deepEqual(Object.keys(profileResult.profiles), [
+      "executor-sol-low",
     ]);
 
     const validation = spawnSync(process.execPath, [
@@ -468,5 +542,12 @@ describe("cross-session agent control plane", () => {
     ], { cwd: repoRoot, encoding: "utf8" });
     assert.equal(validation.status, 0, validation.stderr);
     assert.equal(JSON.parse(validation.stdout).status, "PASS");
+
+    const status = spawnSync(process.execPath, [controllerPath, "status", "--json"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    assert.equal(status.status, 0, status.stderr);
+    assert.equal(JSON.parse(status.stdout).max_parallel_writers, 5);
   });
 });

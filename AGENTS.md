@@ -49,11 +49,13 @@ Spec 或正式 Change Proposal 必须完整暂存；pre-commit hook 会自动同
 
 不要让同一推理链自证正确；Verifier 默认不修改生产代码。
 
-项目控制器是 `scripts/agent-flow.mjs`，完整协议见 `workflows/README.md`。每个 Claude Session 先运行 `status/plan` 恢复共享运行态；最多派发两个无依赖、无路径冲突的 Codex Writer。模型名保持精确大小写且禁止 fallback：
+项目控制器是 `scripts/agent-flow.mjs`，完整协议见 `workflows/README.md`。每个 Claude Session 先运行 `status/plan` 恢复共享运行态；最多派发五个无依赖、无路径冲突的 Codex Writer。V2.2 新任务固定使用：
 
-- `executor-sol-max-fast` → `gpt-5.6-sol` / `max` / `fast`。
-- `executor-terra-max-fast` → `gpt-5.6-terra` / `max` / `fast`。
-- `executor-terra-medium-fast` → `gpt-5.6-terra` / `medium` / `fast`。
+- Claude Code Orchestrator：项目 `fable` → `gpt-5.6-sol` / `medium`。
+- Codex Executor：`executor-sol-low` → `gpt-5.6-sol` / `low` / `fast`。
+- OpenCode Verifier：`yuepu/Deepseek-V4-Pro`；非 Critical 仅在进程/格式故障时可降级 `yuepu/gpt-5.6-sol` / `medium`。
+
+新任务按 Fast / Standard-Low / Standard-High / Critical 路由；前两档按触发器启用独立验证，后两档强制独立验证，Critical 还需人工批准且禁止自动降级 Verifier。
 
 高频状态、JSONL、session ID 和锁只写 Git common dir 的 `agent-flow/`，不提交到工作树。Codex 非交互执行期间不依赖面向用户的周期进度消息；Orchestrator 只在状态转换、阻塞或最终验收时汇总。
 

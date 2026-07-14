@@ -12,17 +12,15 @@
 
 版本控制中的 `tasks/*.yaml` 是任务定义；Git common dir 的 `agent-flow/` 是跨 worktree/session 运行态；Git commit 是代码权威；`verifications/*.json` 只保存最终独立验收证据。模型文本不能覆盖 Git、退出码或路径边界。
 
-## Codex 白名单与路由
+## V2.2 固定模型与路由
 
-Claude 必须显式选择下列大小写敏感 Profile，并写 `profile_reason`；控制器不会规范化模型名或自动降级。
+本项目的 V2.2 新任务固定使用一个 Codex Profile；历史已归档任务中的旧 Profile 只读兼容。
 
 | Profile | 精确模型 | Reasoning | Tier | 建议路由 |
 | --- | --- | --- | --- | --- |
-| `executor-terra-medium-fast` | `gpt-5.6-terra` | `medium` | `fast` | 低风险、局部、验收明确的常规实现 |
-| `executor-terra-max-fast` | `gpt-5.6-terra` | `max` | `fast` | 跨文件、并发、状态或高风险实现的默认 max 通道 |
-| `executor-sol-max-fast` | `gpt-5.6-sol` | `max` | `fast` | 架构/诊断占比高，或需要另一条 max 模型路径时 |
+| `executor-sol-low` | `gpt-5.6-sol` | `low` | `fast` | 所有 V2.2 Codex 实现任务 |
 
-路由是任务级决策，不是隐式 fallback。任何 Profile、模型目录或 reasoning 拒绝都返回 `BLOCKED`；Claude 修改 Task 后才可重新派发。
+任务风险另按 `fast / standard-low / standard-high / critical` 分类。Fast/Standard-Low 无触发器时走 L1/L2 自验；Standard-High/Critical 强制 OpenCode L4。Critical 必须有人类批准，且 Verifier 不自动 fallback。
 
 ## 状态与并行
 
@@ -34,7 +32,7 @@ READY → DISPATCHED → EXECUTING → EXECUTOR_DONE
                                FAIL/BLOCKED → REWORK_READY → DISPATCHED
 ```
 
-- 最多两个 Codex Writer；派发锁保证多个 Claude Session 不会竞态突破上限。
+- 最多五个 Codex Writer；派发锁保证多个 Claude Session 不会竞态突破上限。
 - 依赖、显式冲突、路径 glob 有交集时不并行；Spec、锁文件、共享 Manifest/Schema、Migration、Package 和集成默认串行。
 - Codex JSONL 实时写入 Git common dir；`thread.started` 到达后立即保存 session ID 和子进程 PID。控制 Session 中断后，只有旧进程确认已退出才允许 `resume`。
 - OpenCode 验证与 main 集成分别串行加锁。Verifier 前后比较 worktree Git 状态、任务 plan 目录和用户 plan 目录；任一变化直接 `FAIL`。
@@ -44,11 +42,11 @@ READY → DISPATCHED → EXECUTING → EXECUTOR_DONE
 ## 命令
 
 ```bash
-# 一次性安装/刷新三个 opt-in 用户 Profile；不会改已有 yuepu.config.toml
+# 可选安装/刷新项目使用的 opt-in Codex Profile；不会改已有 yuepu.config.toml
 npm run agent-flow -- profiles --install --json
 npm run agent-flow -- profiles --check-catalog --json
 
-# Claude 每个 Session 先恢复全局状态，再规划最多两个无冲突 Writer
+# Claude 每个 Session 先恢复项目状态，再规划最多五个无冲突 Writer
 npm run agent-flow -- validate --json
 npm run agent-flow -- status --json
 npm run agent-flow -- plan --json
@@ -68,7 +66,7 @@ Codex 运行在非交互 `exec` 中，范围内不再等用户确认；过程事
 
 ## 文件
 
-- `codex-profiles.json`：唯一三档白名单源。
+- `codex-profiles.json`：V2.2 唯一 Executor Profile 源。
 - `agent-flow.schema.json`：Task、运行态与 Verification 合约。
 - `executor-result.schema.json`：传给 `codex exec --output-schema` 的严格 Executor 输出合约。
 - `task.template.yaml`：Claude 生成任务的模板。

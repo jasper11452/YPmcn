@@ -20,10 +20,11 @@
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:1b0ab552e9a36afd268144f239412fee814c38d9c368ac2f8736050b70fff94d`
-变更记录摘要：`sha256:cf7a5e4fc5e745771f9d1dff95c8e14803153d365702b0ab07cca7ea8a915a03`
+变更记录摘要：`sha256:5d350bdaf7b112c8ad05e395d44b8a6af07f4c3067ca7e5d3b14baa7a92f7bc0`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-012 | `SPEC_APPROVED` | [升级项目级 Agent Flow 至 V2.2](../changes/CHG-2026-012-agent-flow-v22.md) |
 | CHG-2026-011 | `SPEC_APPROVED` | [修正 Hook 与 OpenClaw 宿主接口对接](../changes/CHG-2026-011-hook-host-integration.md) |
 | CHG-2026-010 | `SPEC_APPROVED` | [Reference MCP 实现正式输出与恢复契约](../changes/CHG-2026-010-reference-mcp-runtime.md) |
 | CHG-2026-009 | `SPEC_APPROVED` | [Hook / Skill 消费服务端权威状态](../changes/CHG-2026-009-hook-skill-authority.md) |

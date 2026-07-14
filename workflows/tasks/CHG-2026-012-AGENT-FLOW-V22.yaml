@@ -1,0 +1,76 @@
+schema_version: "2.2"
+task_id: CHG-2026-012-AGENT-FLOW-V22
+change_id: CHG-2026-012
+change_type: developer-tooling
+change_status: SPEC_APPROVED
+run_status: READY
+goal: "将现有项目级控制器兼容升级为可试点的 Agent Flow V2.2"
+approved_spec_version: "mvp-v2 / schemaVersion 1"
+change_proposal: "changes/CHG-2026-012-agent-flow-v22.md"
+impact_analysis: "changes/CHG-2026-012-agent-flow-v22-impact.md"
+risk_level: high
+lane: standard-high
+route_reason:
+  matched:
+    - "跨控制器、Schema、状态恢复和验证链路"
+    - "涉及并发、不可变结果与上下文恢复"
+  excluded:
+    - "不修改业务 Spec、生产数据或外部系统"
+upgrade_triggers:
+  - "状态引用或事件序列不一致"
+  - "Verifier 发生非预期写入"
+independent_verifier: required
+human_approval: not_required
+execution_profile: executor-sol-low
+profile_reason: "用户固定 Codex Executor 为 gpt-5.6-sol/low"
+depends_on: []
+conflicts_with: []
+allowed_paths:
+  - ".claude/settings.json"
+  - "changes/CHG-2026-012-agent-flow-v22.md"
+  - "changes/CHG-2026-012-agent-flow-v22-impact.md"
+  - "workflows/**"
+  - "scripts/agent-flow.mjs"
+  - "scripts/agent-flow-hook.mjs"
+  - "tests/agent_flow.test.mjs"
+  - "AGENTS.md"
+  - "CLAUDE.md"
+  - "docs/EVOLUTION.md"
+forbidden_paths:
+  - "spec/**"
+  - "YPmcn/**"
+  - "vector-mcp/**"
+  - "reference-mcp/**"
+  - "packages/**"
+  - ".github/**"
+  - ".env*"
+acceptance:
+  - "项目级 Claude、Codex 与 OpenCode 模型配置精确匹配批准值"
+  - "新任务四档路由、升级触发器和验证策略可机器校验"
+  - "调度器最多选择五个无冲突 Writer"
+  - "状态有 revision 和事件审计，结果不可变，上下文来源有哈希"
+  - "Standard-High/Critical 独立验证；Critical 禁止自动 fallback"
+  - "项目身份错误、路径逃逸、Verifier 写入和陈旧状态更新均 fail closed"
+  - "控制面测试和仓库离线验证全部通过，业务目录零变化"
+verification:
+  - "node --test tests/agent_flow.test.mjs"
+  - "npm run verify"
+  - "node scripts/scan-secrets.mjs --tracked"
+  - "git diff --check"
+required_context:
+  - ref: "changes/CHG-2026-012-agent-flow-v22.md"
+    required: true
+  - ref: "changes/CHG-2026-012-agent-flow-v22-impact.md"
+    required: true
+  - ref: "workflows/README.md"
+    required: true
+stop_conditions:
+  - "需要修改业务 Spec 或业务组件"
+  - "需要修改用户全局 Claude、Codex 或 OpenCode 配置"
+  - "验证证据无法闭环"
+rollback: "revert 本变更；删除 Git common dir 下该任务的 V2.2 运行态"
+attempt: 1
+branch: "codex/chg-2026-012-agent-flow-v22"
+worktree: "/Users/jasper/Documents/YPmcn-worktrees/chg-2026-012-agent-flow-v22"
+base_sha: "f1e8f4713dcf92d2bcd2386eb4a0320b09e4301c"
+next_action: "dispatch"

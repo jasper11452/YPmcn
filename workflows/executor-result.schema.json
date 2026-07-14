@@ -5,6 +5,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "schema_version",
     "task_id",
     "status",
     "session_id",
@@ -13,10 +14,13 @@
     "commit",
     "changed_files",
     "tests",
+    "evidence_paths",
+    "context_expansions",
     "known_risks",
     "blocked_reason"
   ],
   "properties": {
+    "schema_version": { "const": "2.2" },
     "task_id": { "type": "string", "minLength": 1 },
     "status": { "enum": ["PASS", "BLOCKED"] },
     "session_id": { "type": ["string", "null"] },
@@ -37,6 +41,22 @@
           "command": { "type": "string", "minLength": 1 },
           "result": { "enum": ["PASS", "FAIL", "NOT_RUN"] },
           "evidence": { "type": "string" }
+        }
+      }
+    },
+    "evidence_paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "context_expansions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason", "source_ref"],
+        "properties": {
+          "reason": { "type": "string", "minLength": 1 },
+          "source_ref": { "type": "string", "minLength": 1 }
         }
       }
     },
