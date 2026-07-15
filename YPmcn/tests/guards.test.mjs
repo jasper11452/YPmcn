@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { runBeforeToolCallGuards } from "../dist/hooks/guards.js";
+import { normalizeYpmcnToolName, runBeforeToolCallGuards } from "../dist/hooks/guards.js";
 import { createRuntimeStateStore } from "../dist/hooks/runtime-state.js";
 
 const NOW = Date.parse("2026-07-15T10:00:00+08:00");
@@ -52,6 +52,13 @@ function context(store, tool, params, overrides = {}) {
 }
 
 describe("current Endpoint before-tool guards", () => {
+  it("normalizes canonical and deployed YPmcn host prefixes", () => {
+    for (const prefix of ["ypmcn__", "mcp__ypmcn__", "ypmcn-mcp__", "ypmcn-provider__"]) {
+      assert.equal(normalizeYpmcnToolName(`${prefix}get_creator_detail`), "get_creator_detail");
+    }
+    assert.equal(normalizeYpmcnToolName("vector-mcp__get_creator_detail"), null);
+  });
+
   it("uses live id arguments and rejects old chained arguments", async () => {
     const store = createRuntimeStateStore({ now: () => NOW });
     store.set("session-1", { phase: "requirement_ready", requirement_id: "req-1" });

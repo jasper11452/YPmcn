@@ -7,7 +7,7 @@
 - raw：`raw_messages` 或 `raw_messages_json`；
 - structured：mvp-v2 profile 中声明的任一结构字段。
 
-运行时 schema 是语法权威。Agent 不要求用户提供 `trace_id` 或幂等键，不在第一次 validation 前增加无关确认。
+运行时 schema 是语法权威。Agent 不要求用户提供 `trace_id` 或幂等键。第一次 validation 前只处理会造成错误业务写入的硬冲突：不支持或无法映射的平台、缺少年份或已经过去的档期、多平台数量口径、预算是单人还是总额，以及无法解析的语病；其余信息不增加无关确认。
 
 ## 解析原则
 

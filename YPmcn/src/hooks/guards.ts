@@ -252,8 +252,15 @@ function validatePhaseAndIdentity(
   }
 }
 
+const TOOL_NAME_PREFIXES = [
+  "ypmcn__",
+  "mcp__ypmcn__",
+  "ypmcn-mcp__",
+  "ypmcn-provider__",
+] as const;
+
 export function normalizeYpmcnToolName(toolName: string): string | null {
-  for (const prefix of ["ypmcn__", "mcp__ypmcn__"]) {
+  for (const prefix of TOOL_NAME_PREFIXES) {
     if (!toolName.startsWith(prefix)) continue;
     const candidate = toolName.slice(prefix.length);
     return candidate.length > 0 ? candidate : null;

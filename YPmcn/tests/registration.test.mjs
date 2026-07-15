@@ -153,13 +153,14 @@ describe("OpenClaw v2 hook registration", () => {
     assert.doesNotMatch(result.prependContext, /raw_messages|budget_raw|description/);
   });
 
-  it("preserves tool results verbatim", async () => {
+  it("preserves tool results verbatim with a synchronous persistence hook", () => {
     const api = fakeApi();
     const store = createRuntimeStateStore({ now: () => NOW });
     registerHooks(api, { store, now: () => NOW });
     const event = { toolName: "mcp__ypmcn__search_creators", result: { success: true, data: { id: "pool-1" } } };
-    const result = await api.handlers.get("tool_result_persist")(event, { sessionKey: "session-1" });
+    const result = api.handlers.get("tool_result_persist")(event, { sessionKey: "session-1" });
     assert.equal(result, undefined);
+    assert.equal(result instanceof Promise, false);
     assert.deepEqual(event.result, { success: true, data: { id: "pool-1" } });
   });
 });

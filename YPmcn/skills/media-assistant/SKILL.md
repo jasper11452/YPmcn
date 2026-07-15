@@ -10,12 +10,24 @@ description: Use for the live YPmcn media workflow: requirement validation, crea
 ## 契约门禁
 
 1. 调用前读取运行时 `tools/list`，并以仓库根 `spec/mcp.json` 为参数权威。
-2. 工具缺失、required/type 不兼容、ID 语义不明确时停止，返回 `integration_required`。
-3. 当前 Endpoint schema 优先于旧 mvp-v2；不跨 provider 混用 ID。
-4. reference MCP 只供演练；不得把 reference MCP 的 simulated=true 当作生产成功。
-5. 写结果未知时先查权威状态，不盲目重写。
+2. 必须逐项确认固定主链的 required tools 当前可调用；任一工具缺失、被过滤、required/type 不兼容或 ID 语义不明确时，立即停止并返回 `integration_required`。不得继续生成模拟参数、候选、MCN 名单或“可正常推进”的后续流程。
+3. `tools/list` 只证明能力存在，不证明业务步骤已执行。只有实际 MCP 返回可表述为完成；未调用的步骤统一标记“未执行”，不得用预期返回或示例 JSON 冒充运行结果。
+4. 当前 Endpoint schema 优先于旧 mvp-v2；不跨 provider 混用 ID。
+5. reference MCP 只供演练；不得把 reference MCP 的 simulated=true 当作生产成功。
+6. 写结果未知时先查权威状态，不盲目重写。
 
 生产 provider 当前已广告完整非 `pgy` 工具面。`tools/list` 未广告任何 `outputSchema`：除工具描述明确说明的 `rank_creators` 的 `run_id` 和字段选择的 description 文本外，不得把旧输出字段当作契约。
+
+## 需求写入前预检
+
+`validate_requirement` 会写业务数据。调用前先读取 `references/creator_candidate_pool_schema.csv`，将用户筛选条件逐项映射到 CSV 中的真实字段名；只有 CSV 已声明的字段才能结构化，找不到对应字段的条件必须保留原文并请求最小确认，不得自造字段或同义列。随后只检查会导致错误写入的硬冲突，不提前展开完整问卷：
+
+- 平台必须能无歧义映射到运行时支持值；视频号不得映射为 `dy`，不支持时先确认降级或停止。
+- 档期必须有年份且未过期；相对 DDL 按当前时区换算后必须是未来时间。
+- 多平台数量必须明确是合计还是每平台；预算必须明确是单达人还是总预算，以及含税、返点口径。
+- 语病、缺少数值阈值或纯主观筛选不得擅自结构化；保留原文并请求一次最小确认。
+
+存在任一硬冲突时停在 `requirement_draft`，不得调用 `validate_requirement`，也不得叙述下游为“可正常推进”。
 
 ## 固定主链
 
@@ -62,7 +74,7 @@ validate_requirement(payload)
 
 ## 回复边界
 
-结论先行；金额对人显示元/万元，返点显示百分比。只展示决策信息，不暴露完整 Brief、原始 JSON、数据库 ID、状态快照、算法、凭据或堆栈。失败只说明当前步骤、错误语义和下一安全动作。
+结论先行；金额对人显示元/万元，返点显示百分比。只展示决策信息，不暴露完整 Brief、原始或模拟 JSON、数据库 ID、状态快照、算法、凭据或堆栈。明确区分“已执行”“未执行”“被阻断”；不得展示未调用工具的预期成功返回。失败只说明当前步骤、错误语义和下一安全动作。
 
 ## 按需读取
 

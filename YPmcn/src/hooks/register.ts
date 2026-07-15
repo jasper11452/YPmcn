@@ -263,7 +263,7 @@ export function registerHooks(api: HookApi, options: RegisterHooksOptions = {}):
   // updated by after_tool_call and remains deliberately separate.
   api.on(
     "tool_result_persist",
-    async () => undefined,
+    () => undefined,
     DEFAULT_HOOK_OPTIONS,
   );
 
