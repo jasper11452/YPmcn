@@ -1,0 +1,104 @@
+schema_version: "2.2"
+task_id: CHG-2026-013-VECTOR-CONTRACT
+change_id: CHG-2026-013
+change_type: contract
+change_status: SPEC_APPROVED
+run_status: READY
+goal: "把最新 MVP 数据表、工具边界和向量检索治理升级为可机器验证的正式 Spec 基线"
+approved_spec_version: "mvp-v3-vector-baseline / schemaVersion 1"
+change_proposal: "changes/CHG-2026-013-vector-contract-baseline.md"
+impact_analysis: "changes/CHG-2026-013-vector-contract-baseline-impact.md"
+risk_level: critical
+lane: critical
+route_reason:
+  matched:
+    - "修改正式业务数据库、MCP、工作流、错误和算法契约"
+    - "决定数据身份、权限边界、降级语义与后续生产实现前置条件"
+  excluded:
+    - "本阶段不修改运行时代码、生产数据或外部系统"
+upgrade_triggers:
+  - "需要猜测外部文档未定义的业务字段或排序参数"
+  - "需要新增业务 MCP 工具或扩大 vector namespace 权限"
+  - "需要修改运行时、数据库、Qdrant 或服务器"
+independent_verifier: required
+human_approval: approved
+execution_profile: executor-sol-low
+profile_reason: "边界已冻结，Codex 仅需按现有 Spec 模式完成小步契约与测试更新"
+depends_on: []
+conflicts_with: []
+allowed_paths:
+  - "changes/CHG-2026-013-vector-contract-baseline.md"
+  - "changes/CHG-2026-013-vector-contract-baseline-impact.md"
+  - "workflows/tasks/CHG-2026-013-VECTOR-CONTRACT.yaml"
+  - "spec/manifest.json"
+  - "spec/database.json"
+  - "spec/mcp.json"
+  - "spec/workflow.json"
+  - "spec/errors.json"
+  - "spec/algorithms.json"
+  - "tests/spec_governance.test.mjs"
+  - "tests/provider_contract.test.mjs"
+  - "YPmcn/tests/contract-spec.test.mjs"
+  - "docs/README.md"
+  - "docs/PROJECT_MAP.md"
+  - "docs/integration-readiness.md"
+  - "docs/EVOLUTION.md"
+forbidden_paths:
+  - "YPmcn/src/**"
+  - "YPmcn/skills/**"
+  - "YPmcn/package.json"
+  - "YPmcn/mcp.json"
+  - "YPmcn/README.md"
+  - "YPmcn/tests/guards.test.mjs"
+  - "YPmcn/tests/registration.test.mjs"
+  - "YPmcn/tests/runtime-flow.test.mjs"
+  - "YPmcn/tests/contract.test.mjs"
+  - "vector-mcp/**"
+  - "reference-mcp/**"
+  - "packages/**"
+  - "scripts/**"
+  - ".github/**"
+  - ".claude/**"
+  - ".env*"
+  - "workflows/agent-flow.schema.json"
+  - "workflows/executor-result.schema.json"
+  - "workflows/codex-profiles.json"
+acceptance:
+  - "正式 Spec 覆盖最新 MVP 业务实体、平台加 kw_uid 身份及 source_snapshot_date 快照身份"
+  - "MySQL 是唯一事实源且 Qdrant 是可重建派生索引，返回前需回源复核"
+  - "业务 MCP closed-world 工具集合不新增，vector-mcp namespace 继续 excluded"
+  - "search_creators 与 rank_creators 的向量内部实现、硬过滤、软排序和 provenance 边界明确"
+  - "content 与 commercial 向量字段、排除字段及缺失感知排序规则可机器验证"
+  - "模型、维度、权重和阈值保持待评估、shadow 或 disabled，未写入猜测生产默认值"
+  - "向量不可用、索引陈旧和 SQL-only 降级具有稳定错误或结果语义"
+  - "全部变更仅位于 allowed_paths，仓库全量离线门禁通过"
+verification:
+  - "node --test tests/spec_governance.test.mjs"
+  - "node --test tests/provider_contract.test.mjs"
+  - "npm run verify:spec"
+  - "npm run verify:docs"
+  - "npm run verify"
+  - "node scripts/scan-secrets.mjs --tracked"
+  - "git diff --check"
+  - "OpenCode yuepu/Deepseek-V4-Pro read-only verification"
+required_context:
+  - ref: "changes/CHG-2026-013-vector-contract-baseline.md"
+    required: true
+  - ref: "changes/CHG-2026-013-vector-contract-baseline-impact.md"
+    required: true
+  - ref: "AGENTS.md"
+    required: true
+  - ref: "spec/manifest.json"
+    required: true
+stop_conditions:
+  - "需要修改 forbidden_paths"
+  - "正式 Spec 无法由现有 Schema 表达且需要修改验证脚本"
+  - "需要修改除 YPmcn/tests/contract-spec.test.mjs 外的 YPmcn 运行时、类型、Skill 或测试"
+  - "必须选择尚未评估的模型、维度、阈值或排序权重"
+  - "Critical 首选 Verifier 不可用或产生非预期写入"
+rollback: "revert 本 Change 的 Spec、测试和文档变更；无业务数据或向量索引回滚"
+attempt: 1
+branch: "codex/chg-2026-013-vector-contract"
+worktree: "/Users/jasper/Documents/YPmcn-worktrees/chg-2026-013-vector-contract"
+base_sha: "5d36b391c1b0c69cd58243dd3f8598018996d71d"
+next_action: "dispatch"

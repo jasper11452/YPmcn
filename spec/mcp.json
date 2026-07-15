@@ -2,6 +2,28 @@
   "schemaVersion": 1,
   "profile": "mvp-v2",
   "mode": "writable",
+  "vectorCapabilityBoundary": {
+    "publicBusinessVectorTools": [],
+    "excludedNamespace": "vector-mcp",
+    "operationsTools": [
+      "sync_creator_tag_vectors",
+      "search_creator_tag_vectors",
+      "health_check_vector_store"
+    ],
+    "search_creators": {
+      "role": "hard-filter-candidate-recall-and-provenance",
+      "vectorUse": "internal-shadow-capability",
+      "hardFiltersAuthoritativeSource": "mysql",
+      "returnVerification": "current-mysql-record",
+      "degradation": "sql-only-with-provenance-and-degraded-reason"
+    },
+    "rank_creators": {
+      "role": "accepted-candidates-only-missing-aware-explainable-ranking",
+      "vectorUse": "soft-feature-only",
+      "acceptedStatuses": ["accepted"],
+      "provenanceRequired": true
+    }
+  },
   "serverIdentity": {
     "canonicalNamespace": "ypmcn",
     "hostQualifiedToolName": {
@@ -311,6 +333,16 @@
           "as_of_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "retrieval_mode": {
+            "type": "string",
+            "enum": ["sql-only", "vector-shadow"]
+          },
+          "degraded_reason": {
+            "type": ["string", "null"]
+          },
+          "provenance": {
+            "type": "object"
           }
         },
         "additionalProperties": false
@@ -321,6 +353,10 @@
         "DICTIONARY_REFERENCE_MISMATCH",
         "JOIN_GATE_FAILED",
         "SCOPE_MISMATCH",
+        "VECTOR_CONFIGURATION_INVALID",
+        "EMBEDDING_UNAVAILABLE",
+        "VECTOR_STORE_UNAVAILABLE",
+        "VECTOR_INDEX_STALE",
         "WRITE_RESULT_UNKNOWN"
       ]
     },
@@ -673,6 +709,16 @@
           "state_version": {
             "type": "integer",
             "minimum": 1
+          },
+          "retrieval_mode": {
+            "type": "string",
+            "enum": ["sql-only", "vector-shadow"]
+          },
+          "degraded_reason": {
+            "type": ["string", "null"]
+          },
+          "provenance": {
+            "type": "object"
           }
         },
         "additionalProperties": false
@@ -684,6 +730,9 @@
         "JOIN_GATE_FAILED",
         "SCOPE_MISMATCH",
         "LATE_DATA_REJECTED",
+        "RERANKER_UNAVAILABLE",
+        "VECTOR_STORE_UNAVAILABLE",
+        "VECTOR_INDEX_STALE",
         "WRITE_RESULT_UNKNOWN"
       ]
     },

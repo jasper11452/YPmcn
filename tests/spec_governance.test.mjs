@@ -123,15 +123,74 @@ describe("Spec governance", () => {
     assert.deepEqual(registeredEvents.sort(), Object.keys(hooks.events).sort());
   });
 
-  it("blocks inferred algorithm contracts until an approved definition exists", () => {
+  it("pins the approved vector governance baseline without production defaults", () => {
+    const manifest = json("manifest.json");
+    const database = json("database.json");
+    const mcp = json("mcp.json");
+    const workflow = json("workflow.json");
+    const errors = json("errors.json");
     const algorithms = json("algorithms.json");
+
+    assert.equal(manifest.contractBaseline, "mvp-v3-vector-baseline");
+    assert.equal(database.businessDataAuthority.systemOfRecord, "mysql");
+    assert.deepEqual(database.mvpEntityBaseline.creatorBusinessIdentity, ["platform", "kw_uid"]);
+    assert.deepEqual(database.mvpEntityBaseline.sourceRecordIdentity, [
+      "platform", "kw_uid", "source_snapshot_date",
+    ]);
+    assert.deepEqual(database.mvpEntityBaseline.entities, [
+      "customer_demands", "xhs_creator_accounts", "dy_creator_accounts",
+      "creator_supply_offers", "creator_candidate_pool", "mcn_recommendation_items",
+      "mcn_inquiry_batches", "mcn_inquiries", "mcn_submission_items",
+      "recommendation_runs", "creator_recommendation_items",
+    ]);
+    assert.equal(database.businessDataAuthority.vectorIndex.role, "rebuildable-derived-index");
+    assert.equal(database.businessDataAuthority.vectorIndex.businessWriteAuthority, false);
+
+    assert.deepEqual(mcp.vectorCapabilityBoundary.publicBusinessVectorTools, []);
+    assert.equal(mcp.vectorCapabilityBoundary.excludedNamespace, "vector-mcp");
+    assert.equal(mcp.vectorCapabilityBoundary.search_creators.hardFiltersAuthoritativeSource, "mysql");
+    assert.deepEqual(mcp.vectorCapabilityBoundary.rank_creators.acceptedStatuses, ["accepted"]);
+    assert.equal(mcp.vectorCapabilityBoundary.rank_creators.provenanceRequired, true);
+    for (const toolName of ["search_creators", "rank_creators"]) {
+      const properties = mcp.outputContracts[toolName].successSchema.properties;
+      assert.deepEqual(
+        ["retrieval_mode", "degraded_reason", "provenance"].every((name) => name in properties),
+        true,
+      );
+    }
+
     assert.equal(algorithms.readinessStatus, "external-unverified");
     assert.deepEqual(algorithms.definitions, {});
+    const retrieval = algorithms.vectorGovernance.creator_vector_retrieval;
+    assert.equal(retrieval.status, "shadow");
+    assert.deepEqual(retrieval.publicTools, []);
+    assert.deepEqual(retrieval.internalConsumers, ["search_creators", "rank_creators"]);
+    assert.deepEqual(Object.keys(retrieval.namedVectors).sort(), ["commercial", "content"]);
+    assert.equal(retrieval.rankingPolicy.missingAware, true);
+    assert.equal(retrieval.rankingPolicy.coverageAware, true);
+    assert.equal(retrieval.rankingPolicy.missingIsWorstValue, false);
+    assert.equal(retrieval.rankingPolicy.cpePrimaryWeightAllowed, false);
+    for (const parameter of Object.values(retrieval.parameters)) {
+      assert.ok(["pending-evaluation", "disabled"].includes(parameter.status));
+      assert.equal(parameter.value, null);
+    }
     assert.equal(
       algorithms.governance.changePolicy,
-      "blocked_until_approved_definition_exists",
+      "approved_baseline_parameters_require_frozen_sample_evaluation",
     );
     assert.equal(algorithms.governance.implementationMustNotDefineContract, true);
+
+    assert.equal(workflow.vectorDegradationPolicy.mode, "explicit-sql-only");
+    assert.deepEqual(workflow.vectorDegradationPolicy.requiredResultFields, [
+      "retrieval_mode", "degraded_reason", "provenance",
+    ]);
+    for (const code of [
+      "VECTOR_CONFIGURATION_INVALID", "EMBEDDING_UNAVAILABLE", "RERANKER_UNAVAILABLE",
+      "VECTOR_STORE_UNAVAILABLE", "VECTOR_INDEX_STALE", "SQL_ONLY_DEGRADED",
+    ]) {
+      assert.ok(errors.codes.includes(code));
+      assert.equal(errors.errors.filter((entry) => entry.code === code).length, 1);
+    }
   });
 
   it("resolves every generated JSON Schema reference inside the repository", () => {
