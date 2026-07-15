@@ -2,6 +2,29 @@
   "schemaVersion": 1,
   "profile": "mvp-v2",
   "mode": "writable",
+  "vectorCapabilityBoundary": {
+    "publicBusinessVectorTools": [],
+    "excludedNamespace": "vector-mcp",
+    "operationsTools": [
+      "sync_creator_tag_vectors",
+      "search_creator_tag_vectors",
+      "health_check_vector_store"
+    ],
+    "internalConsumers": ["search_creators", "rank_creators"],
+    "search_creators": {
+      "role": "hard-filter-candidate-recall-and-provenance",
+      "vectorUse": "internal-shadow-capability",
+      "hardConstraintsAuthoritativeSource": "mysql",
+      "returnVerification": "current-mysql-record",
+      "degradation": "sql-only-with-provenance-and-degraded-reason"
+    },
+    "rank_creators": {
+      "role": "accepted-candidates-only-missing-aware-explainable-ranking",
+      "vectorUse": "soft-feature-only",
+      "acceptedStatuses": ["accepted"],
+      "provenanceRequired": true
+    }
+  },
   "serverIdentity": {
     "canonicalNamespace": "ypmcn",
     "hostQualifiedToolName": {
@@ -311,6 +334,27 @@
           "as_of_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "retrieval_mode": {
+            "type": "string",
+            "enum": ["sql-only", "vector-shadow"]
+          },
+          "degraded_reason": {
+            "type": ["string", "null"],
+            "enum": [null, "vector_configuration_invalid", "embedding_unavailable", "vector_store_unavailable", "vector_index_stale"]
+          },
+          "provenance": {
+            "type": "object",
+            "required": ["authoritative_source", "mysql_revalidated", "vector_status"],
+            "properties": {
+              "authoritative_source": {"const": "mysql"},
+              "mysql_revalidated": {"const": true},
+              "vector_status": {
+                "type": "string",
+                "enum": ["disabled", "shadow", "unavailable", "stale"]
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -321,6 +365,10 @@
         "DICTIONARY_REFERENCE_MISMATCH",
         "JOIN_GATE_FAILED",
         "SCOPE_MISMATCH",
+        "VECTOR_CONFIGURATION_INVALID",
+        "EMBEDDING_UNAVAILABLE",
+        "VECTOR_STORE_UNAVAILABLE",
+        "VECTOR_INDEX_STALE",
         "WRITE_RESULT_UNKNOWN"
       ]
     },
@@ -673,6 +721,27 @@
           "state_version": {
             "type": "integer",
             "minimum": 1
+          },
+          "retrieval_mode": {
+            "type": "string",
+            "enum": ["sql-only", "vector-shadow"]
+          },
+          "degraded_reason": {
+            "type": ["string", "null"],
+            "enum": [null, "vector_configuration_invalid", "embedding_unavailable", "reranker_unavailable", "vector_store_unavailable", "vector_index_stale"]
+          },
+          "provenance": {
+            "type": "object",
+            "required": ["authoritative_source", "mysql_revalidated", "vector_status"],
+            "properties": {
+              "authoritative_source": {"const": "mysql"},
+              "mysql_revalidated": {"const": true},
+              "vector_status": {
+                "type": "string",
+                "enum": ["disabled", "shadow", "unavailable", "stale"]
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -684,6 +753,11 @@
         "JOIN_GATE_FAILED",
         "SCOPE_MISMATCH",
         "LATE_DATA_REJECTED",
+        "VECTOR_CONFIGURATION_INVALID",
+        "EMBEDDING_UNAVAILABLE",
+        "RERANKER_UNAVAILABLE",
+        "VECTOR_STORE_UNAVAILABLE",
+        "VECTOR_INDEX_STALE",
         "WRITE_RESULT_UNKNOWN"
       ]
     },

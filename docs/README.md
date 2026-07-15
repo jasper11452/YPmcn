@@ -34,7 +34,7 @@
 | 数据库证明 | 14 项不变量，`external-unverified` |
 | 算法定义 | `external-unverified` |
 | 兼容检测 | `legacy-1.9.4` |
-| Spec 摘要 | `sha256:1b0ab552e9a36afd268144f239412fee814c38d9c368ac2f8736050b70fff94d` |
+| Spec 摘要 | `sha256:2c134982c85bb723dca2a198a791d94fd1f931fbeb222354d329cbc96eea086b` |
 <!-- human-docs:spec-summary:end -->
 
 ## 五条原则

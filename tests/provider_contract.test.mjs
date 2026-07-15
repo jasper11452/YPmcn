@@ -33,6 +33,25 @@ function legacyToolDefinitions() {
 }
 
 describe("read-only provider contract checker", () => {
+  it("keeps the provider tool set closed without vector operations tools", () => {
+    const names = createToolDefinitions().map(({ name }) => name);
+    assert.deepEqual(names, [
+      "validate_requirement", "search_creators", "rank_mcns",
+      "select_inquiry_form_fields", "create_with_distributions",
+      "sync_mcn_inquiry_status", "ingest_mcn_submissions", "manual_source_creators",
+      "rank_creators", "create_submission_batch", "record_client_feedback",
+      "get_recommendation_run_detail", "get_creator_detail",
+      "audit_manual_adjustment", "get_workflow_state",
+    ]);
+    for (const name of [
+      "sync_creator_tag_vectors",
+      "search_creator_tag_vectors",
+      "health_check_vector_store",
+    ]) {
+      assert.equal(names.includes(name), false);
+    }
+  });
+
   it("detects the legacy profile and reports exactly the three target tool gaps", () => {
     const report = compareProviderTools(legacyToolDefinitions());
     assert.equal(report.status, "FAIL");

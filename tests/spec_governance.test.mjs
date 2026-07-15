@@ -123,15 +123,198 @@ describe("Spec governance", () => {
     assert.deepEqual(registeredEvents.sort(), Object.keys(hooks.events).sort());
   });
 
-  it("blocks inferred algorithm contracts until an approved definition exists", () => {
+  it("pins the approved vector data authority, identities, ownership, and recommendation path", () => {
+    const database = json("database.json");
+
+    assert.equal(database.businessDataAuthority.systemOfRecord, "mysql");
+    assert.deepEqual(database.businessDataAuthority.vectorIndex, {
+      engine: "qdrant",
+      role: "rebuildable-derived-index",
+      businessWriteAuthority: false,
+      returnPolicy: "rehydrate-and-revalidate-current-mysql-record",
+    });
+    assert.deepEqual(database.mvpEntityBaseline.entities, [
+      "customer_demands",
+      "xhs_creator_accounts",
+      "dy_creator_accounts",
+      "creator_supply_offers",
+      "creator_candidate_pool",
+      "mcn_recommendation_items",
+      "mcn_inquiry_batches",
+      "mcn_inquiries",
+      "mcn_submission_items",
+      "recommendation_runs",
+      "creator_recommendation_items",
+    ]);
+    assert.deepEqual(database.mvpEntityBaseline.creatorBusinessIdentity, [
+      "platform",
+      "kw_uid",
+    ]);
+    assert.deepEqual(database.mvpEntityBaseline.sourceRecordIdentity, [
+      "platform",
+      "kw_uid",
+      "source_snapshot_date",
+    ]);
+    assert.equal(
+      database.mvpEntityBaseline.ownershipPolicy,
+      "business-mcp-write-surface-only",
+    );
+    assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership, {
+      customer_demands: ["validate_requirement"],
+      xhs_creator_accounts: [],
+      dy_creator_accounts: [],
+      creator_supply_offers: ["ingest_mcn_submissions", "manual_source_creators"],
+      creator_candidate_pool: ["search_creators"],
+      mcn_recommendation_items: ["rank_mcns"],
+      mcn_inquiry_batches: ["sync_mcn_inquiry_status"],
+      mcn_inquiries: ["sync_mcn_inquiry_status"],
+      mcn_submission_items: ["ingest_mcn_submissions"],
+      recommendation_runs: ["rank_creators"],
+      creator_recommendation_items: ["rank_creators", "audit_manual_adjustment"],
+    });
+    assert.deepEqual(database.mvpEntityBaseline.recommendationPath, [
+      ["xhs_creator_accounts", "creator_candidate_pool"],
+      ["dy_creator_accounts", "creator_candidate_pool"],
+      ["customer_demands", "creator_candidate_pool"],
+      ["creator_candidate_pool", "mcn_recommendation_items"],
+      ["mcn_recommendation_items", "mcn_inquiry_batches"],
+      ["mcn_inquiry_batches", "mcn_inquiries"],
+      ["mcn_inquiries", "mcn_submission_items"],
+      ["mcn_submission_items", "creator_supply_offers"],
+      ["creator_supply_offers", "recommendation_runs"],
+      ["recommendation_runs", "creator_recommendation_items"],
+    ]);
+  });
+
+  it("keeps vector retrieval internal to the closed business tool surface", () => {
+    const mcp = json("mcp.json");
+    const businessTools = [...mcp.requiredTools, ...mcp.optionalTools];
+
+    assert.deepEqual(mcp.vectorCapabilityBoundary.publicBusinessVectorTools, []);
+    assert.equal(mcp.vectorCapabilityBoundary.excludedNamespace, "vector-mcp");
+    assert.deepEqual(mcp.serverIdentity.excludedNamespaces, ["vector-mcp"]);
+    assert.deepEqual(mcp.vectorCapabilityBoundary.operationsTools, [
+      "sync_creator_tag_vectors",
+      "search_creator_tag_vectors",
+      "health_check_vector_store",
+    ]);
+    assert.equal(new Set(businessTools).size, 15);
+    for (const name of mcp.vectorCapabilityBoundary.operationsTools) {
+      assert.equal(businessTools.includes(name), false, name);
+      assert.equal(name in mcp.tools, false, name);
+    }
+    assert.deepEqual(mcp.vectorCapabilityBoundary.internalConsumers, [
+      "search_creators",
+      "rank_creators",
+    ]);
+  });
+
+  it("pins named-vector fields and retrieval semantics without production defaults", () => {
     const algorithms = json("algorithms.json");
+    const retrieval = algorithms.vectorGovernance.creatorVectorRetrieval;
+    const prohibitedEmbeddingFields = [
+      "id", "platform", "kw_uid", "source_snapshot_date", "nickname", "url",
+      "agency", "gender", "age", "region", "follower_metrics",
+      "engagement_metrics", "cpe", "cpm", "prices", "rebate",
+      "numeric_only_json",
+    ];
+
     assert.equal(algorithms.readinessStatus, "external-unverified");
     assert.deepEqual(algorithms.definitions, {});
+    assert.equal(retrieval.status, "shadow");
+    assert.deepEqual(retrieval.internalConsumers, ["search_creators", "rank_creators"]);
+    assert.equal(retrieval.authoritativeSource, "mysql");
+    assert.equal(retrieval.derivedIndex, "qdrant");
+    assert.equal(retrieval.returnVerification, "rehydrate-and-revalidate-current-mysql-record");
+    assert.deepEqual(retrieval.namedVectors.content.includeFields, [
+      "creator_type", "content_types", "content_tags", "persona", "clean_description",
+    ]);
+    assert.deepEqual(retrieval.namedVectors.commercial.includeFields, [
+      "parsed_brands", "parsed_categories", "parsed_scenarios", "parsed_benefits",
+      "parsed_ingredients", "parsed_ip",
+    ]);
+    for (const vector of Object.values(retrieval.namedVectors)) {
+      assert.deepEqual(vector.excludeFields, prohibitedEmbeddingFields);
+      assert.deepEqual(
+        vector.includeFields.filter((field) => vector.excludeFields.includes(field)),
+        [],
+      );
+    }
+    assert.deepEqual(retrieval.hardConstraints, [
+      "platform", "region", "follower_range", "price_range", "compliance",
+    ]);
+    assert.deepEqual(retrieval.softFeatures, [
+      "content_similarity", "commercial_similarity", "content_tags",
+    ]);
+    assert.equal(retrieval.softFeaturesMayOverrideHardConstraints, false);
+    assert.deepEqual(retrieval.rankingPolicy, {
+      missingAware: true,
+      coverageAware: true,
+      zeroIsObservedValue: true,
+      missingIsWorstValue: false,
+      cpePrimaryWeightAllowed: false,
+      explanationRequired: true,
+    });
+    assert.deepEqual(Object.keys(retrieval.parameters).sort(), [
+      "candidateLimit", "dimensions", "distanceMetric", "embeddingModel",
+      "embeddingModelVersion", "embeddingProvider", "normalization",
+      "rankingWeights", "rerankerModel", "rerankerModelVersion",
+      "rerankerProvider", "retrievalTopK", "rrfParameters", "thresholds",
+    ]);
+    for (const parameter of Object.values(retrieval.parameters)) {
+      assert.ok(["pending-evaluation", "disabled"].includes(parameter.status));
+      assert.equal(parameter.value, null);
+    }
     assert.equal(
       algorithms.governance.changePolicy,
-      "blocked_until_approved_definition_exists",
+      "approved-baseline-parameters-require-frozen-sample-evaluation",
     );
     assert.equal(algorithms.governance.implementationMustNotDefineContract, true);
+  });
+
+  it("requires MySQL-revalidated provenance and explicit vector degradation semantics", () => {
+    const manifest = json("manifest.json");
+    const mcp = json("mcp.json");
+    const workflow = json("workflow.json");
+    const errors = json("errors.json");
+    const vectorCodes = [
+      "VECTOR_CONFIGURATION_INVALID",
+      "EMBEDDING_UNAVAILABLE",
+      "RERANKER_UNAVAILABLE",
+      "VECTOR_STORE_UNAVAILABLE",
+      "VECTOR_INDEX_STALE",
+      "SQL_ONLY_DEGRADED",
+    ];
+
+    assert.equal(manifest.contractBaseline, "mvp-v3-vector-baseline");
+    for (const toolName of ["search_creators", "rank_creators"]) {
+      const schema = mcp.outputContracts[toolName].successSchema;
+      for (const field of ["retrieval_mode", "degraded_reason", "provenance"]) {
+        assert.ok(field in schema.properties, `${toolName}:${field}`);
+      }
+      assert.deepEqual(schema.properties.retrieval_mode.enum, ["sql-only", "vector-shadow"]);
+      assert.equal(schema.properties.provenance.properties.authoritative_source.const, "mysql");
+      assert.equal(schema.properties.provenance.properties.mysql_revalidated.const, true);
+    }
+    assert.deepEqual(workflow.vectorDegradationPolicy, {
+      mode: "explicit-sql-only",
+      preserveBusinessWorkflow: true,
+      requiredResultFields: ["retrieval_mode", "degraded_reason", "provenance"],
+      retrievalMode: "sql-only",
+      allowedReasons: [
+        "vector_configuration_invalid",
+        "embedding_unavailable",
+        "reranker_unavailable",
+        "vector_store_unavailable",
+        "vector_index_stale",
+      ],
+      staleHitPolicy: "exclude-and-revalidate-from-mysql",
+      prohibitedSubstitutes: ["fake-qdrant", "local-json-as-production-result"],
+    });
+    for (const code of vectorCodes) {
+      assert.ok(errors.codes.includes(code), code);
+      assert.equal(errors.errors.filter((entry) => entry.code === code).length, 1, code);
+    }
   });
 
   it("resolves every generated JSON Schema reference inside the repository", () => {

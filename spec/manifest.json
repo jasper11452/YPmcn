@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "profile": "mvp-v2",
+  "contractBaseline": "mvp-v3-vector-baseline",
   "status": "approved",
   "contracts": {
     "database": "database.json",

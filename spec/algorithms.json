@@ -3,12 +3,58 @@
   "profile": "mvp-v2",
   "readinessStatus": "external-unverified",
   "definitions": {},
+  "vectorGovernance": {
+    "creatorVectorRetrieval": {
+      "status": "shadow",
+      "internalConsumers": ["search_creators", "rank_creators"],
+      "authoritativeSource": "mysql",
+      "derivedIndex": "qdrant",
+      "returnVerification": "rehydrate-and-revalidate-current-mysql-record",
+      "namedVectors": {
+        "content": {
+          "includeFields": ["creator_type", "content_types", "content_tags", "persona", "clean_description"],
+          "excludeFields": ["id", "platform", "kw_uid", "source_snapshot_date", "nickname", "url", "agency", "gender", "age", "region", "follower_metrics", "engagement_metrics", "cpe", "cpm", "prices", "rebate", "numeric_only_json"]
+        },
+        "commercial": {
+          "includeFields": ["parsed_brands", "parsed_categories", "parsed_scenarios", "parsed_benefits", "parsed_ingredients", "parsed_ip"],
+          "excludeFields": ["id", "platform", "kw_uid", "source_snapshot_date", "nickname", "url", "agency", "gender", "age", "region", "follower_metrics", "engagement_metrics", "cpe", "cpm", "prices", "rebate", "numeric_only_json"]
+        }
+      },
+      "hardConstraints": ["platform", "region", "follower_range", "price_range", "compliance"],
+      "softFeatures": ["content_similarity", "commercial_similarity", "content_tags"],
+      "softFeaturesMayOverrideHardConstraints": false,
+      "rankingPolicy": {
+        "missingAware": true,
+        "coverageAware": true,
+        "zeroIsObservedValue": true,
+        "missingIsWorstValue": false,
+        "cpePrimaryWeightAllowed": false,
+        "explanationRequired": true
+      },
+      "parameters": {
+        "embeddingProvider": {"status": "pending-evaluation", "value": null},
+        "embeddingModel": {"status": "pending-evaluation", "value": null},
+        "embeddingModelVersion": {"status": "pending-evaluation", "value": null},
+        "dimensions": {"status": "pending-evaluation", "value": null},
+        "normalization": {"status": "pending-evaluation", "value": null},
+        "distanceMetric": {"status": "pending-evaluation", "value": null},
+        "retrievalTopK": {"status": "pending-evaluation", "value": null},
+        "candidateLimit": {"status": "pending-evaluation", "value": null},
+        "rrfParameters": {"status": "pending-evaluation", "value": null},
+        "thresholds": {"status": "pending-evaluation", "value": null},
+        "rankingWeights": {"status": "pending-evaluation", "value": null},
+        "rerankerProvider": {"status": "disabled", "value": null},
+        "rerankerModel": {"status": "disabled", "value": null},
+        "rerankerModelVersion": {"status": "disabled", "value": null}
+      }
+    }
+  },
   "sourceDocuments": [
     "doc/20260630-06-业务算法规则.md的替身"
   ],
   "governance": {
-    "changePolicy": "blocked_until_approved_definition_exists",
+    "changePolicy": "approved-baseline-parameters-require-frozen-sample-evaluation",
     "implementationMustNotDefineContract": true,
-    "notes": "本文件显式记录算法契约尚未导入；不得依据当前代码或 Agent 推断补写业务规则。"
+    "notes": "仅批准治理边界；模型、版本、维度、距离、归一化、Top-K、候选上限、RRF、阈值与排序权重在冻结样本评估前不得成为生产默认值。"
   }
 }

@@ -9,6 +9,58 @@
   },
   "modelVersion": "2026-07-12.1",
   "modelStatus": "target-contract-external-unverified",
+  "businessDataAuthority": {
+    "systemOfRecord": "mysql",
+    "vectorIndex": {
+      "engine": "qdrant",
+      "role": "rebuildable-derived-index",
+      "businessWriteAuthority": false,
+      "returnPolicy": "rehydrate-and-revalidate-current-mysql-record"
+    }
+  },
+  "mvpEntityBaseline": {
+    "entities": [
+      "customer_demands",
+      "xhs_creator_accounts",
+      "dy_creator_accounts",
+      "creator_supply_offers",
+      "creator_candidate_pool",
+      "mcn_recommendation_items",
+      "mcn_inquiry_batches",
+      "mcn_inquiries",
+      "mcn_submission_items",
+      "recommendation_runs",
+      "creator_recommendation_items"
+    ],
+    "creatorBusinessIdentity": ["platform", "kw_uid"],
+    "sourceRecordIdentity": ["platform", "kw_uid", "source_snapshot_date"],
+    "ownershipPolicy": "business-mcp-write-surface-only",
+    "businessMcpWriterOwnership": {
+      "customer_demands": ["validate_requirement"],
+      "xhs_creator_accounts": [],
+      "dy_creator_accounts": [],
+      "creator_supply_offers": ["ingest_mcn_submissions", "manual_source_creators"],
+      "creator_candidate_pool": ["search_creators"],
+      "mcn_recommendation_items": ["rank_mcns"],
+      "mcn_inquiry_batches": ["sync_mcn_inquiry_status"],
+      "mcn_inquiries": ["sync_mcn_inquiry_status"],
+      "mcn_submission_items": ["ingest_mcn_submissions"],
+      "recommendation_runs": ["rank_creators"],
+      "creator_recommendation_items": ["rank_creators", "audit_manual_adjustment"]
+    },
+    "recommendationPath": [
+      ["xhs_creator_accounts", "creator_candidate_pool"],
+      ["dy_creator_accounts", "creator_candidate_pool"],
+      ["customer_demands", "creator_candidate_pool"],
+      ["creator_candidate_pool", "mcn_recommendation_items"],
+      ["mcn_recommendation_items", "mcn_inquiry_batches"],
+      ["mcn_inquiry_batches", "mcn_inquiries"],
+      ["mcn_inquiries", "mcn_submission_items"],
+      ["mcn_submission_items", "creator_supply_offers"],
+      ["creator_supply_offers", "recommendation_runs"],
+      ["recommendation_runs", "creator_recommendation_items"]
+    ]
+  },
   "commonFieldPolicies": {
     "scopeFields": [
       "scope_type",

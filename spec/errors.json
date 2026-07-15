@@ -2,6 +2,12 @@
   "schemaVersion": 1,
   "profile": "mvp-v2",
   "codes": [
+    "VECTOR_CONFIGURATION_INVALID",
+    "EMBEDDING_UNAVAILABLE",
+    "RERANKER_UNAVAILABLE",
+    "VECTOR_STORE_UNAVAILABLE",
+    "VECTOR_INDEX_STALE",
+    "SQL_ONLY_DEGRADED",
     "INTEGRATION_REQUIRED",
     "SCHEMA_MISMATCH",
     "INVALID_INPUT",
@@ -26,6 +32,66 @@
     "WRITE_RESULT_UNKNOWN"
   ],
   "errors": [
+    {
+      "code": "VECTOR_CONFIGURATION_INVALID",
+      "retryable": false,
+      "category": "vector-contract",
+      "message": "Vector retrieval configuration is missing, incompatible, or not approved.",
+      "recoveryAction": "Keep vector retrieval disabled and use the approved SQL-only path until configuration is evaluated and approved.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {"mode": "disabled-until-approved", "directRetry": false, "conditionalRetryAfterReconciliation": false, "authoritativeReconciliationRequired": false, "reconcileWith": null}
+    },
+    {
+      "code": "EMBEDDING_UNAVAILABLE",
+      "retryable": true,
+      "category": "vector-dependency",
+      "message": "The embedding dependency is unavailable.",
+      "recoveryAction": "Return an explicitly marked SQL-only result or retry only under the dependency retry budget.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {"mode": "sql-only-or-bounded-retry", "directRetry": false, "conditionalRetryAfterReconciliation": true, "authoritativeReconciliationRequired": false, "reconcileWith": "embedding-health"}
+    },
+    {
+      "code": "RERANKER_UNAVAILABLE",
+      "retryable": true,
+      "category": "vector-dependency",
+      "message": "The optional reranker dependency is unavailable.",
+      "recoveryAction": "Continue without reranking only when result provenance marks reranking disabled or unavailable.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {"mode": "disabled-or-bounded-retry", "directRetry": false, "conditionalRetryAfterReconciliation": true, "authoritativeReconciliationRequired": false, "reconcileWith": "reranker-health"}
+    },
+    {
+      "code": "VECTOR_STORE_UNAVAILABLE",
+      "retryable": true,
+      "category": "vector-dependency",
+      "message": "The derived vector index is unavailable.",
+      "recoveryAction": "Use SQL-only retrieval with degraded provenance; never substitute a fake or local JSON index.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {"mode": "sql-only-or-bounded-retry", "directRetry": false, "conditionalRetryAfterReconciliation": true, "authoritativeReconciliationRequired": false, "reconcileWith": "vector-store-health"}
+    },
+    {
+      "code": "VECTOR_INDEX_STALE",
+      "retryable": false,
+      "category": "data-freshness",
+      "message": "The derived vector index is older than the approved source snapshot boundary.",
+      "recoveryAction": "Exclude stale vector hits, use SQL-only retrieval, and rebuild the index from MySQL.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {"mode": "sql-only-until-rebuilt", "directRetry": false, "conditionalRetryAfterReconciliation": false, "authoritativeReconciliationRequired": true, "reconcileWith": "mysql-source-snapshot-date"}
+    },
+    {
+      "code": "SQL_ONLY_DEGRADED",
+      "retryable": false,
+      "category": "degraded-result",
+      "message": "The successful result used only authoritative SQL retrieval because vector capability was unavailable or stale.",
+      "recoveryAction": "Accept the result as degraded only when retrieval mode, reason, and MySQL-revalidated provenance are present.",
+      "writeRelated": false,
+      "blindRetry": false,
+      "retryPolicy": {"mode": "successful-degraded-result", "directRetry": false, "conditionalRetryAfterReconciliation": false, "authoritativeReconciliationRequired": true, "reconcileWith": "mysql-current-records"}
+    },
     {
       "code": "INTEGRATION_REQUIRED",
       "retryable": false,

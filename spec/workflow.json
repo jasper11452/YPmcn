@@ -1,6 +1,15 @@
 {
   "schemaVersion": 1,
   "profile": "mvp-v2",
+  "vectorDegradationPolicy": {
+    "mode": "explicit-sql-only",
+    "preserveBusinessWorkflow": true,
+    "requiredResultFields": ["retrieval_mode", "degraded_reason", "provenance"],
+    "retrievalMode": "sql-only",
+    "allowedReasons": ["vector_configuration_invalid", "embedding_unavailable", "reranker_unavailable", "vector_store_unavailable", "vector_index_stale"],
+    "staleHitPolicy": "exclude-and-revalidate-from-mysql",
+    "prohibitedSubstitutes": ["fake-qdrant", "local-json-as-production-result"]
+  },
   "phases": [
     "requirement_draft",
     "requirement_ready",

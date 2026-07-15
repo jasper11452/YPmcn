@@ -19,11 +19,12 @@
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:1b0ab552e9a36afd268144f239412fee814c38d9c368ac2f8736050b70fff94d`
-变更记录摘要：`sha256:b9acee2e8ec694dce442ae7a892ef3b020e5e5991d28695a18dcafa90c2f5190`
+当前 Spec：`mvp-v2` · `sha256:2c134982c85bb723dca2a198a791d94fd1f931fbeb222354d329cbc96eea086b`
+变更记录摘要：`sha256:047d096e1e7ddb39cbd12769db8567490dfd0d2111839f3aa58726cc19b705b0`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-013 | `SPEC_APPROVED` | [建立向量检索 MVP 正式契约基线](../changes/CHG-2026-013-vector-contract-baseline.md) |
 | CHG-2026-011 | `SPEC_APPROVED` | [修正 Hook 与 OpenClaw 宿主接口对接](../changes/CHG-2026-011-hook-host-integration.md) |
 | CHG-2026-010 | `SPEC_APPROVED` | [Reference MCP 实现正式输出与恢复契约](../changes/CHG-2026-010-reference-mcp-runtime.md) |
 | CHG-2026-009 | `SPEC_APPROVED` | [Hook / Skill 消费服务端权威状态](../changes/CHG-2026-009-hook-skill-authority.md) |
