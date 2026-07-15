@@ -10,7 +10,7 @@ const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.u
 const stagedPluginRoot = fileURLToPath(
   new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
 );
-const VERSION = "3.0.1";
+const VERSION = "3.0.2";
 
 function json(relativePath) {
   return JSON.parse(readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8"));
@@ -38,7 +38,7 @@ function dryRunFiles() {
 before(stageIfImplemented);
 after(() => rmSync(stagingBase, { recursive: true, force: true }));
 
-describe("3.0.1 release metadata", () => {
+describe("3.0.2 release metadata", () => {
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
     const rootPackage = json("package.json");
     const rootLock = json("package-lock.json");
@@ -62,7 +62,7 @@ describe("3.0.1 release metadata", () => {
     const pluginPackage = json("YPmcn/package.json");
     const manifest = json("YPmcn/openclaw.plugin.json");
     assert.deepEqual(pluginPackage.openclaw, {
-      hooks: "./dist/index.js",
+      hooks: ["./hooks/ypmcn-media-assistant"],
       extensions: ["./dist/index.js"],
     });
     assert.equal(pluginPackage["openclaw.hooks"], undefined);
