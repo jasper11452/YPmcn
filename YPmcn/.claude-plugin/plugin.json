@@ -1,7 +1,7 @@
 {
   "name": "ypmcn-media-assistant",
-  "version": "3.0.0",
-  "description": "YPmcn mvp-v2 媒介助手：契约优先的 OpenClaw 工作流插件。",
+  "version": "3.0.1",
+  "description": "YPmcn 媒介助手：对齐当前生产 MCP 的 OpenClaw 工作流插件。",
   "author": {
     "name": "Jasper"
   },

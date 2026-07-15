@@ -1,0 +1,706 @@
+{
+  "schemaVersion": 1,
+  "profile": "mvp-v2",
+  "vectorDegradationPolicy": {
+    "mode": "explicit-sql-only",
+    "preserveBusinessWorkflow": true,
+    "requiredResultFields": ["retrieval_mode", "degraded_reason", "provenance"],
+    "retrievalMode": "sql-only",
+    "allowedReasons": ["vector_configuration_invalid", "embedding_unavailable", "reranker_unavailable", "vector_store_unavailable", "vector_index_stale"],
+    "staleHitPolicy": "exclude-and-revalidate-from-mysql",
+    "prohibitedSubstitutes": ["fake-qdrant", "local-json-as-production-result"]
+  },
+  "phases": [
+    "requirement_draft",
+    "requirement_ready",
+    "candidate_pool_ready",
+    "mcn_planning",
+    "field_selection_ready",
+    "distribution_sync_pending",
+    "waiting_return",
+    "recovering",
+    "recovery_sync_pending",
+    "recovered",
+    "recommendation_ready",
+    "submission_batch_ready",
+    "feedback_routing",
+    "blocked"
+  ],
+  "lifecycleStatuses": [
+    "sent",
+    "waiting_return",
+    "recover_requested",
+    "recovering",
+    "recover_failed",
+    "recovered",
+    "closed"
+  ],
+  "responseStatuses": [
+    "pending",
+    "partial",
+    "completed",
+    "expired",
+    "failed"
+  ],
+  "allowedActions": [
+    "validate_requirement",
+    "search_creators",
+    "rank_mcns",
+    "select_inquiry_form_fields",
+    "create_with_distributions",
+    "refresh_recovery",
+    "request_recovery",
+    "finalize_recovery",
+    "rank_creators",
+    "create_submission_batch",
+    "record_client_feedback"
+  ],
+  "stateAuthority": {
+    "source": "provider-persisted-workflow-state",
+    "schema": "schemas/workflow-state.schema.json",
+    "stateVersionRequired": true,
+    "allowedActionsRequired": true,
+    "allowedActionsAreClosedWorld": true,
+    "readActionsAlwaysAllowed": [
+      "get_workflow_state"
+    ],
+    "hookSessionContextAuthoritative": false,
+    "hookSessionContextMayGrantActions": false,
+    "hookSessionContextMayDenyForAdditionalSafety": true,
+    "missingOrUnknownCombinationBehavior": "fail-closed",
+    "missingOrUnknownCombinationError": "STATE_COMBINATION_INVALID",
+    "staleStateVersionError": "STATE_CONFLICT"
+  },
+  "recoveryOperations": [
+    {
+      "name": "refresh",
+      "action": "refresh_recovery",
+      "tool": "sync_mcn_inquiry_status",
+      "order": 1,
+      "authority": "server-state-version-and-allowed-actions",
+      "sessionContextRequired": false,
+      "effect": "reconcile-provider-and-persist-authoritative-state",
+      "terminalBehavior": "no-op-with-authoritative-state",
+      "nextOperations": [
+        "request",
+        "finalize"
+      ]
+    },
+    {
+      "name": "request",
+      "action": "request_recovery",
+      "tool": "ingest_mcn_submissions",
+      "order": 2,
+      "authority": "server-compare-and-swap-on-state-version",
+      "sessionContextRequired": false,
+      "effect": "acquire-single-recovery-owner-and-ingest",
+      "triggerFieldSemantics": "audit-origin-only-not-authorization",
+      "nextOperations": [
+        "finalize"
+      ]
+    },
+    {
+      "name": "finalize",
+      "action": "finalize_recovery",
+      "tool": "sync_mcn_inquiry_status",
+      "order": 3,
+      "authority": "server-state-version-and-recovery-operation-id",
+      "sessionContextRequired": false,
+      "effect": "reconcile-ingest-and-persist-terminal-state",
+      "terminalBehavior": "idempotent-no-op",
+      "nextOperations": []
+    }
+  ],
+  "stateCombinations": [
+    {
+      "id": "requirement-draft",
+      "phase": "requirement_draft",
+      "lifecycleStatuses": [
+        null
+      ],
+      "responseStatuses": [
+        null
+      ],
+      "allowedActions": [
+        "validate_requirement"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "requirement-ready",
+      "phase": "requirement_ready",
+      "lifecycleStatuses": [
+        null
+      ],
+      "responseStatuses": [
+        null
+      ],
+      "allowedActions": [
+        "search_creators"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "candidate-pool-ready",
+      "phase": "candidate_pool_ready",
+      "lifecycleStatuses": [
+        null
+      ],
+      "responseStatuses": [
+        null
+      ],
+      "allowedActions": [
+        "rank_mcns"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "mcn-planning",
+      "phase": "mcn_planning",
+      "lifecycleStatuses": [
+        null
+      ],
+      "responseStatuses": [
+        null
+      ],
+      "allowedActions": [
+        "select_inquiry_form_fields"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "field-selection-ready",
+      "phase": "field_selection_ready",
+      "lifecycleStatuses": [
+        null
+      ],
+      "responseStatuses": [
+        null
+      ],
+      "allowedActions": [
+        "create_with_distributions"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "distribution-sync-pending",
+      "phase": "distribution_sync_pending",
+      "lifecycleStatuses": [
+        "sent"
+      ],
+      "responseStatuses": [
+        "pending"
+      ],
+      "allowedActions": [
+        "refresh_recovery"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "waiting-return",
+      "phase": "waiting_return",
+      "lifecycleStatuses": [
+        "sent",
+        "waiting_return"
+      ],
+      "responseStatuses": [
+        "pending",
+        "partial",
+        "completed",
+        "expired",
+        "failed"
+      ],
+      "allowedActions": [
+        "refresh_recovery"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "recovery-requestable",
+      "phase": "recovering",
+      "lifecycleStatuses": [
+        "recover_requested",
+        "waiting_return"
+      ],
+      "responseStatuses": [
+        "pending",
+        "partial",
+        "completed",
+        "expired",
+        "failed"
+      ],
+      "allowedActions": [
+        "request_recovery"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "recovery-failed-refreshable",
+      "phase": "recovering",
+      "lifecycleStatuses": [
+        "recover_failed"
+      ],
+      "responseStatuses": [
+        "pending",
+        "partial",
+        "expired",
+        "failed"
+      ],
+      "allowedActions": [
+        "refresh_recovery"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "recovery-finalize-pending",
+      "phase": "recovery_sync_pending",
+      "lifecycleStatuses": [
+        "recovering",
+        "recover_requested"
+      ],
+      "responseStatuses": [
+        "pending",
+        "partial",
+        "completed",
+        "expired",
+        "failed"
+      ],
+      "allowedActions": [
+        "finalize_recovery"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "recovered-for-ranking",
+      "phase": "recovered",
+      "lifecycleStatuses": [
+        "recovered",
+        "closed"
+      ],
+      "responseStatuses": [
+        "partial",
+        "completed",
+        "expired"
+      ],
+      "allowedActions": [
+        "refresh_recovery",
+        "rank_creators"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "recommendation-ready",
+      "phase": "recommendation_ready",
+      "lifecycleStatuses": [
+        "recovered",
+        "closed"
+      ],
+      "responseStatuses": [
+        "partial",
+        "completed",
+        "expired"
+      ],
+      "allowedActions": [
+        "create_submission_batch"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "submission-batch-ready",
+      "phase": "submission_batch_ready",
+      "lifecycleStatuses": [
+        "recovered",
+        "closed"
+      ],
+      "responseStatuses": [
+        "partial",
+        "completed",
+        "expired"
+      ],
+      "allowedActions": [
+        "record_client_feedback"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "feedback-routing",
+      "phase": "feedback_routing",
+      "lifecycleStatuses": [
+        "recovered",
+        "closed"
+      ],
+      "responseStatuses": [
+        "partial",
+        "completed",
+        "expired"
+      ],
+      "allowedActions": [
+        "create_submission_batch",
+        "record_client_feedback"
+      ],
+      "terminal": false
+    },
+    {
+      "id": "blocked",
+      "phase": "blocked",
+      "lifecycleStatuses": [
+        "sent",
+        "waiting_return",
+        "recover_requested",
+        "recovering",
+        "recover_failed",
+        "recovered",
+        "closed",
+        null
+      ],
+      "responseStatuses": [
+        "pending",
+        "partial",
+        "completed",
+        "expired",
+        "failed",
+        null
+      ],
+      "allowedActions": [],
+      "terminal": true
+    }
+  ],
+  "policies": {
+    "sendSuccessPhase": "distribution_sync_pending",
+    "waitingReturnRequires": "first-successful-refresh",
+    "ordinaryMessageUnlocksWaiting": false,
+    "manualRecoveryConfirmation": "recorded-by-server-before-action-is-allowed",
+    "scheduledRecoveryContext": "audit-origin-only-not-authorization",
+    "recoverySequence": [
+      "refresh",
+      "request",
+      "finalize"
+    ],
+    "recoveryToolSequence": [
+      "sync_mcn_inquiry_status",
+      "ingest_mcn_submissions",
+      "sync_mcn_inquiry_status"
+    ],
+    "rankingAllowedAfterPhase": "recovered",
+    "terminalRecovery": {
+      "authoritativeLifecycleStatuses": [
+        "recovered",
+        "closed"
+      ],
+      "behavior": "idempotent-authoritative-no-op",
+      "sideEffectsAllowed": false,
+      "evidence": [
+        "authoritative state_version",
+        "allowed_actions excludes request_recovery",
+        "allowed_actions excludes finalize_recovery"
+      ]
+    }
+  },
+  "transitions": [
+    {
+      "id": "requirement-validated",
+      "from": "requirement_draft",
+      "trigger": {
+        "type": "tool",
+        "name": "validate_requirement"
+      },
+      "guards": [
+        "required-demand-fields-present",
+        "result.data.status === ready",
+        "authoritative.allowed_actions includes validate_requirement"
+      ],
+      "evidence": [
+        "success === true",
+        "data.id",
+        "data.status"
+      ],
+      "nextPhase": "requirement_ready"
+    },
+    {
+      "id": "candidate-pool-written",
+      "from": "requirement_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "search_creators"
+      },
+      "guards": [
+        "params.requirement_id === authoritative.requirement_id",
+        "authoritative.allowed_actions includes search_creators"
+      ],
+      "evidence": [
+        "success === true",
+        "data.id",
+        "data.candidate_pool_written"
+      ],
+      "nextPhase": "candidate_pool_ready"
+    },
+    {
+      "id": "mcn-plan-written",
+      "from": "candidate_pool_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "rank_mcns"
+      },
+      "guards": [
+        "params.candidate_pool_id === authoritative.candidate_pool_id",
+        "authoritative.allowed_actions includes rank_mcns"
+      ],
+      "evidence": [
+        "success === true",
+        "data.id",
+        "data.inquiry_advice"
+      ],
+      "nextPhase": "mcn_planning"
+    },
+    {
+      "id": "inquiry-fields-selected",
+      "from": "mcn_planning",
+      "trigger": {
+        "type": "tool",
+        "name": "select_inquiry_form_fields"
+      },
+      "guards": [
+        "params.mcn_recommendation_id === authoritative.mcn_recommendation_id",
+        "authoritative.allowed_actions includes select_inquiry_form_fields"
+      ],
+      "evidence": [
+        "success === true",
+        "fields",
+        "items",
+        "selected_count === items.length",
+        "selected_count > 0"
+      ],
+      "nextPhase": "field_selection_ready"
+    },
+    {
+      "id": "distribution-sent",
+      "from": "field_selection_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "create_with_distributions"
+      },
+      "guards": [
+        "authoritative.allowed_actions includes create_with_distributions",
+        "persisted-selection-matches-ordered-columns",
+        "selection-state-version-matches-authoritative-state",
+        "params.preview_only === false"
+      ],
+      "evidence": [
+        "success === true",
+        "data.provider_project_id",
+        "data.distribution_batch_ref",
+        "data.distributions.length > 0"
+      ],
+      "nextPhase": "distribution_sync_pending"
+    },
+    {
+      "id": "first-distribution-refresh",
+      "from": "distribution_sync_pending",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "params.mcn_recommendation_id === authoritative.mcn_recommendation_id",
+        "params.requirement_id === authoritative.requirement_id",
+        "authoritative.allowed_actions includes refresh_recovery"
+      ],
+      "evidence": [
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
+      ],
+      "nextPhase": "waiting_return"
+    },
+    {
+      "id": "recovery-refreshed-requestable",
+      "from": "waiting_return",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "authoritative.allowed_actions includes refresh_recovery",
+        "result.data.allowed_actions includes request_recovery",
+        "result.data.lifecycle_status not in [recovered, closed]"
+      ],
+      "evidence": [
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
+      ],
+      "nextPhase": "recovering"
+    },
+    {
+      "id": "recovery-refreshed-terminal",
+      "from": "waiting_return",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "authoritative.allowed_actions includes refresh_recovery",
+        "result.data.lifecycle_status in [recovered, closed]",
+        "result.data.allowed_actions excludes request_recovery"
+      ],
+      "evidence": [
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
+      ],
+      "nextPhase": "recovered"
+    },
+    {
+      "id": "recovery-requested",
+      "from": "recovering",
+      "trigger": {
+        "type": "tool",
+        "name": "ingest_mcn_submissions"
+      },
+      "guards": [
+        "authoritative.allowed_actions includes request_recovery",
+        "compare-and-swap authoritative.state_version succeeds",
+        "params.trigger is audit-only-not-authorization"
+      ],
+      "evidence": [
+        "success === true",
+        "data.id",
+        "data.accepted_count",
+        "data.rejected_count",
+        "data.created_submission_item_count"
+      ],
+      "nextPhase": "recovery_sync_pending"
+    },
+    {
+      "id": "recovery-refreshed-after-failure",
+      "from": "recovering",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "authoritative.lifecycle_status === recover_failed",
+        "authoritative.allowed_actions includes refresh_recovery",
+        "result.data.allowed_actions includes request_recovery"
+      ],
+      "evidence": [
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
+      ],
+      "nextPhase": "recovering"
+    },
+    {
+      "id": "recovery-finalized",
+      "from": "recovery_sync_pending",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "authoritative.allowed_actions includes finalize_recovery",
+        "authoritative.recovery_operation_id is present",
+        "result.data.lifecycle_status in [recovered, closed]"
+      ],
+      "evidence": [
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
+      ],
+      "nextPhase": "recovered"
+    },
+    {
+      "id": "terminal-recovery-refresh-no-op",
+      "from": "recovered",
+      "trigger": {
+        "type": "tool",
+        "name": "sync_mcn_inquiry_status"
+      },
+      "guards": [
+        "authoritative.lifecycle_status in [recovered, closed]",
+        "authoritative.allowed_actions includes refresh_recovery",
+        "authoritative.allowed_actions excludes request_recovery",
+        "authoritative.allowed_actions excludes finalize_recovery"
+      ],
+      "evidence": [
+        "success === true",
+        "data.inquiry_batch_id",
+        "data.inquiry_ids",
+        "data.snapshot_id",
+        "data.lifecycle_status",
+        "data.response_status"
+      ],
+      "nextPhase": "recovered"
+    },
+    {
+      "id": "creators-ranked",
+      "from": "recovered",
+      "trigger": {
+        "type": "tool",
+        "name": "rank_creators"
+      },
+      "guards": [
+        "authoritative.allowed_actions includes rank_creators",
+        "authoritative.lifecycle_status in [recovered, closed]"
+      ],
+      "evidence": [
+        "success === true",
+        "data.run_id",
+        "data.ranked_count"
+      ],
+      "nextPhase": "recommendation_ready"
+    },
+    {
+      "id": "submission-batch-created",
+      "from": "recommendation_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "create_submission_batch"
+      },
+      "guards": [
+        "params.run_id === authoritative.run_id",
+        "authoritative.allowed_actions includes create_submission_batch"
+      ],
+      "evidence": [
+        "success === true",
+        "data.id",
+        "data.batch_no",
+        "data.submitted_count"
+      ],
+      "nextPhase": "submission_batch_ready"
+    },
+    {
+      "id": "client-feedback-recorded",
+      "from": "submission_batch_ready",
+      "trigger": {
+        "type": "tool",
+        "name": "record_client_feedback"
+      },
+      "guards": [
+        "params.run_id === authoritative.run_id",
+        "authoritative.allowed_actions includes record_client_feedback"
+      ],
+      "evidence": [
+        "success === true",
+        "data.updated_count",
+        "data.next_action"
+      ],
+      "nextPhase": "feedback_routing"
+    }
+  ]
+}

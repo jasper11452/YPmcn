@@ -5,8 +5,8 @@ function readSpec(relativePath) {
   return JSON.parse(readFileSync(new URL(`../spec/${relativePath}`, import.meta.url), "utf8"));
 }
 
-const targetProfile = readSpec("mcp.json");
-const workflowProfile = readSpec("workflow.json");
+const targetProfile = readSpec("profiles/reference-mvp-v2.json");
+const workflowProfile = readSpec("profiles/reference-mvp-v2-workflow.json");
 const requirementPolicy = readSpec("requirements.json");
 const requirementDictionary = readSpec("requirement-dictionary.json");
 const requirementRecordSchema = readSpec("schemas/requirement-record.schema.json");

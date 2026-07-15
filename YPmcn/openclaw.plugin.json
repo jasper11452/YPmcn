@@ -1,7 +1,7 @@
 {
   "id": "ypmcn-media-assistant",
-  "version": "3.0.0",
-  "description": "YPmcn mvp-v2 媒介助手：契约优先的工具门禁、语义 ID 链路与可恢复状态机。",
+  "version": "3.0.1",
+  "description": "YPmcn 媒介助手：对齐当前生产 MCP 的工具门禁、证据链路与本地会话投影。",
   "author": {
     "name": "Jasper"
   },

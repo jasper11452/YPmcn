@@ -13,9 +13,14 @@ import {
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const serverPath = fileURLToPath(new URL("../reference-mcp/server.mjs", import.meta.url));
-const targetProfile = JSON.parse(readFileSync(new URL("../spec/mcp.json", import.meta.url), "utf8"));
+const targetProfile = JSON.parse(
+  readFileSync(new URL("../spec/profiles/reference-mvp-v2.json", import.meta.url), "utf8"),
+);
 const workflowSchema = JSON.parse(
-  readFileSync(new URL("../spec/schemas/workflow-state.schema.json", import.meta.url), "utf8"),
+  readFileSync(
+    new URL("../spec/profiles/reference-mvp-v2-workflow-state.schema.json", import.meta.url),
+    "utf8",
+  ),
 );
 const requirementDictionary = JSON.parse(
   readFileSync(new URL("../spec/requirement-dictionary.json", import.meta.url), "utf8"),
