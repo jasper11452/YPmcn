@@ -44,18 +44,65 @@ export interface SqlExecutor {
   end?(): Promise<void>;
 }
 
-const CREATOR_COLUMNS = [
-  "id",
-  "item_id",
-  "douyinId",
-  "update_time",
+const COMMON_CREATOR_COLUMNS = [
   "kwUid",
+  "update_time",
+  "date",
+  "description",
   "kwProvince AS province",
   "kwCity AS city",
   "followercount AS follower_count",
-  "date",
-  "data_json",
 ] as const;
+const CREATOR_COLUMNS: Record<CreatorPlatform, readonly string[]> = {
+  dy: [
+    ...COMMON_CREATOR_COLUMNS,
+    "douyinId",
+    "verifiedreason",
+    "tagBrand",
+    "contentThemeLabel",
+    "industryTagLabel",
+    "xtTalentTypeLabel",
+    "growTalentTypeLabel",
+    "talentTypeLabel",
+  ],
+  xhs: [
+    ...COMMON_CREATOR_COLUMNS,
+    "xiaohongshuId",
+    "verifiedreason",
+    "tagBrand",
+    "kolPersonaLabel",
+    "contentFeatureLabel",
+    "talentTypeLabel",
+    "pgyBloggerTypeLabel",
+    "growBloggerTypeLabel",
+    "contentTag",
+    "businessIndustry",
+  ],
+};
+const SEMANTIC_FIELDS: Record<CreatorPlatform, readonly string[]> = {
+  dy: [
+    "description",
+    "verifiedreason",
+    "tagBrand",
+    "contentThemeLabel",
+    "industryTagLabel",
+    "xtTalentTypeLabel",
+    "growTalentTypeLabel",
+    "talentTypeLabel",
+  ],
+  xhs: [
+    "description",
+    "verifiedreason",
+    "tagBrand",
+    "kolPersonaLabel",
+    "contentFeatureLabel",
+    "talentTypeLabel",
+    "pgyBloggerTypeLabel",
+    "growBloggerTypeLabel",
+    "contentTag",
+    "businessIndustry",
+  ],
+};
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function envValue(env: NodeJS.ProcessEnv, yp: string, legacy: string, fallback = ""): string {
@@ -63,8 +110,8 @@ function envValue(env: NodeJS.ProcessEnv, yp: string, legacy: string, fallback =
 }
 
 export function mysqlSourceConfigFromEnv(env: NodeJS.ProcessEnv = process.env): MysqlSourceConfig {
-  const dyTable = env.VECTOR_DY_SOURCE_TABLE ?? "mz_item_data_dy";
-  const xhsTable = env.VECTOR_XHS_SOURCE_TABLE?.trim() || undefined;
+  const dyTable = env.VECTOR_DY_SOURCE_TABLE ?? "dy_mz";
+  const xhsTable = env.VECTOR_XHS_SOURCE_TABLE?.trim() || "xhs_mz";
   const projectTable = env.VECTOR_PROJECT_SOURCE_TABLE ?? "core_project";
   const configured = (env.VECTOR_SOURCE_TABLE_ALLOWLIST ?? "").split(",").map((v) => v.trim()).filter(Boolean);
   return {
@@ -78,7 +125,7 @@ export function mysqlSourceConfigFromEnv(env: NodeJS.ProcessEnv = process.env): 
     dyTable,
     xhsTable,
     projectTable,
-    allowedTables: [...new Set(["mz_item_data_dy", "core_project", dyTable, projectTable, ...(xhsTable ? [xhsTable] : []), ...configured])],
+    allowedTables: [...new Set(["dy_mz", "xhs_mz", "core_project", dyTable, projectTable, xhsTable, ...configured])],
   };
 }
 
@@ -104,13 +151,12 @@ function numberValue(value: unknown): number | undefined {
   return Number.isFinite(resolved) ? resolved : undefined;
 }
 
-function dataObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value !== "string") return {};
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch { return {}; }
+function semanticData(platform: CreatorPlatform, row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    SEMANTIC_FIELDS[platform]
+      .filter((field) => row[field] !== null && row[field] !== undefined && row[field] !== "")
+      .map((field) => [field, row[field]]),
+  );
 }
 
 function mapRow(platform: CreatorPlatform, sourceTable: string, row: Record<string, unknown>): CreatorRow | null {
@@ -118,21 +164,19 @@ function mapRow(platform: CreatorPlatform, sourceTable: string, row: Record<stri
   const sourceUpdatedAt = stringValue(row.update_time).trim();
   const sourceSnapshotDate = stringValue(row.date).trim() || sourceUpdatedAt.slice(0, 10);
   if (!kwUid || !sourceUpdatedAt || !sourceSnapshotDate) return null;
-  const data = dataObject(row.data_json);
   return {
     platform,
     kwUid,
     sourceTable,
-    sourceRowId: stringValue(row.id),
+    sourceRowId: kwUid,
     sourceSnapshotDate,
     sourceUpdatedAt,
-    itemId: stringValue(row.item_id) || undefined,
     douyinId: stringValue(row.douyinId) || undefined,
-    description: stringValue(data.description) || undefined,
+    description: stringValue(row.description) || undefined,
     province: stringValue(row.province) || undefined,
     city: stringValue(row.city) || undefined,
     followerCount: numberValue(row.follower_count),
-    dataJson: row.data_json,
+    dataJson: semanticData(platform, row),
   };
 }
 
@@ -152,7 +196,7 @@ export class MysqlReadonlySource {
     const cursorClause = options.cursor ? " WHERE update_time > ?" : "";
     const limitClause = limit === undefined ? "" : " LIMIT ?";
     const values: unknown[] = [...(options.cursor ? [options.cursor] : []), ...(limit === undefined ? [] : [limit])];
-    const sql = `SELECT ${CREATOR_COLUMNS.join(", ")} FROM \`${table}\`${cursorClause} ORDER BY update_time ASC, kwUid ASC, id ASC${limitClause}`;
+    const sql = `SELECT ${CREATOR_COLUMNS[platform].join(", ")} FROM \`${table}\`${cursorClause} ORDER BY update_time ASC, kwUid ASC${limitClause}`;
     try {
       const [rawRows] = await this.sql.query(sql, values);
       const rows = (Array.isArray(rawRows) ? rawRows : [])
@@ -178,7 +222,7 @@ export class MysqlReadonlySource {
     const identities = [...new Set(kwUids)].sort();
     if (identities.length > 1000) throw new TypeError("rehydrate identity limit exceeded");
     const placeholders = identities.map(() => "?").join(", ");
-    const sql = `SELECT ${CREATOR_COLUMNS.join(", ")} FROM \`${table}\` WHERE kwUid IN (${placeholders}) ORDER BY kwUid ASC, update_time DESC, id DESC`;
+    const sql = `SELECT ${CREATOR_COLUMNS[platform].join(", ")} FROM \`${table}\` WHERE kwUid IN (${placeholders}) ORDER BY kwUid ASC, update_time DESC`;
     try {
       const [rawRows] = await this.sql.query(sql, identities);
       const latest = new Map<string, CreatorRow>();

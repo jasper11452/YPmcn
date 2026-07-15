@@ -16,9 +16,9 @@ production_runtime_integration: false
 
 ## 已验证的数据边界
 
-- 可见抖音源：`mz_item_data_dy`。固定只读 SELECT 使用 `id`、`item_id`、`douyinId`、`update_time`、`kwUid`、`kwProvince`、`kwCity`、`followercount`、`date`、`data_json`。
+- 达人权威源仅为 `dy_mz` 与 `xhs_mz`。两表均以 `kwUid` 为主键，使用 `update_time`、`date`、`description`、`kwProvince`、`kwCity`、`followercount` 及各平台固定语义字段的只读 SELECT；`kwUid` 同时作为回源行标识。
 - 项目查询源：`core_project.description`，按项目 id 单行读取。
-- 未发现可确认的 XHS 源。`VECTOR_XHS_SOURCE_TABLE` 可配置；未配置或表不存在时返回明确 `source_unavailable`，不会伪造成功。
+- 默认分别读取 `dy_mz` 与 `xhs_mz`；若源表不存在，返回明确 `source_unavailable`，不会伪造成功。
 - 表名必须是安全标识符并属于固定/配置 allowlist。所有 SQL 均为固定 SELECT；无 DDL/DML。
 
 ## 本地配置
@@ -39,6 +39,6 @@ production_runtime_integration: false
 
 ## 同步方式与回滚
 
-首次不传 cursor 执行全量批次；后续人工传 cursor，固定使用 `update_time > cursor` 且按 `update_time, kwUid, id` 排序。没有后台 scheduler。
+首次不传 cursor 执行全量批次；后续人工传 cursor，固定使用 `update_time > cursor` 且按 `update_time, kwUid` 排序。没有后台 scheduler。
 
 回滚：停止 real 模式，删除本地 Qdrant collection（派生索引），revert 本 Change 的 `vector-mcp` 与两份 CHG 文档。MySQL 无写入，无数据库回滚步骤。

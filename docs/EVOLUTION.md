@@ -20,7 +20,7 @@
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:2c134982c85bb723dca2a198a791d94fd1f931fbeb222354d329cbc96eea086b`
-变更记录摘要：`sha256:35c7d748210917a5cfc2db97697d4bc73c4ef89fbc319e188a2e31219732d34a`
+变更记录摘要：`sha256:a46455f31a2f3e63724053f8de9fb8154102853e00ec1922dab59bf82f3e3581`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |

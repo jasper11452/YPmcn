@@ -12,16 +12,14 @@ import { RealQdrantClient } from "../dist/vector/real-qdrant.js";
 function config(overrides = {}) {
   return {
     host: "db", port: 3306, user: "u", password: "secret", database: "d",
-    dyTable: "mz_item_data_dy", projectTable: "core_project",
-    allowedTables: ["mz_item_data_dy", "core_project"],
+    dyTable: "dy_mz", xhsTable: "xhs_mz", projectTable: "core_project",
+    allowedTables: ["dy_mz", "xhs_mz", "core_project"],
     ...overrides,
   };
 }
 
 function rawRow(overrides = {}) {
   return {
-    id: 7,
-    item_id: "item-7",
     douyinId: "dy-7",
     update_time: "2026-07-14 12:00:00.000",
     kwUid: "kw-7",
@@ -29,7 +27,9 @@ function rawRow(overrides = {}) {
     city: "沈阳",
     follower_count: 12000,
     date: "2026-07-14",
-    data_json: JSON.stringify({ description: "徒步露营", talentTypeLabel: "户外达人", parsedCategories: ["户外用品"] }),
+    description: "徒步露营",
+    talentTypeLabel: "户外达人",
+    tagBrand: "户外用品",
     ...overrides,
   };
 }
@@ -38,16 +38,15 @@ function creator(overrides = {}) {
   return {
     platform: "dy",
     kwUid: "kw-7",
-    sourceTable: "mz_item_data_dy",
-    sourceRowId: "7",
+    sourceTable: "dy_mz",
+    sourceRowId: "kw-7",
     sourceSnapshotDate: "2026-07-14",
     sourceUpdatedAt: "2026-07-14T12:00:00.000Z",
-    profile: "户外创作者",
     description: "徒步露营",
     province: "辽宁",
     city: "沈阳",
     followerCount: 12000,
-    dataJson: { talentTypeLabel: "户外达人", parsedCategories: ["户外用品"] },
+    dataJson: { talentTypeLabel: "户外达人", tagBrand: "户外用品" },
     ...overrides,
   };
 }
@@ -66,11 +65,11 @@ it("preserves the three public operation tool interfaces", () => {
 describe("projection and redaction", () => {
   it("keeps allowed semantics and removes contact, URL, ID-like, metrics and region fields", () => {
     const projected = projectCreatorText({
-      profile: "联系 13800138000 mail a@example.com https://example.com/u",
+      description: "联系 13800138000 mail a@example.com https://example.com/u",
       data_json: {
         description: "户外露营 token ABCD1234567890123456",
         contentThemeLabel: ["徒步"],
-        parsedCategories: ["户外用品"],
+        tagBrand: "户外用品",
         province: "辽宁",
         nickname: "Alice",
         followerCount: 99999,
@@ -156,7 +155,7 @@ describe("official Qdrant SDK adapter", () => {
     const qdrant = new RealQdrantClient({ url: "http://q", collectionName: "c", vectorSize: 2, client });
     await qdrant.ensureCollection();
     await qdrant.upsert([{ id: "p", vector: { content: [1, 0], commercial: [0, 1] }, payload: {
-      platform: "dy", kw_uid: "kw-7", source_table: "mz_item_data_dy", source_row_id: "7",
+      platform: "dy", kw_uid: "kw-7", source_table: "dy_mz", source_row_id: "kw-7",
       source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
       embedding_model_id: "text-embedding-v4", vector_version: "local-v1",
     } }]);
@@ -182,7 +181,7 @@ describe("official Qdrant SDK adapter", () => {
     const qdrant = new RealQdrantClient({ url: "http://q", collectionName: "c", vectorSize: 2, client });
     await assert.rejects(qdrant.ensureCollection(), /schema mismatch/);
     await assert.rejects(qdrant.upsert([{ id: "p", vector: { content: [1], commercial: [0, 1] }, payload: {
-      platform: "dy", kw_uid: "kw-7", source_table: "mz_item_data_dy", source_row_id: "7",
+      platform: "dy", kw_uid: "kw-7", source_table: "dy_mz", source_row_id: "kw-7",
       source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
       embedding_model_id: "text-embedding-v4", vector_version: "local-v1",
     } }]), /exactly 2/);
@@ -227,7 +226,7 @@ describe("read-only MySQL source", () => {
     assert.doesNotMatch(calls[0].sql, /^\s*(?:INSERT|UPDATE|DELETE|CREATE|ALTER)\b/i);
     assert.deepEqual(calls[0].values, []);
     assert.doesNotMatch(calls[0].sql, / LIMIT \?$/);
-    assert.match(calls[1].sql, /WHERE update_time > \? ORDER BY update_time ASC, kwUid ASC, id ASC LIMIT \?$/);
+    assert.match(calls[1].sql, /WHERE update_time > \? ORDER BY update_time ASC, kwUid ASC LIMIT \?$/);
     assert.deepEqual(calls[1].values, ["2026-07-14", 10]);
     assert.equal(incremental.cursor, "2026-07-14 12:00:00.000");
   });
@@ -235,7 +234,7 @@ describe("read-only MySQL source", () => {
   it("rejects unallowlisted tables, reports missing XHS, and loads project description", async () => {
     assert.throws(() => validateTableIdentifier("evil; DROP TABLE x", ["evil"]), /allowlist/);
     const calls = [];
-    const source = new MysqlReadonlySource(config(), { query: async (sql, values) => { calls.push({ sql, values }); return [[{ description: "露营项目 13800138000" }]]; } });
+    const source = new MysqlReadonlySource(config({ xhsTable: undefined }), { query: async (sql, values) => { calls.push({ sql, values }); return [[{ description: "露营项目 13800138000" }]]; } });
     assert.deepEqual(await source.readCreators("xhs"), {
       status: "unavailable", platform: "xhs", rows: [], reason: "source_not_configured",
     });
@@ -245,7 +244,7 @@ describe("read-only MySQL source", () => {
 
   it("reports configured XHS table-not-found without fake success", async () => {
     const missing = Object.assign(new Error("missing"), { code: "ER_NO_SUCH_TABLE", errno: 1146 });
-    const source = new MysqlReadonlySource(config({ xhsTable: "mz_item_data_xhs", allowedTables: ["mz_item_data_dy", "mz_item_data_xhs", "core_project"] }), {
+    const source = new MysqlReadonlySource(config(), {
       query: async () => { throw missing; },
     });
     assert.deepEqual(await source.readCreators("xhs"), {

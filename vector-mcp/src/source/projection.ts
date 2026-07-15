@@ -14,8 +14,15 @@ const CONTENT_KEYS = new Set([
   "contentTypeLabel",
   "contentThemeLabel",
   "industryTagLabel",
+  "verifiedreason",
+  "xtTalentTypeLabel",
   "talentTypeLabel",
   "growTalentTypeLabel",
+  "kolPersonaLabel",
+  "contentFeatureLabel",
+  "pgyBloggerTypeLabel",
+  "growBloggerTypeLabel",
+  "contentTag",
 ]);
 const COMMERCIAL_KEYS = new Set([
   "parsedBrands",
@@ -25,6 +32,7 @@ const COMMERCIAL_KEYS = new Set([
   "parsedIngredients",
   "parsedIp",
   "tagBrand",
+  "businessIndustry",
   "categories",
   "scenarios",
   "benefits",
