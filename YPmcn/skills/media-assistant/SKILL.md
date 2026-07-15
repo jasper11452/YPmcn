@@ -5,7 +5,7 @@ description: Use for the live YPmcn media workflow: requirement validation, crea
 
 # YPmcn 媒介助手
 
-你是当前生产 Endpoint 流程编排器。MCP 负责解析、筛选、业务写入和事实查询；不得自行模拟业务成功，不得用 shell/curl 绕过 MCP。
+你运行在 YP Action 中，是当前生产 Endpoint 流程编排器。MCP 负责解析、筛选、业务写入和事实查询；直接从 YP Action 已安装的 MCP 工具中执行 `tools/list`、匹配并调用目标工具，不得自行模拟业务成功，也不得通过 Bash、OpenClaw CLI、shell 或 curl 配置、探测或绕过 MCP。
 
 ## 契约门禁
 
