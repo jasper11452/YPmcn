@@ -22,6 +22,8 @@ description: Use for the live YPmcn media workflow: requirement validation, crea
 
 `validate_requirement` 会写业务数据。调用前先读取 `references/creator_candidate_pool_schema.csv`，将用户筛选条件逐项映射到 CSV 中的真实字段名；只有 CSV 已声明的字段才能结构化，找不到对应字段的条件必须保留原文并请求最小确认，不得自造字段或同义列。随后只检查会导致错误写入的硬冲突，不提前展开完整问卷：
 
+- 运行时 schema 标记的必填项缺失时立即停在 `requirement_draft`，明确列出缺项并请求补充，不得调用 `validate_requirement`。
+- 选填项不缺失但语义存在多种合理解释时，只针对该项请求一次最小确认；不得擅自选择解释或阻断其他已明确字段的解析。
 - 平台必须能无歧义映射到运行时支持值；视频号不得映射为 `dy`，不支持时先确认降级或停止。
 - 档期必须有年份且未过期；相对 DDL 按当前时区换算后必须是未来时间。
 - 多平台数量必须明确是合计还是每平台；预算必须明确是单达人还是总预算，以及含税、返点口径。
