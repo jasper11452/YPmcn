@@ -8,6 +8,7 @@
   "files": [
     ".claude-plugin/",
     "dist/",
+    "hooks/",
     "skills/",
     "spec/",
     "vector-mcp/dist/",
@@ -39,7 +40,9 @@
   ],
   "license": "MIT",
   "openclaw": {
-    "hooks": "./dist/index.js",
+    "hooks": [
+      "./hooks/ypmcn-media-assistant"
+    ],
     "extensions": [
       "./dist/index.js"
     ]

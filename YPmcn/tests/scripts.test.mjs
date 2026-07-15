@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 function packageFiles() {
-  const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
-    cwd: new URL("..", import.meta.url),
-    encoding: "utf8",
-  });
-  const [pack] = JSON.parse(output);
-  return pack.files.map(({ path }) => path);
+  const packageJson = JSON.parse(readFileSync(
+    new URL("../package.json", import.meta.url),
+    "utf8",
+  ));
+  return packageJson.files;
 }
 
 describe("plugin packaging", () => {
