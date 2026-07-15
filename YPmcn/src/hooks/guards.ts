@@ -1,35 +1,18 @@
-import { validateFieldSelection, validateToolParams } from "../contract/validator.js";
+import { validateToolParams } from "../contract/validator.js";
 import type { ValidationIssue } from "../contract/types.js";
-import type {
-  BeforeToolCallResult,
-  FieldDefinition,
-  GuardContext,
-  RuntimeState,
-} from "./types.js";
+import type { BeforeToolCallResult, GuardContext, RuntimeState } from "./types.js";
 
 const TARGET_TOOLS = new Set([
-  "validate_requirement",
-  "search_creators",
-  "rank_mcns",
-  "select_inquiry_form_fields",
-  "create_with_distributions",
-  "sync_mcn_inquiry_status",
-  "ingest_mcn_submissions",
-  "manual_source_creators",
-  "rank_creators",
-  "create_submission_batch",
-  "record_client_feedback",
-  "get_recommendation_run_detail",
-  "get_creator_detail",
-  "audit_manual_adjustment",
-  "get_workflow_state",
+  "validate_requirement", "search_creators", "rank_mcns",
+  "select_inquiry_form_fields", "create_with_distributions",
+  "sync_mcn_inquiry_status", "ingest_mcn_submissions",
+  "manual_source_creators", "rank_creators", "create_submission_batch",
+  "record_client_feedback", "get_recommendation_run_detail",
+  "get_creator_detail", "audit_manual_adjustment", "get_workflow_state",
 ]);
-
 const READ_ONLY_TOOLS = new Set([
-  "select_inquiry_form_fields",
-  "get_recommendation_run_detail",
-  "get_creator_detail",
-  "get_workflow_state",
+  "select_inquiry_form_fields", "get_recommendation_run_detail",
+  "get_creator_detail", "get_workflow_state",
 ]);
 const SHELL_TOOLS = new Set(["exec", "bash", "shell", "powershell", "pwsh"]);
 const SEND_ROLES = new Set(["media", "procurement"]);
@@ -46,37 +29,13 @@ function nonemptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function deepEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((value, index) => deepEqual(value, right[index]))
-    );
-  }
-  if (!isRecord(left) || !isRecord(right)) return false;
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
-  return (
-    leftKeys.length === rightKeys.length &&
-    leftKeys.every(
-      (key, index) => key === rightKeys[index] && deepEqual(left[key], right[key]),
-    )
-  );
-}
-
 function blocked(code: string, message: string): BeforeToolCallResult {
   return { block: true, blockReason: `${code}: ${message}` };
 }
 
 function blockedByIssues(issues: ValidationIssue[]): BeforeToolCallResult | undefined {
   if (issues.length === 0) return undefined;
-  const summary = issues
-    .slice(0, 3)
-    .map((entry) => `${entry.code} at ${entry.path}`)
-    .join("; ");
+  const summary = issues.slice(0, 3).map((entry) => `${entry.code} at ${entry.path}`).join("; ");
   return blocked(issues[0].code, summary);
 }
 
@@ -87,150 +46,134 @@ function shellText(params: Record<string, unknown>): string {
     .join("\n");
 }
 
-function phaseRequired(state: RuntimeState | undefined, expected: RuntimeState["phase"]): BeforeToolCallResult | undefined {
+function phaseRequired(
+  state: RuntimeState | undefined,
+  expected: RuntimeState["phase"],
+): BeforeToolCallResult | undefined {
   if (state?.phase === expected) return undefined;
   return blocked(
     "INVALID_PHASE",
-    `Tool requires phase ${expected}; current phase is ${state?.phase ?? "missing"}.`,
+    `Tool requires local projection ${expected}; current projection is ${state?.phase ?? "missing"}.`,
   );
 }
 
-function sameIdentifier(
-  params: Record<string, unknown>,
-  state: RuntimeState,
-  key: "requirement_id" | "candidate_pool_id" | "mcn_recommendation_id" | "run_id",
+function matchingString(
+  actual: unknown,
+  expected: string | undefined,
+  label: string,
 ): BeforeToolCallResult | undefined {
-  const expected = state[key];
-  if (nonemptyString(expected) && params[key] === expected) return undefined;
-  return blocked("STATE_CONFLICT", `${key} does not match the current-session projection.`);
+  if (nonemptyString(expected) && actual === expected) return undefined;
+  return blocked("STATE_CONFLICT", `${label} does not match current-session evidence.`);
 }
 
-function validateSendTimestamps(
-  params: Record<string, unknown>,
-  nowMs: number,
-): BeforeToolCallResult | undefined {
-  const deadline = params.deadline;
-  const remindAt = params.remindAt;
-  if (!nonemptyString(deadline) || !ISO_WITH_TIMEZONE.test(deadline)) {
-    return blocked("INVALID_INPUT", "deadline must be a timezone-qualified ISO timestamp.");
-  }
-  if (!nonemptyString(remindAt) || !ISO_WITH_TIMEZONE.test(remindAt)) {
-    return blocked("INVALID_INPUT", "remindAt must be a timezone-qualified ISO timestamp.");
-  }
-  const deadlineMs = Date.parse(deadline);
-  const remindAtMs = Date.parse(remindAt);
-  if (!Number.isFinite(deadlineMs) || deadlineMs <= nowMs) {
-    return blocked("INVALID_INPUT", "deadline must be in the future.");
-  }
-  if (!Number.isFinite(remindAtMs) || remindAtMs <= nowMs) {
-    return blocked("INVALID_INPUT", "remindAt must be in the future.");
-  }
-  if (remindAtMs > deadlineMs) {
-    return blocked("INVALID_INPUT", "remindAt cannot be later than deadline.");
-  }
-  return undefined;
+function columnContainsField(column: Record<string, unknown>, fieldName: string): boolean {
+  return Object.keys(column).includes(fieldName) ||
+    Object.values(column).some((value) => value === fieldName);
 }
 
 function validateDistributionGuard(
   context: GuardContext,
   state: RuntimeState | undefined,
 ): BeforeToolCallResult | undefined {
+  const phaseError = phaseRequired(state, "field_selection_ready");
+  if (phaseError || !state) return phaseError;
   if (!nonemptyString(context.toolCallId)) {
     return blocked("INVALID_INPUT", "A provider write requires toolCallId evidence.");
   }
-  const confirmation = state?.sendConfirmation;
-  if (!confirmation || !SEND_ROLES.has(confirmation.operatorRole)) {
-    return blocked("CONFIRMATION_REQUIRED", "A known media/procurement operator role is required.");
-  }
+  const confirmation = state.sendConfirmation;
   if (
-    confirmation.mcn_recommendation_id !== context.params.mcn_recommendation_id ||
+    !confirmation ||
+    !SEND_ROLES.has(confirmation.operatorRole) ||
+    confirmation.mcn_recommendation_id !== state.mcn_recommendation_id ||
     confirmation.supplyConfirmed !== true ||
     confirmation.mcnConfirmed !== true ||
     confirmation.messageConfirmed !== true
   ) {
     return blocked(
       "CONFIRMATION_REQUIRED",
-      "Supply, target-MCN, and outbound-message confirmations are all required.",
+      "Current target-MCN, supply, and outbound-message confirmations are required.",
     );
   }
-  const phaseError = phaseRequired(state, "field_selection_ready");
-  if (phaseError || !state) return phaseError;
-  const idError = sameIdentifier(context.params, state, "mcn_recommendation_id");
-  if (idError) return idError;
-  if (!state.fieldSelection) {
-    return blocked("FIELD_SELECTION_INVALID", "Current-session field-selection proof is missing.");
+  const selection = state.fieldSelection;
+  if (!selection || selection.fieldNames.length === 0) {
+    return blocked("FIELD_SELECTION_INVALID", "Current-session field description is missing.");
   }
-  const selectionIssues = validateFieldSelection({
-    success: true,
-    fields: state.fieldSelection.fields,
-    items: state.fieldSelection.items,
-    selected_count: state.fieldSelection.selected_count,
-  });
-  if (selectionIssues.length > 0) return blockedByIssues(selectionIssues);
-  if (!deepEqual(context.params.columns, state.fieldSelection.items)) {
+  const columns = context.params.columns;
+  if (
+    !Array.isArray(columns) ||
+    columns.length !== selection.fieldNames.length ||
+    !columns.every((column, index) =>
+      isRecord(column) && columnContainsField(column, selection.fieldNames[index]))
+  ) {
     return blocked(
       "FIELD_SELECTION_INVALID",
-      "Outbound columns must exactly match the ordered current-session field selection.",
+      "Ordered columns must bind one-to-one to the confirmed field-description names.",
     );
   }
-  return validateSendTimestamps(context.params, context.nowMs ?? Date.now());
+  if (!Array.isArray(context.params.supplierIds) || context.params.supplierIds.length === 0) {
+    return blocked("INVALID_INPUT", "At least one supplierId is required for a distribution write.");
+  }
+  const deadline = context.params.deadline;
+  if (
+    !nonemptyString(deadline) ||
+    !ISO_WITH_TIMEZONE.test(deadline) ||
+    !Number.isFinite(Date.parse(deadline)) ||
+    Date.parse(deadline) <= (context.nowMs ?? Date.now())
+  ) {
+    return blocked("INVALID_INPUT", "deadline must be a future timezone-qualified timestamp.");
+  }
+  return undefined;
 }
 
 function manualRecoveryIsCurrent(state: RuntimeState, nowMs: number): boolean {
-  return (
-    typeof state.manualRecoveryConfirmedAt === "number" &&
-    state.manualRecoveryConfirmedAt <= nowMs
-  );
+  return typeof state.manualRecoveryConfirmedAt === "number" &&
+    state.manualRecoveryConfirmedAt <= nowMs;
+}
+
+function scheduledContext(context: GuardContext): boolean {
+  return context.recoveryTrigger === "scheduled" &&
+    context.trigger === "cron" &&
+    nonemptyString(context.params.cron_job_id);
 }
 
 function validateSyncGuard(
   context: GuardContext,
   state: RuntimeState | undefined,
 ): BeforeToolCallResult | undefined {
-  // A state projection can be lost between send and first reconciliation. The
-  // authoritative sync is the only safe way to reconstruct it from semantic IDs.
-  if (!state) return undefined;
-
-  const requirementError = sameIdentifier(context.params, state, "requirement_id");
-  if (requirementError) return requirementError;
-  const mcnError = sameIdentifier(context.params, state, "mcn_recommendation_id");
-  if (mcnError) return mcnError;
-
-  if (state.phase === "distribution_sync_pending") return undefined;
-  if (state.phase === "recovered") {
-    return blocked(
-      "RECOVERY_ALREADY_TERMINAL",
-      "Authoritative state is terminal; another recovery write is not allowed.",
-    );
+  if (!state) return blocked("INTEGRATION_REQUIRED", "Current-session send evidence is missing.");
+  for (const [key, expected] of [
+    ["requirement_id", state.requirement_id],
+    ["project_id", state.project_id],
+    ["mcn_id", state.mcn_id],
+  ] as const) {
+    const error = matchingString(context.params[key], expected, key);
+    if (error) return error;
   }
+  if (state.phase === "distribution_sync_pending") return undefined;
   if (state.phase === "waiting_return") {
     if (
       context.recoveryTrigger === "manual" &&
       manualRecoveryIsCurrent(state, context.nowMs ?? Date.now())
-    ) {
-      return undefined;
-    }
-    if (context.recoveryTrigger === "scheduled" && context.trigger === "cron") {
-      return undefined;
-    }
+    ) return undefined;
+    if (scheduledContext(context)) return undefined;
     return blocked(
       "RECOVERY_NOT_CONFIRMED",
-      "Waiting recovery requires explicit current-session manual intent or cron evidence.",
+      "Recovery sync requires current manual intent or scheduled cron evidence.",
     );
   }
   if (state.phase === "recovery_sync_pending") {
-    if (!state.lastIngest) {
-      return blocked("INVALID_PHASE", "Final sync requires successful ingest evidence.");
+    if (!state.lastIngest || context.recoveryTrigger !== state.lastIngest.trigger) {
+      return blocked("STATE_CONFLICT", "Final sync does not match current ingest evidence.");
     }
-    if (context.recoveryTrigger !== state.lastIngest.trigger) {
-      return blocked("STATE_CONFLICT", "Final sync trigger does not match the ingest trigger.");
-    }
-    if (state.lastIngest.trigger === "scheduled" && context.trigger !== "cron") {
+    if (state.lastIngest.trigger === "scheduled" && !scheduledContext(context)) {
       return blocked("RECOVERY_NOT_CONFIRMED", "Scheduled final sync requires cron evidence.");
     }
     return undefined;
   }
-  return blocked("INVALID_PHASE", `Sync is not allowed from phase ${state.phase}.`);
+  if (state.phase === "recovered") {
+    return blocked("RECOVERY_ALREADY_TERMINAL", "Local recovery sequence is already complete.");
+  }
+  return blocked("INVALID_PHASE", `Sync is not allowed from local projection ${state.phase}.`);
 }
 
 function validateIngestGuard(
@@ -239,41 +182,23 @@ function validateIngestGuard(
 ): BeforeToolCallResult | undefined {
   const phaseError = phaseRequired(state, "recovering");
   if (phaseError || !state) return phaseError;
-  const requirementError = sameIdentifier(context.params, state, "requirement_id");
-  if (requirementError) return requirementError;
-  const mcnError = sameIdentifier(context.params, state, "mcn_recommendation_id");
-  if (mcnError) return mcnError;
+  const inquiryError = matchingString(context.params.inquiry_id, state.inquiry_id, "inquiry_id");
+  if (inquiryError) return inquiryError;
   if (!state.lastSync) {
-    return blocked("RECOVERY_NOT_CONFIRMED", "Ingest requires current-session sync evidence.");
-  }
-
-  const requestedTrigger = context.params.trigger;
-  if (requestedTrigger === "manual") {
-    if (
-      context.recoveryTrigger !== "manual" ||
-      state.lastSync.trigger !== "manual" ||
-      !manualRecoveryIsCurrent(state, context.nowMs ?? Date.now()) ||
-      state.lastSync.at < (state.manualRecoveryConfirmedAt ?? Number.POSITIVE_INFINITY)
-    ) {
-      return blocked(
-        "RECOVERY_NOT_CONFIRMED",
-        "Manual ingest requires confirmation followed by a matching successful sync.",
-      );
-    }
-    return undefined;
+    return blocked("RECOVERY_NOT_CONFIRMED", "Ingest requires successful current-session sync evidence.");
   }
   if (
-    requestedTrigger === "scheduled" &&
-    context.recoveryTrigger !== "manual" &&
+    context.recoveryTrigger === "manual" &&
+    manualRecoveryIsCurrent(state, context.nowMs ?? Date.now()) &&
+    state.lastSync.trigger === "manual" &&
+    state.lastSync.at >= (state.manualRecoveryConfirmedAt ?? Number.POSITIVE_INFINITY)
+  ) return undefined;
+  if (
+    context.recoveryTrigger === "scheduled" &&
     context.trigger === "cron" &&
     state.lastSync.trigger === "scheduled"
-  ) {
-    return undefined;
-  }
-  return blocked(
-    "RECOVERY_NOT_CONFIRMED",
-    "Scheduled ingest requires matching current-session sync and ctx.trigger=cron.",
-  );
+  ) return undefined;
+  return blocked("RECOVERY_NOT_CONFIRMED", "Ingest requires matching manual or cron sync evidence.");
 }
 
 function validatePhaseAndIdentity(
@@ -283,50 +208,45 @@ function validatePhaseAndIdentity(
 ): BeforeToolCallResult | undefined {
   switch (toolName) {
     case "validate_requirement":
-      if (!state || state.phase === "requirement_draft" || state.phase === "feedback_routing") {
-        return undefined;
-      }
-      return blocked("INVALID_PHASE", `Requirement validation is not allowed from ${state.phase}.`);
+      return !state || state.phase === "requirement_draft" || state.phase === "feedback_routing"
+        ? undefined
+        : blocked("INVALID_PHASE", `Requirement validation is not allowed from ${state.phase}.`);
     case "search_creators": {
-      const phaseError = phaseRequired(state, "requirement_ready");
-      return phaseError || (state ? sameIdentifier(context.params, state, "requirement_id") : phaseError);
+      const error = phaseRequired(state, "requirement_ready");
+      return error || matchingString(context.params.id, state?.requirement_id, "id");
     }
     case "rank_mcns": {
-      const phaseError = phaseRequired(state, "candidate_pool_ready");
-      return phaseError || (state ? sameIdentifier(context.params, state, "candidate_pool_id") : phaseError);
+      const error = phaseRequired(state, "search_completed");
+      return error || matchingString(context.params.id, state?.requirement_id, "id");
     }
-    case "select_inquiry_form_fields": {
-      const phaseError = phaseRequired(state, "mcn_planning");
-      return phaseError || (state ? sameIdentifier(context.params, state, "mcn_recommendation_id") : phaseError);
-    }
+    case "select_inquiry_form_fields":
+      return phaseRequired(state, "mcn_planning");
     case "create_with_distributions":
       return validateDistributionGuard(context, state);
     case "sync_mcn_inquiry_status":
       return validateSyncGuard(context, state);
     case "ingest_mcn_submissions":
       return validateIngestGuard(context, state);
-    case "manual_source_creators": {
-      const phaseError = phaseRequired(state, "recovered");
-      return phaseError || (state ? sameIdentifier(context.params, state, "requirement_id") : phaseError);
-    }
+    case "manual_source_creators":
+      return phaseRequired(state, "recovered");
     case "rank_creators": {
-      const phaseError = phaseRequired(state, "recovered");
-      if (phaseError || !state) return phaseError;
-      const idError = sameIdentifier(context.params, state, "mcn_recommendation_id");
-      if (idError) return idError;
-      if (state.lastSync?.lifecycle_status !== "recovered") {
-        return blocked("INVALID_PHASE", "Ranking requires the latest authoritative sync to be recovered.");
-      }
-      return undefined;
+      const error = phaseRequired(state, "recovered");
+      return error || matchingString(
+        context.params.requirement_id,
+        state?.requirement_id,
+        "requirement_id",
+      );
     }
     case "create_submission_batch": {
-      const phaseError = phaseRequired(state, "recommendation_ready");
-      return phaseError || (state ? sameIdentifier(context.params, state, "run_id") : phaseError);
+      const error = phaseRequired(state, "recommendation_ready");
+      return error || matchingString(context.params.run_id, state?.run_id, "run_id");
     }
     case "record_client_feedback": {
-      const phaseError = phaseRequired(state, "submission_batch_ready");
-      return phaseError || (state ? sameIdentifier(context.params, state, "run_id") : phaseError);
+      const error = phaseRequired(state, "submission_batch_ready");
+      return error || matchingString(context.params.run_id, state?.run_id, "run_id");
     }
+    case "audit_manual_adjustment":
+      return matchingString(context.params.run_id, state?.run_id, "run_id");
     default:
       return undefined;
   }
@@ -334,10 +254,9 @@ function validatePhaseAndIdentity(
 
 export function normalizeYpmcnToolName(toolName: string): string | null {
   for (const prefix of ["ypmcn__", "mcp__ypmcn__"]) {
-    if (toolName.startsWith(prefix)) {
-      const candidate = toolName.slice(prefix.length);
-      return candidate.length > 0 ? candidate : null;
-    }
+    if (!toolName.startsWith(prefix)) continue;
+    const candidate = toolName.slice(prefix.length);
+    return candidate.length > 0 ? candidate : null;
   }
   return null;
 }
@@ -351,30 +270,27 @@ export async function runBeforeToolCallGuards(
       "Provider writes must use the declared MCP tool, not a shell or curl bypass.",
     );
   }
-
   const toolName = normalizeYpmcnToolName(context.toolName);
   if (!toolName) return undefined;
   if (!TARGET_TOOLS.has(toolName)) {
-    return blocked("INTEGRATION_REQUIRED", `Tool ${toolName} is not executable in the mvp-v2 profile.`);
+    return blocked("INTEGRATION_REQUIRED", `Tool ${toolName} is not executable in the current profile.`);
   }
   if (!nonemptyString(context.sessionKey)) {
     return blocked("INVALID_INPUT", "A current sessionKey is required for state-safe execution.");
   }
-  if (toolName === "create_with_distributions" && context.params.preview_only !== false) {
-    return blocked("SCHEMA_MISMATCH", "mvp-v2 forbids preview sends; preview_only must be false.");
-  }
-
   const contractError = blockedByIssues(validateToolParams(toolName, context.params));
   if (contractError) return contractError;
-
   const state = context.store.get(context.sessionKey);
+  if (state?.lastResultIssue?.toolName === toolName && !READ_ONLY_TOOLS.has(toolName)) {
+    return blocked(
+      state.lastResultIssue.code,
+      "Previous result lacked explicit evidence; reconcile before retrying this write.",
+    );
+  }
   const phaseError = validatePhaseAndIdentity(toolName, context, state);
   if (phaseError) return phaseError;
-
   if (!READ_ONLY_TOOLS.has(toolName) && !nonemptyString(context.toolCallId)) {
     return blocked("INVALID_INPUT", "A business write requires toolCallId evidence.");
   }
   return undefined;
 }
-
-export type { FieldDefinition };

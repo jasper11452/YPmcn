@@ -1,18 +1,12 @@
-import { loadContractProfile, loadContractSchema } from "../contract/loader.js";
-import type { ContractSchema, MvpContractProfile } from "../contract/types.js";
-import { validateFieldSelection } from "../contract/validator.js";
 import { normalizeYpmcnToolName } from "./guards.js";
+import { parseFieldSelectionDescription } from "../contract/validator.js";
 import type {
   ApplyToolResultContext,
-  FieldDefinition,
   FieldSelectionProof,
   RecoveryTrigger,
   RuntimeState,
   SyncEvidence,
 } from "./types.js";
-
-const ISO_WITH_TIMEZONE =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -20,10 +14,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function nonemptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
-}
-
-function hasOwn(value: Record<string, unknown>, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function parseJson(value: string): unknown {
@@ -34,24 +24,11 @@ function parseJson(value: string): unknown {
   }
 }
 
-function deepEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) &&
-      left.length === right.length && left.every((entry, index) => deepEqual(entry, right[index]));
-  }
-  if (!isRecord(left) || !isRecord(right)) return false;
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
-  return leftKeys.length === rightKeys.length &&
-    leftKeys.every((key, index) =>
-      key === rightKeys[index] && hasOwn(right, key) && deepEqual(left[key], right[key]));
-}
-
 function unwrapResult(value: unknown): unknown {
   if (!isRecord(value)) return value;
-  if (hasOwn(value, "result")) return unwrapResult(value.result);
-  if (hasOwn(value, "structuredContent")) return unwrapResult(value.structuredContent);
+  if (value.isError === true) return value;
+  if (Object.hasOwn(value, "result")) return unwrapResult(value.result);
+  if (Object.hasOwn(value, "structuredContent")) return unwrapResult(value.structuredContent);
   if (Array.isArray(value.content)) {
     for (const entry of value.content) {
       if (!isRecord(entry) || typeof entry.text !== "string") continue;
@@ -62,141 +39,77 @@ function unwrapResult(value: unknown): unknown {
   return value;
 }
 
-function resolveJsonPointer(root: unknown, pointer: string): unknown {
-  let current = root;
-  for (const rawPart of pointer.split("/").filter(Boolean)) {
-    if (!isRecord(current)) return undefined;
-    const part = rawPart.replace(/~1/g, "/").replace(/~0/g, "~");
-    current = current[part];
-  }
-  return current;
+interface ObservedSuccess {
+  root: Record<string, unknown>;
+  data?: Record<string, unknown>;
+  traceId?: string;
 }
 
-function resolveSchemaReference(
-  reference: string,
-  profile: MvpContractProfile,
-): ContractSchema | undefined {
-  if (reference.startsWith("#/")) {
-    const resolved = resolveJsonPointer(profile, reference.slice(1));
-    return isRecord(resolved) ? resolved as ContractSchema : undefined;
-  }
-  const [schemaPath, pointer = ""] = reference.split("#", 2);
-  if (!schemaPath.startsWith("schemas/")) return undefined;
-  try {
-    const document = loadContractSchema(schemaPath.slice("schemas/".length));
-    const resolved = pointer ? resolveJsonPointer(document, pointer) : document;
-    return isRecord(resolved) ? resolved as ContractSchema : undefined;
-  } catch {
+function observedSuccess(result: unknown): ObservedSuccess | undefined {
+  const root = unwrapResult(result);
+  if (
+    !isRecord(root) ||
+    root.isError === true ||
+    root.success !== true ||
+    (Object.hasOwn(root, "error") && root.error !== null && root.error !== undefined)
+  ) {
     return undefined;
   }
-}
-
-function matchesSchema(
-  schema: ContractSchema,
-  value: unknown,
-  profile: MvpContractProfile,
-): boolean {
-  if (typeof schema.$ref === "string") {
-    const resolved = resolveSchemaReference(schema.$ref, profile);
-    return resolved !== undefined && matchesSchema(resolved, value, profile);
-  }
-  if (Array.isArray(schema.oneOf)) {
-    if (schema.oneOf.filter((candidate) => matchesSchema(candidate, value, profile)).length !== 1) {
-      return false;
-    }
-  }
-  const types = schema.type === undefined ? [] : Array.isArray(schema.type) ? schema.type : [schema.type];
-  if (types.length > 0 && !types.some((type) => {
-    switch (type) {
-      case "array": return Array.isArray(value);
-      case "boolean": return typeof value === "boolean";
-      case "integer": return typeof value === "number" && Number.isInteger(value);
-      case "null": return value === null;
-      case "number": return typeof value === "number" && Number.isFinite(value);
-      case "object": return isRecord(value);
-      case "string": return typeof value === "string";
-    }
-  })) return false;
-  if (hasOwn(schema as Record<string, unknown>, "const") && !deepEqual(value, schema.const)) return false;
-  if (schema.enum && !schema.enum.some((candidate) => deepEqual(candidate, value))) return false;
-
-  if (typeof value === "string") {
-    if (schema.minLength !== undefined && value.length < schema.minLength) return false;
-    if (schema.pattern !== undefined) {
-      try {
-        if (!new RegExp(schema.pattern).test(value)) return false;
-      } catch {
-        return false;
-      }
-    }
-    if (schema.format === "date-time" &&
-      (!ISO_WITH_TIMEZONE.test(value) || !Number.isFinite(Date.parse(value)))) return false;
-  }
-  if (typeof value === "number") {
-    if (schema.minimum !== undefined && value < schema.minimum) return false;
-    if (schema.maximum !== undefined && value > schema.maximum) return false;
-  }
-  if (Array.isArray(value)) {
-    if (schema.minItems !== undefined && value.length < schema.minItems) return false;
-    if (schema.maxItems !== undefined && value.length > schema.maxItems) return false;
-    if (schema.uniqueItems && value.some((entry, index) =>
-      value.slice(0, index).some((candidate) => deepEqual(candidate, entry)))) return false;
-    if (schema.items && !value.every((entry) => matchesSchema(schema.items as ContractSchema, entry, profile))) {
-      return false;
-    }
-  }
-  if (isRecord(value)) {
-    if (typeof schema.minProperties === "number" && Object.keys(value).length < schema.minProperties) {
-      return false;
-    }
-    if ((schema.required ?? []).some((key) => !hasOwn(value, key))) return false;
-    const properties = schema.properties ?? {};
-    for (const [key, entry] of Object.entries(value)) {
-      const property = properties[key];
-      if (property) {
-        if (!matchesSchema(property, entry, profile)) return false;
-      } else if (schema.additionalProperties === false) {
-        return false;
-      } else if (isRecord(schema.additionalProperties) &&
-        !matchesSchema(schema.additionalProperties as ContractSchema, entry, profile)) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-function successfulOutput(toolName: string, result: unknown): Record<string, unknown> | undefined {
-  let profile: MvpContractProfile;
-  try {
-    profile = loadContractProfile("mvp-v2");
-  } catch {
-    return undefined;
-  }
-  const contract = profile.outputContracts[toolName];
-  if (!contract) return undefined;
-  const unwrapped = unwrapResult(result);
-  if (!isRecord(unwrapped)) return undefined;
-  if (contract.successEnvelope === "standard") {
-    const envelope = profile.outputEnvelopes.standard;
-    if (!envelope || !matchesSchema(envelope, unwrapped, profile) ||
-      unwrapped.success !== true || !isRecord(unwrapped.data) || unwrapped.error !== null ||
-      !matchesSchema(contract.successSchema, unwrapped.data, profile)) {
-      return undefined;
-    }
-    return unwrapped.data;
-  }
-  return matchesSchema(contract.successSchema, unwrapped, profile) ? unwrapped : undefined;
-}
-
-function fieldSelectionProof(result: unknown): FieldSelectionProof | undefined {
-  const unwrapped = unwrapResult(result);
-  if (validateFieldSelection(unwrapped).length > 0 || !isRecord(unwrapped)) return undefined;
   return {
-    fields: structuredClone(unwrapped.fields as Record<string, FieldDefinition>),
-    items: structuredClone(unwrapped.items as FieldDefinition[]),
-    selected_count: unwrapped.selected_count as number,
+    root,
+    data: isRecord(root.data) ? root.data : undefined,
+    traceId: nonemptyString(root.trace_id) ? root.trace_id : undefined,
   };
+}
+
+function knownFailure(result: unknown): boolean {
+  const root = unwrapResult(result);
+  return isRecord(root) && (root.isError === true || root.success === false);
+}
+
+function withResultIssue(
+  current: RuntimeState | undefined,
+  toolName: string,
+  at: number,
+): RuntimeState {
+  const readOnly = toolName === "select_inquiry_form_fields" ||
+    toolName === "get_recommendation_run_detail" ||
+    toolName === "get_creator_detail" ||
+    toolName === "get_workflow_state";
+  return {
+    ...currentOrDraft(current),
+    lastResultIssue: {
+      toolName,
+      code: readOnly ? "INTEGRATION_REQUIRED" : "WRITE_RESULT_UNKNOWN",
+      at,
+    },
+  };
+}
+
+function clearResultIssue(state: RuntimeState): RuntimeState {
+  const { lastResultIssue: _ignored, ...rest } = state;
+  return rest;
+}
+
+function explicitString(
+  evidence: ObservedSuccess,
+  ...keys: string[]
+): string | undefined {
+  for (const source of [evidence.data, evidence.root]) {
+    if (!source) continue;
+    for (const key of keys) {
+      if (nonemptyString(source[key])) return source[key];
+    }
+  }
+  return undefined;
+}
+
+function parseFieldSelection(evidence: ObservedSuccess): FieldSelectionProof | undefined {
+  const description = explicitString(evidence, "description");
+  if (!description) return undefined;
+  const fieldNames = parseFieldSelectionDescription(description);
+  if (!fieldNames) return undefined;
+  return { description, fieldNames };
 }
 
 function currentOrDraft(state: RuntimeState | undefined): RuntimeState {
@@ -207,80 +120,56 @@ function recoveryTrigger(context: ApplyToolResultContext): RecoveryTrigger | "in
   return context.recoveryTrigger ?? "initial";
 }
 
-function validSyncEvidence(
-  data: Record<string, unknown>,
-  at: number,
-  trigger: RecoveryTrigger | "initial",
-): SyncEvidence | undefined {
-  if (
-    !nonemptyString(data.inquiry_batch_id) ||
-    !Array.isArray(data.inquiry_ids) ||
-    !data.inquiry_ids.every(nonemptyString) ||
-    !nonemptyString(data.snapshot_id) ||
-    !nonemptyString(data.lifecycle_status) ||
-    !nonemptyString(data.response_status)
-  ) {
-    return undefined;
-  }
-  return {
-    at,
-    trigger,
-    inquiry_batch_id: data.inquiry_batch_id,
-    inquiry_ids: [...data.inquiry_ids],
-    snapshot_id: data.snapshot_id,
-    lifecycle_status: data.lifecycle_status,
-    response_status: data.response_status,
-  };
-}
-
 function applySync(
   current: RuntimeState | undefined,
-  params: Record<string, unknown>,
-  data: Record<string, unknown>,
+  evidence: ObservedSuccess,
   context: ApplyToolResultContext,
 ): RuntimeState | undefined {
-  const evidence = validSyncEvidence(
-    data,
-    context.nowMs ?? Date.now(),
-    recoveryTrigger(context),
-  );
-  if (!evidence) return current;
-
-  const base: RuntimeState = current ?? {
-    phase: "distribution_sync_pending",
-    requirement_id: nonemptyString(params.requirement_id) ? params.requirement_id : undefined,
-    mcn_recommendation_id: nonemptyString(params.mcn_recommendation_id)
-      ? params.mcn_recommendation_id
-      : undefined,
-  };
-  const terminal = evidence.lifecycle_status === "recovered" || evidence.lifecycle_status === "closed";
-  let phase = base.phase;
-
-  if (base.phase === "distribution_sync_pending") {
-    phase = terminal ? "recovered" : "waiting_return";
-  } else if (base.phase === "waiting_return") {
-    if (terminal) phase = "recovered";
-    else if (context.recoveryTrigger === "manual" || context.recoveryTrigger === "scheduled") {
-      phase = "recovering";
-    }
-  } else if (base.phase === "recovery_sync_pending" && terminal) {
-    phase = "recovered";
-  } else if (base.phase === "recovered") {
-    phase = "recovered";
+  if (!current) return current;
+  const { requirement_id, project_id, mcn_id } = context.params;
+  if (
+    !nonemptyString(requirement_id) ||
+    !nonemptyString(project_id) ||
+    !nonemptyString(mcn_id) ||
+    (current.requirement_id !== undefined && current.requirement_id !== requirement_id) ||
+    (current.project_id !== undefined && current.project_id !== project_id) ||
+    (current.mcn_id !== undefined && current.mcn_id !== mcn_id)
+  ) {
+    return current;
   }
-
-  return {
-    ...base,
-    phase,
-    requirement_id: base.requirement_id ?? (nonemptyString(params.requirement_id) ? params.requirement_id : undefined),
-    mcn_recommendation_id:
-      base.mcn_recommendation_id ??
-      (nonemptyString(params.mcn_recommendation_id) ? params.mcn_recommendation_id : undefined),
-    inquiry_batch_id: evidence.inquiry_batch_id,
-    inquiry_ids: evidence.inquiry_ids,
-    snapshot_id: evidence.snapshot_id,
-    lastSync: evidence,
+  const inquiryId = explicitString(evidence, "inquiry_id");
+  const sync: SyncEvidence = {
+    at: context.nowMs ?? Date.now(),
+    trigger: recoveryTrigger(context),
+    requirement_id,
+    project_id,
+    mcn_id,
+    inquiry_id: inquiryId,
+    trace_id: evidence.traceId,
   };
+  let phase = current.phase;
+  if (phase === "distribution_sync_pending") phase = "waiting_return";
+  else if (phase === "waiting_return" && context.recoveryTrigger) {
+    if (!inquiryId) {
+      return withResultIssue(
+        current,
+        "sync_mcn_inquiry_status",
+        context.nowMs ?? Date.now(),
+      );
+    }
+    phase = "recovering";
+  }
+  else if (phase === "recovery_sync_pending") phase = "recovered";
+  else if (phase !== "recovered") return current;
+  return clearResultIssue({
+    ...current,
+    phase,
+    requirement_id,
+    project_id,
+    mcn_id,
+    inquiry_id: inquiryId ?? current.inquiry_id,
+    lastSync: sync,
+  });
 }
 
 function applySuccessfulResult(
@@ -288,127 +177,111 @@ function applySuccessfulResult(
   current: RuntimeState | undefined,
   context: ApplyToolResultContext,
 ): RuntimeState | undefined {
-  const output = successfulOutput(toolName, context.result);
-  if (!output) return current;
-
-  if (toolName === "select_inquiry_form_fields") {
-    const selection = fieldSelectionProof(output);
-    if (
-      !selection ||
-      !current ||
-      current.phase !== "mcn_planning" ||
-      !nonemptyString(context.params.mcn_recommendation_id) ||
-      current.mcn_recommendation_id !== context.params.mcn_recommendation_id
-    ) {
-      return current;
-    }
-    return {
-      ...current,
-      phase: "field_selection_ready",
-      mcn_recommendation_id: context.params.mcn_recommendation_id,
-      fieldSelection: selection,
-    };
+  const evidence = observedSuccess(context.result);
+  if (!evidence) {
+    return knownFailure(context.result)
+      ? current
+      : withResultIssue(current, toolName, context.nowMs ?? Date.now());
   }
 
-  const data = output;
-
   switch (toolName) {
-    case "validate_requirement":
-      if (!nonemptyString(data.id) || data.status !== "ready") return current;
-      return {
+    case "validate_requirement": {
+      const requirementId = explicitString(evidence, "requirement_id", "id");
+      if (!requirementId) {
+        return withResultIssue(current, toolName, context.nowMs ?? Date.now());
+      }
+      return clearResultIssue({
         ...currentOrDraft(current),
         phase: "requirement_ready",
-        requirement_id: data.id,
-      };
+        requirement_id: requirementId,
+      });
+    }
     case "search_creators":
-      if (!nonemptyString(data.id) || data.candidate_pool_written !== true) return current;
-      return {
-        ...currentOrDraft(current),
-        phase: "candidate_pool_ready",
-        candidate_pool_id: data.id,
-      };
-    case "rank_mcns":
-      if (!nonemptyString(data.id) || !hasOwn(data, "inquiry_advice")) return current;
-      return {
-        ...currentOrDraft(current),
+      if (!current || current.phase !== "requirement_ready" || context.params.id !== current.requirement_id) {
+        return current;
+      }
+      return clearResultIssue({ ...current, phase: "search_completed" });
+    case "rank_mcns": {
+      if (!current || current.phase !== "search_completed" || context.params.id !== current.requirement_id) {
+        return current;
+      }
+      const recommendationId = explicitString(evidence, "mcn_recommendation_id", "id");
+      if (!recommendationId) {
+        return withResultIssue(current, toolName, context.nowMs ?? Date.now());
+      }
+      return clearResultIssue({
+        ...current,
         phase: "mcn_planning",
-        mcn_recommendation_id: data.id,
+        mcn_recommendation_id: recommendationId,
         fieldSelection: undefined,
         sendConfirmation: undefined,
-      };
-    case "create_with_distributions":
-      if (
-        !current ||
-        !nonemptyString(data.provider_project_id) ||
-        !nonemptyString(data.distribution_batch_ref) ||
-        !Array.isArray(data.distributions) ||
-        data.distributions.length === 0
-      ) {
-        return current;
+      });
+    }
+    case "select_inquiry_form_fields": {
+      if (!current || current.phase !== "mcn_planning") return current;
+      const selection = parseFieldSelection(evidence);
+      if (!selection) {
+        return withResultIssue(current, toolName, context.nowMs ?? Date.now());
       }
-      return {
+      return clearResultIssue({ ...current, phase: "field_selection_ready", fieldSelection: selection });
+    }
+    case "create_with_distributions": {
+      if (!current || current.phase !== "field_selection_ready") return current;
+      const projectId = explicitString(evidence, "project_id");
+      const mcnId = explicitString(evidence, "mcn_id");
+      if (!projectId || !mcnId) {
+        return withResultIssue(current, toolName, context.nowMs ?? Date.now());
+      }
+      return clearResultIssue({
         ...current,
         phase: "distribution_sync_pending",
-        provider_project_id: data.provider_project_id,
-        distribution_batch_ref: data.distribution_batch_ref,
-      };
+        project_id: projectId,
+        mcn_id: mcnId,
+      });
+    }
     case "sync_mcn_inquiry_status":
-      return applySync(current, context.params, data, context);
+      return applySync(current, evidence, context);
     case "ingest_mcn_submissions": {
-      const trigger = context.params.trigger;
       if (
         !current ||
-        (trigger !== "manual" && trigger !== "scheduled") ||
-        !nonemptyString(data.id) ||
-        !Number.isInteger(data.accepted_count) ||
-        !Number.isInteger(data.rejected_count) ||
-        !Number.isInteger(data.created_submission_item_count)
+        current.phase !== "recovering" ||
+        !nonemptyString(context.params.inquiry_id) ||
+        context.params.inquiry_id !== current.inquiry_id ||
+        !context.recoveryTrigger
       ) {
         return current;
       }
-      return {
+      return clearResultIssue({
         ...current,
         phase: "recovery_sync_pending",
         lastIngest: {
           at: context.nowMs ?? Date.now(),
-          ingest_batch_id: data.id,
-          trigger,
+          inquiry_id: context.params.inquiry_id,
+          trigger: context.recoveryTrigger,
+          trace_id: evidence.traceId,
         },
-      };
+      });
     }
-    case "manual_source_creators":
-      if (!current || !nonemptyString(data.manual_batch_id) || !Number.isInteger(data.imported_count)) {
+    case "rank_creators": {
+      if (!current || current.phase !== "recovered" || context.params.requirement_id !== current.requirement_id) {
         return current;
       }
-      return {
-        ...current,
-        manual_batch_ids: [...(current.manual_batch_ids ?? []), data.manual_batch_id],
-      };
-    case "rank_creators":
-      if (!current || !nonemptyString(data.run_id) || !Number.isInteger(data.ranked_count)) {
-        return current;
+      const runId = explicitString(evidence, "run_id");
+      if (!runId) {
+        return withResultIssue(current, toolName, context.nowMs ?? Date.now());
       }
-      return { ...current, phase: "recommendation_ready", run_id: data.run_id };
+      return clearResultIssue({ ...current, phase: "recommendation_ready", run_id: runId });
+    }
     case "create_submission_batch":
-      if (
-        !current ||
-        !nonemptyString(data.id) ||
-        !Number.isInteger(data.batch_no) ||
-        !Number.isInteger(data.submitted_count)
-      ) {
+      if (!current || current.phase !== "recommendation_ready" || context.params.run_id !== current.run_id) {
         return current;
       }
-      return {
-        ...current,
-        phase: "submission_batch_ready",
-        submission_batch_id: data.id,
-        batch_no: data.batch_no as number,
-      };
+      return clearResultIssue({ ...current, phase: "submission_batch_ready" });
     case "record_client_feedback":
-      if (!current || !Number.isInteger(data.updated_count) || !nonemptyString(data.next_action)) {
+      if (!current || current.phase !== "submission_batch_ready" || context.params.run_id !== current.run_id) {
         return current;
       }
-      return { ...current, phase: "feedback_routing" };
+      return clearResultIssue({ ...current, phase: "feedback_routing" });
     default:
       return current;
   }
@@ -418,8 +291,6 @@ export function applyToolResult(context: ApplyToolResultContext): RuntimeState |
   if (!nonemptyString(context.sessionKey)) return undefined;
   const toolName = normalizeYpmcnToolName(context.toolName);
   if (!toolName) return context.store.get(context.sessionKey);
-
   return context.store.update(context.sessionKey, (current) =>
-    applySuccessfulResult(toolName, current, context),
-  );
+    applySuccessfulResult(toolName, current, context));
 }

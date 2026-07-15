@@ -1,7 +1,7 @@
 export type WorkflowPhase =
   | "requirement_draft"
   | "requirement_ready"
-  | "candidate_pool_ready"
+  | "search_completed"
   | "mcn_planning"
   | "field_selection_ready"
   | "distribution_sync_pending"
@@ -16,17 +16,9 @@ export type WorkflowPhase =
 
 export type RecoveryTrigger = "manual" | "scheduled";
 
-export interface FieldDefinition {
-  key: string;
-  name: string;
-  type: string;
-  required: boolean;
-}
-
 export interface FieldSelectionProof {
-  fields: Record<string, FieldDefinition>;
-  items: FieldDefinition[];
-  selected_count: number;
+  description: string;
+  fieldNames: string[];
 }
 
 export interface SendConfirmationProof {
@@ -40,39 +32,39 @@ export interface SendConfirmationProof {
 
 export interface SyncEvidence {
   at: number;
-  lifecycle_status: string;
-  response_status: string;
   trigger: "initial" | RecoveryTrigger;
-  inquiry_batch_id?: string;
-  inquiry_ids?: string[];
-  snapshot_id?: string;
+  requirement_id: string;
+  project_id: string;
+  mcn_id: string;
+  inquiry_id?: string;
+  trace_id?: string;
 }
 
 export interface IngestEvidence {
   at: number;
-  ingest_batch_id: string;
+  inquiry_id: string;
   trigger: RecoveryTrigger;
+  trace_id?: string;
 }
 
 export interface RuntimeState {
   phase: WorkflowPhase;
   requirement_id?: string;
-  candidate_pool_id?: string;
   mcn_recommendation_id?: string;
-  provider_project_id?: string;
-  distribution_batch_ref?: string;
-  inquiry_batch_id?: string;
-  inquiry_ids?: string[];
-  snapshot_id?: string;
+  project_id?: string;
+  mcn_id?: string;
+  inquiry_id?: string;
   run_id?: string;
-  submission_batch_id?: string;
-  batch_no?: number;
-  manual_batch_ids?: string[];
   fieldSelection?: FieldSelectionProof;
   sendConfirmation?: SendConfirmationProof;
   manualRecoveryConfirmedAt?: number;
   lastSync?: SyncEvidence;
   lastIngest?: IngestEvidence;
+  lastResultIssue?: {
+    toolName: string;
+    code: "INTEGRATION_REQUIRED" | "WRITE_RESULT_UNKNOWN";
+    at: number;
+  };
 }
 
 export interface RuntimeStateStore {

@@ -74,7 +74,7 @@ class SkillPackageContractTest(unittest.TestCase):
         for name in EXPECTED_REFERENCE_FILES:
             self.assertIn(f"references/{name}", text)
         for required in (
-            "mvp-v2",
+            "当前生产 Endpoint",
             "integration_required",
             "select_inquiry_form_fields",
             "sync_mcn_inquiry_status",
@@ -107,20 +107,19 @@ class SkillPackageContractTest(unittest.TestCase):
             for forbidden in contract["forbidden"]:
                 self.assertIn(f"`{forbidden}`", error_text, f"{name}: forbidden {forbidden}")
 
-    def test_documented_semantic_id_chain_matches_v2(self):
+    def test_documented_id_routing_matches_current_endpoint(self):
         routing = read(REFERENCES / "mcp-tool-routing.md")
         for mapping in (
-            "validate_requirement.data.id → requirement_id",
-            "search_creators.data.id → candidate_pool_id",
-            "rank_mcns.data.id → mcn_recommendation_id",
-            "rank_creators.data.run_id → run_id",
+            "validate_requirement(payload)",
+            "search_creators(id)",
+            "rank_mcns(id, platform)",
+            "rank_creators(requirement_id, limit)",
+            "实际返回并确认字段语义",
         ):
             self.assertIn(mapping, routing)
         for obsolete in (
-            "search_creators({id})",
-            "rank_mcns({id})",
-            "create_with_distributions({id",
-            "ingest_mcn_submissions({inquiry_id",
+            "search_creators.data.id → candidate_pool_id",
+            "rank_mcns.data.id → mcn_recommendation_id",
         ):
             self.assertNotIn(obsolete, routing)
 
@@ -130,28 +129,21 @@ class SkillPackageContractTest(unittest.TestCase):
             self.assertIn(f"`{phase}`", text)
         for required in (
             "distribution_sync_pending",
-            "首次成功 sync",
+            "实际 success",
             "manual",
             "scheduled",
             "ctx.trigger=cron",
             "recovery_sync_pending",
             "最终 sync",
-            "RECOVERY_ALREADY_TERMINAL",
+            "不得盲目重试",
         ):
             self.assertIn(required, text)
 
     def test_send_and_recovery_docs_are_fail_closed(self):
-        joined = "\n".join(
-            read(path)
-            for path in [SKILL, *(REFERENCES.glob("*.md")), *(TOOLS_DIR.glob("*.md"))]
-        )
+        joined = "\n".join(read(path) for path in [SKILL, *TOOLS_DIR.glob("*.md")])
         for required in (
-            "preview_only=false",
-            "sessionKey",
-            "toolCallId",
-            "supplyConfirmed",
-            "mcnConfirmed",
-            "messageConfirmed",
+            "用户确认",
+            "写结果未知",
             "普通消息不解除等待",
             "不得把 reference MCP 的 simulated=true 当作生产成功",
         ):
@@ -167,18 +159,17 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertIsNone(re.search(pattern, joined, re.IGNORECASE), pattern)
 
-    def test_provider_mismatch_is_a_hard_integration_error(self):
-        joined = "\n".join((read(SKILL), read(ROOT / "README.md"), read(PACKAGE / "README.md")))
+    def test_provider_contract_mismatch_is_a_hard_integration_error(self):
+        joined = read(SKILL)
         for required in (
-            "legacy-1.9.4",
+            "当前 Endpoint schema 优先于旧 mvp-v2",
             "select_inquiry_form_fields",
             "create_with_distributions",
             "sync_mcn_inquiry_status",
             "integration_required",
-            "check-provider-contract.mjs",
         ):
             self.assertIn(required, joined)
-        self.assertNotIn("自动降级", joined)
+        self.assertNotIn("缺 `select_inquiry_form_fields`", joined)
 
     def test_reference_file_inventory_is_exact(self):
         actual = {path.name for path in REFERENCES.glob("*.md")}
@@ -219,10 +210,11 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_hook_docs_map_public_projection_to_machine_phases(self):
         text = read(REFERENCES / "hook-behavior.md")
         for required in (
-            "14 个机器阶段",
-            "project_distribution_completed",
-            "distribution_sync_pending",
-            "spec/workflow.json",
+            "本地 phase/ID 摘要",
+            "不是 provider 事实",
+            "description 与最终 `columns`",
+            "`mcn_recommendation_id` 只绑定当前会话",
+            "旧 `mcn_recommendation_id`",
         ):
             self.assertIn(required, text)
 

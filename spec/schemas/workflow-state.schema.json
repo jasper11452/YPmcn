@@ -1,22 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ypmcn.local/schemas/workflow-state.schema.json",
-  "title": "YPmcn Server-Authoritative Workflow State",
+  "title": "YPmcn Local Session Projection",
+  "description": "Fail-closed hook projection derived only from explicit actual tool evidence; it is not provider state or an advertised provider output.",
   "type": "object",
   "required": [
+    "projection_status",
     "phase",
-    "state_version",
-    "allowed_actions",
-    "pending_gates",
-    "identifiers",
     "updated_at"
   ],
   "properties": {
+    "projection_status": {
+      "const": "local-session-projection"
+    },
     "phase": {
       "enum": [
         "requirement_draft",
         "requirement_ready",
-        "candidate_pool_ready",
+        "search_completed",
         "mcn_planning",
         "field_selection_ready",
         "distribution_sync_pending",
@@ -30,108 +31,30 @@
         "blocked"
       ]
     },
-    "lifecycle_status": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "enum": [
-        "sent",
-        "waiting_return",
-        "recover_requested",
-        "recovering",
-        "recover_failed",
-        "recovered",
-        "closed",
-        null
-      ]
+    "requirement_id": {
+      "type": "string",
+      "minLength": 1
     },
-    "response_status": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "enum": [
-        "pending",
-        "partial",
-        "completed",
-        "expired",
-        "failed",
-        null
-      ]
+    "mcn_recommendation_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Local confirmation binding only; never a current Endpoint provider argument."
     },
-    "state_version": {
-      "type": "integer",
-      "minimum": 1
+    "project_id": {
+      "type": "string",
+      "minLength": 1
     },
-    "allowed_actions": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": {
-        "enum": [
-          "validate_requirement",
-          "search_creators",
-          "rank_mcns",
-          "select_inquiry_form_fields",
-          "create_with_distributions",
-          "refresh_recovery",
-          "request_recovery",
-          "finalize_recovery",
-          "rank_creators",
-          "create_submission_batch",
-          "record_client_feedback"
-        ]
-      }
+    "mcn_id": {
+      "type": "string",
+      "minLength": 1
     },
-    "pending_gates": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
+    "inquiry_id": {
+      "type": "string",
+      "minLength": 1
     },
-    "identifiers": {
-      "type": "object",
-      "properties": {
-        "requirement_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "candidate_pool_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "mcn_recommendation_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "selection_result_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "send_operation_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "inquiry_batch_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "recovery_operation_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "run_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "submission_batch_id": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "additionalProperties": false
+    "run_id": {
+      "type": "string",
+      "minLength": 1
     },
     "updated_at": {
       "type": "string",

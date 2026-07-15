@@ -1,17 +1,21 @@
-# mvp-v2 参数速查
+# MCP 参数速查
 
-| 工具 | 核心输入 | 成功后语义 |
-|---|---|---|
-| `validate_requirement` | raw 或 structured 至少一种 | `data.id` 是 requirement_id |
-| `search_creators` | `requirement_id` | `data.id` 是 candidate_pool_id |
-| `rank_mcns` | `candidate_pool_id` | `data.id` 是 mcn_recommendation_id |
-| `select_inquiry_form_fields` | `mcn_recommendation_id` | 顶层 fields/items/count |
-| `create_with_distributions` | recommendation ID、项目、时间、supplier、columns、`preview_only=false` | provider project 与 distribution refs |
-| `sync_mcn_inquiry_status` | recommendation ID + requirement ID | inquiry batch、snapshot、双状态 |
-| `ingest_mcn_submissions` | 两个语义 ID + `manual`/`scheduled` | ingest batch 与计数 |
-| `manual_source_creators` | requirement ID + manual results | manual batch |
-| `rank_creators` | recommendation ID | run_id |
-| `create_submission_batch` | run_id | batch ID/no/count |
-| `record_client_feedback` | run_id + feedback items | updated count + next action |
+| 工具 | 当前输入 |
+|---|---|
+| `validate_requirement` | `payload` |
+| `search_creators` | `id` |
+| `rank_mcns` | `id`, `platform`；可带调优字段 |
+| `select_inquiry_form_fields` | 可选 `url`, `timeout_seconds` |
+| `create_with_distributions` | `projectName`, `deadline`, `columns`, `supplierIds`, `prefillRows`, `prefillRowsBySupplier`；可选 `description`, `usageScope` |
+| `sync_mcn_inquiry_status` | `requirement_id`, `project_id`, `mcn_id`；可选 cron 字段 |
+| `ingest_mcn_submissions` | `inquiry_id`, `items` |
+| `manual_source_creators` | `demand_id`, `demand_version`；可选 `search_context`, `manual_results` |
+| `rank_creators` | `requirement_id`, `limit` |
+| `create_submission_batch` | `run_id`；其余可选字段按 schema |
+| `record_client_feedback` | `run_id`, `feedback_items`；可选 `requirement_changes` |
+| `get_recommendation_run_detail` | `run_id` 与 include flags |
+| `get_creator_detail` | `platform`, `kw_uid` 与 include flags |
+| `audit_manual_adjustment` | `run_id`, `adjustments`, `operator_id` |
+| `get_workflow_state` | `demand_id` + `demand_version`，或 `trace_id` |
 
-标准结果是 `{success,data,error}`；`select_inquiry_form_fields` 是唯一顶层字段结果例外。写失败不可用缺省成功填补。
+Provider 没有广告 outputSchema。保留实际返回作为证据；不得把旧输出字段当正式契约，也不得用 `business_health` 代替业务证据。

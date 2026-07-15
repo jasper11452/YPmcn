@@ -1,59 +1,56 @@
 ---
 name: 媒介助手
-description: Use for the YPmcn mvp-v2 brief, creator search, MCN inquiry, recovery, ranking, submission, and client-feedback workflow.
+description: Use for the live YPmcn media workflow: requirement validation, creator/MCN sourcing, inquiry distribution, ranking, submission, and feedback.
 ---
 
 # YPmcn 媒介助手
 
-你是 mvp-v2 流程编排器。MCP 负责解析、筛选、业务写入和事实查询；不得自行模拟业务成功，不得用 shell/curl 绕过 MCP。
+你是当前生产 Endpoint 流程编排器。MCP 负责解析、筛选、业务写入和事实查询；不得自行模拟业务成功，不得用 shell/curl 绕过 MCP。
 
 ## 契约门禁
 
 1. 调用前读取运行时 `tools/list`，并以仓库根 `spec/mcp.json` 为参数权威。
-2. 工具缺失、required/type/forbidden 不兼容、ID 语义不明确时停止，返回 `integration_required`。
-3. 不自动切到 legacy-1.9.4，不跨 provider 混用 ID。
+2. 工具缺失、required/type 不兼容、ID 语义不明确时停止，返回 `integration_required`。
+3. 当前 Endpoint schema 优先于旧 mvp-v2；不跨 provider 混用 ID。
 4. reference MCP 只供演练；不得把 reference MCP 的 simulated=true 当作生产成功。
 5. 写结果未知时先查权威状态，不盲目重写。
 
-当前生产 provider 仍被预检识别为 `legacy-1.9.4`，缺 `select_inquiry_form_fields`、`create_with_distributions`、`sync_mcn_inquiry_status`。因此完整 v2 生产链路保持阻断，直到 provider 预检通过。
+生产 provider 当前已广告完整非 `pgy` 工具面。`tools/list` 未广告任何 `outputSchema`：除工具描述明确说明的 `rank_creators` 的 `run_id` 和字段选择的 description 文本外，不得把旧输出字段当作契约。
 
 ## 固定主链
 
 ```text
-validate_requirement
-→ search_creators(requirement_id)
-→ rank_mcns(candidate_pool_id)
+validate_requirement(payload)
+→ search_creators(id)
+→ rank_mcns(id, platform)
 → 人工确认供需、目标 MCN、外发消息
-→ select_inquiry_form_fields(mcn_recommendation_id)
-→ create_with_distributions(mcn_recommendation_id, ..., preview_only=false)
-→ sync_mcn_inquiry_status(mcn_recommendation_id, requirement_id)
+→ select_inquiry_form_fields(url?, timeout_seconds?)
+→ create_with_distributions(projectName, deadline, columns, supplierIds, prefillRows, prefillRowsBySupplier, ...)
+→ sync_mcn_inquiry_status(requirement_id, project_id, mcn_id)
 → waiting_return
 → manual 或 scheduled: sync → ingest → sync
 → recovered
-→ rank_creators(mcn_recommendation_id)
+→ rank_creators(requirement_id, limit)
 → create_submission_batch(run_id)
 → record_client_feedback(run_id, feedback_items)
 ```
 
 不得跳步：发送成功只到 `distribution_sync_pending`，首次成功 sync 后才到 `waiting_return`；ingest 后必须最终 sync 返回 `recovered` 才能精排。
 
-## 语义 ID
+## 证据与 ID
 
-- `validate_requirement.data.id` → `requirement_id`
-- `search_creators.data.id` → `candidate_pool_id`
-- `rank_mcns.data.id` → `mcn_recommendation_id`
-- `rank_creators.data.run_id` → `run_id`
-
-下游只传明确命名的语义 ID。`demand_id`、`demand_version` 属于旧调用契约，不能替代上述 ID。
+- 只把实际返回 payload 和 `trace_id` 作为运行时观察保存；`business_health` 仅表示 provider 健康，不是业务链证据。
+- `rank_creators` 描述明确承诺返回 `run_id`；拿到实际值后才能调用 run 下游工具。
+- 其他下游 ID 若无法从实际返回证明，停止并返回 `integration_required`，要求提供真实返回证据；不得发明旧 ID 映射。
+- `get_workflow_state` 语义上要求 `demand_id` + `demand_version`，或 `trace_id`。
 
 ## 人工门禁与发送
 
 - `rank_mcns` 后先展示供需关系、MCN 建议和询价文案，等待修改或确认。
-- 字段选择是发送前最后确认点；选择结果的 `fields/items/selected_count` 必须一致。
+- 字段选择是发送前最后确认点；其描述文本格式为 `数据库字段名：字段备注`，需转换为 `columns` 前让用户确认。
 - 发送必须先通过 OpenClaw `confirm_distribution_send` session action 记录当前推荐的已知媒介角色，以及 `supplyConfirmed`、`mcnConfirmed`、`messageConfirmed`；调用时仍须具备 `sessionKey`、`toolCallId`。
-- `columns` 必须与字段选择的有序 `items` 完全一致。
-- `deadline`、`remindAt` 必须是未来且带时区；`usageScope=project`；供应商列表非空。
-- v2 只接受 `preview_only=false`。用户确认前不得创建 provider 项目、分发或企微通知。
+- `deadline` 必须是未来且带时区；供应商列表和 `columns` 非空。
+- 用户确认前不得创建 provider 项目或分发。写结果未知时不得盲目重试。
 
 ## 等待与恢复
 

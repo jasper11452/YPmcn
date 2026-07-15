@@ -136,16 +136,17 @@ function stateSummary(state: RuntimeState): string {
   const safeEntries: Array<[string, unknown]> = [
     ["phase", state.phase],
     ["requirement_id", state.requirement_id],
-    ["candidate_pool_id", state.candidate_pool_id],
     ["mcn_recommendation_id", state.mcn_recommendation_id],
-    ["inquiry_batch_id", state.inquiry_batch_id],
+    ["project_id", state.project_id],
+    ["mcn_id", state.mcn_id],
+    ["inquiry_id", state.inquiry_id],
     ["run_id", state.run_id],
-    ["batch_no", state.batch_no],
+    ["last_result_issue", state.lastResultIssue?.code],
   ];
   const lines = safeEntries
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `${key}: ${String(value)}`);
-  return ["[YPmcn mvp-v2 会话投影]", ...lines].join("\n");
+  return ["[YPmcn 本地会话投影；不是 provider 事实]", ...lines].join("\n");
 }
 
 export function registerHooks(api: HookApi, options: RegisterHooksOptions = {}): RuntimeStateStore {

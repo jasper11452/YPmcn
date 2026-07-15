@@ -2,22 +2,20 @@
 
 ## 何时调用
 
-需要核对单个达人事实、报价、账号或风险证据时只读调用。
+只读核对单个达人事实、报价或风险时调用。
 
 ## 输入
 
-必须且只能选择一种完整标识：`creator_id`，或 `platform` + `platform_account_id`。
+必填 `platform`、`kw_uid`；可选 `include_offers`、`include_mcn`、`include_vector_text`、`include_recent_metrics`。
 
 ## 输出成功证据
 
-- success === true
-- data.creator_id
-- data.creator_detail
+- retain actual returned payload as downstream evidence
 
 ## 调用后必须停在哪里
 
-查询不推进主链；把已确认事实用于展示或人工决策。
+查询不推进主链，只展示已确认事实。
 
 ## 错误与停止条件
 
-禁止 `demand_id`、`demand_version`。不得混用两种标识，不得从昵称猜账号 ID。
+不得发送旧 `creator_id` 或 `platform_account_id`，不得从昵称猜 `kw_uid`。

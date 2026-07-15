@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
   "profile": "mvp-v2",
+  "projectionStatus": "local-session-projection",
   "phases": [
     "requirement_draft",
     "requirement_ready",
-    "candidate_pool_ready",
+    "search_completed",
     "mcn_planning",
     "field_selection_ready",
     "distribution_sync_pending",
@@ -17,680 +18,149 @@
     "feedback_routing",
     "blocked"
   ],
-  "lifecycleStatuses": [
-    "sent",
-    "waiting_return",
-    "recover_requested",
-    "recovering",
-    "recover_failed",
-    "recovered",
-    "closed"
-  ],
-  "responseStatuses": [
-    "pending",
-    "partial",
-    "completed",
-    "expired",
-    "failed"
-  ],
   "allowedActions": [
     "validate_requirement",
     "search_creators",
     "rank_mcns",
     "select_inquiry_form_fields",
     "create_with_distributions",
-    "refresh_recovery",
-    "request_recovery",
-    "finalize_recovery",
+    "sync_mcn_inquiry_status",
+    "ingest_mcn_submissions",
     "rank_creators",
     "create_submission_batch",
     "record_client_feedback"
   ],
   "stateAuthority": {
-    "source": "provider-persisted-workflow-state",
+    "source": "hook-session-projection",
     "schema": "schemas/workflow-state.schema.json",
-    "stateVersionRequired": true,
-    "allowedActionsRequired": true,
-    "allowedActionsAreClosedWorld": true,
-    "readActionsAlwaysAllowed": [
-      "get_workflow_state"
-    ],
-    "hookSessionContextAuthoritative": false,
-    "hookSessionContextMayGrantActions": false,
-    "hookSessionContextMayDenyForAdditionalSafety": true,
-    "missingOrUnknownCombinationBehavior": "fail-closed",
-    "missingOrUnknownCombinationError": "STATE_COMBINATION_INVALID",
-    "staleStateVersionError": "STATE_CONFLICT"
+    "providerFacts": false,
+    "providerOutputSchemaAdvertised": false,
+    "phaseAdvance": "explicit-actual-returned-evidence-only",
+    "missingEvidenceBehavior": "no-phase-advance",
+    "unknownWriteResult": "WRITE_RESULT_UNKNOWN",
+    "mayGrantProviderAuthority": false,
+    "mayDenyForSafety": true,
+    "sessionTtl": "24h",
+    "rawPayloadStored": false
   },
-  "recoveryOperations": [
-    {
-      "name": "refresh",
-      "action": "refresh_recovery",
-      "tool": "sync_mcn_inquiry_status",
-      "order": 1,
-      "authority": "server-state-version-and-allowed-actions",
-      "sessionContextRequired": false,
-      "effect": "reconcile-provider-and-persist-authoritative-state",
-      "terminalBehavior": "no-op-with-authoritative-state",
-      "nextOperations": [
-        "request",
-        "finalize"
-      ]
-    },
-    {
-      "name": "request",
-      "action": "request_recovery",
-      "tool": "ingest_mcn_submissions",
-      "order": 2,
-      "authority": "server-compare-and-swap-on-state-version",
-      "sessionContextRequired": false,
-      "effect": "acquire-single-recovery-owner-and-ingest",
-      "triggerFieldSemantics": "audit-origin-only-not-authorization",
-      "nextOperations": [
-        "finalize"
-      ]
-    },
-    {
-      "name": "finalize",
-      "action": "finalize_recovery",
-      "tool": "sync_mcn_inquiry_status",
-      "order": 3,
-      "authority": "server-state-version-and-recovery-operation-id",
-      "sessionContextRequired": false,
-      "effect": "reconcile-ingest-and-persist-terminal-state",
-      "terminalBehavior": "idempotent-no-op",
-      "nextOperations": []
-    }
-  ],
-  "stateCombinations": [
-    {
-      "id": "requirement-draft",
-      "phase": "requirement_draft",
-      "lifecycleStatuses": [
-        null
-      ],
-      "responseStatuses": [
-        null
-      ],
-      "allowedActions": [
-        "validate_requirement"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "requirement-ready",
-      "phase": "requirement_ready",
-      "lifecycleStatuses": [
-        null
-      ],
-      "responseStatuses": [
-        null
-      ],
-      "allowedActions": [
-        "search_creators"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "candidate-pool-ready",
-      "phase": "candidate_pool_ready",
-      "lifecycleStatuses": [
-        null
-      ],
-      "responseStatuses": [
-        null
-      ],
-      "allowedActions": [
-        "rank_mcns"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "mcn-planning",
-      "phase": "mcn_planning",
-      "lifecycleStatuses": [
-        null
-      ],
-      "responseStatuses": [
-        null
-      ],
-      "allowedActions": [
-        "select_inquiry_form_fields"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "field-selection-ready",
-      "phase": "field_selection_ready",
-      "lifecycleStatuses": [
-        null
-      ],
-      "responseStatuses": [
-        null
-      ],
-      "allowedActions": [
-        "create_with_distributions"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "distribution-sync-pending",
-      "phase": "distribution_sync_pending",
-      "lifecycleStatuses": [
-        "sent"
-      ],
-      "responseStatuses": [
-        "pending"
-      ],
-      "allowedActions": [
-        "refresh_recovery"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "waiting-return",
-      "phase": "waiting_return",
-      "lifecycleStatuses": [
-        "sent",
-        "waiting_return"
-      ],
-      "responseStatuses": [
-        "pending",
-        "partial",
-        "completed",
-        "expired",
-        "failed"
-      ],
-      "allowedActions": [
-        "refresh_recovery"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "recovery-requestable",
-      "phase": "recovering",
-      "lifecycleStatuses": [
-        "recover_requested",
-        "waiting_return"
-      ],
-      "responseStatuses": [
-        "pending",
-        "partial",
-        "completed",
-        "expired",
-        "failed"
-      ],
-      "allowedActions": [
-        "request_recovery"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "recovery-failed-refreshable",
-      "phase": "recovering",
-      "lifecycleStatuses": [
-        "recover_failed"
-      ],
-      "responseStatuses": [
-        "pending",
-        "partial",
-        "expired",
-        "failed"
-      ],
-      "allowedActions": [
-        "refresh_recovery"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "recovery-finalize-pending",
-      "phase": "recovery_sync_pending",
-      "lifecycleStatuses": [
-        "recovering",
-        "recover_requested"
-      ],
-      "responseStatuses": [
-        "pending",
-        "partial",
-        "completed",
-        "expired",
-        "failed"
-      ],
-      "allowedActions": [
-        "finalize_recovery"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "recovered-for-ranking",
-      "phase": "recovered",
-      "lifecycleStatuses": [
-        "recovered",
-        "closed"
-      ],
-      "responseStatuses": [
-        "partial",
-        "completed",
-        "expired"
-      ],
-      "allowedActions": [
-        "refresh_recovery",
-        "rank_creators"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "recommendation-ready",
-      "phase": "recommendation_ready",
-      "lifecycleStatuses": [
-        "recovered",
-        "closed"
-      ],
-      "responseStatuses": [
-        "partial",
-        "completed",
-        "expired"
-      ],
-      "allowedActions": [
-        "create_submission_batch"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "submission-batch-ready",
-      "phase": "submission_batch_ready",
-      "lifecycleStatuses": [
-        "recovered",
-        "closed"
-      ],
-      "responseStatuses": [
-        "partial",
-        "completed",
-        "expired"
-      ],
-      "allowedActions": [
-        "record_client_feedback"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "feedback-routing",
-      "phase": "feedback_routing",
-      "lifecycleStatuses": [
-        "recovered",
-        "closed"
-      ],
-      "responseStatuses": [
-        "partial",
-        "completed",
-        "expired"
-      ],
-      "allowedActions": [
-        "create_submission_batch",
-        "record_client_feedback"
-      ],
-      "terminal": false
-    },
-    {
-      "id": "blocked",
-      "phase": "blocked",
-      "lifecycleStatuses": [
-        "sent",
-        "waiting_return",
-        "recover_requested",
-        "recovering",
-        "recover_failed",
-        "recovered",
-        "closed",
-        null
-      ],
-      "responseStatuses": [
-        "pending",
-        "partial",
-        "completed",
-        "expired",
-        "failed",
-        null
-      ],
-      "allowedActions": [],
-      "terminal": true
-    }
-  ],
   "policies": {
-    "sendSuccessPhase": "distribution_sync_pending",
-    "waitingReturnRequires": "first-successful-refresh",
-    "ordinaryMessageUnlocksWaiting": false,
-    "manualRecoveryConfirmation": "recorded-by-server-before-action-is-allowed",
-    "scheduledRecoveryContext": "audit-origin-only-not-authorization",
-    "recoverySequence": [
-      "refresh",
-      "request",
-      "finalize"
+    "outwardSendConfirmation": "sessionKey + toolCallId + operator.write + supply/mcn/message confirmations",
+    "fieldSelectionBinding": "description field names map one-to-one in order to final columns",
+    "unsupportedProviderArguments": [
+      "candidate_pool_id",
+      "mcn_recommendation_id",
+      "preview_only",
+      "remindAt",
+      "trigger"
     ],
-    "recoveryToolSequence": [
+    "recoverySequence": [
       "sync_mcn_inquiry_status",
       "ingest_mcn_submissions",
       "sync_mcn_inquiry_status"
     ],
-    "rankingAllowedAfterPhase": "recovered",
-    "terminalRecovery": {
-      "authoritativeLifecycleStatuses": [
-        "recovered",
-        "closed"
-      ],
-      "behavior": "idempotent-authoritative-no-op",
-      "sideEffectsAllowed": false,
-      "evidence": [
-        "authoritative state_version",
-        "allowed_actions excludes request_recovery",
-        "allowed_actions excludes finalize_recovery"
-      ]
-    }
+    "scheduledRecoveryRequires": "ctx.trigger=cron and cron_job_id",
+    "providerStatuses": "observed-only; never interpreted as advertised facts"
   },
   "transitions": [
     {
       "id": "requirement-validated",
       "from": "requirement_draft",
-      "trigger": {
-        "type": "tool",
-        "name": "validate_requirement"
-      },
-      "guards": [
-        "required-demand-fields-present",
-        "result.data.status === ready",
-        "authoritative.allowed_actions includes validate_requirement"
-      ],
-      "evidence": [
-        "success === true",
-        "data.id",
-        "data.status"
-      ],
+      "trigger": { "type": "tool", "name": "validate_requirement" },
+      "guards": ["payload matches live input schema"],
+      "evidence": ["actual success === true", "actual data.requirement_id or data.id"],
       "nextPhase": "requirement_ready"
     },
     {
-      "id": "candidate-pool-written",
+      "id": "search-completed",
       "from": "requirement_ready",
-      "trigger": {
-        "type": "tool",
-        "name": "search_creators"
-      },
-      "guards": [
-        "params.requirement_id === authoritative.requirement_id",
-        "authoritative.allowed_actions includes search_creators"
-      ],
-      "evidence": [
-        "success === true",
-        "data.id",
-        "data.candidate_pool_written"
-      ],
-      "nextPhase": "candidate_pool_ready"
+      "trigger": { "type": "tool", "name": "search_creators" },
+      "guards": ["params.id matches current requirement evidence"],
+      "evidence": ["actual success === true"],
+      "nextPhase": "search_completed"
     },
     {
-      "id": "mcn-plan-written",
-      "from": "candidate_pool_ready",
-      "trigger": {
-        "type": "tool",
-        "name": "rank_mcns"
-      },
-      "guards": [
-        "params.candidate_pool_id === authoritative.candidate_pool_id",
-        "authoritative.allowed_actions includes rank_mcns"
-      ],
-      "evidence": [
-        "success === true",
-        "data.id",
-        "data.inquiry_advice"
-      ],
+      "id": "mcn-plan-observed",
+      "from": "search_completed",
+      "trigger": { "type": "tool", "name": "rank_mcns" },
+      "guards": ["params.id matches current requirement evidence"],
+      "evidence": ["actual success === true", "actual mcn_recommendation_id or id for local confirmation binding"],
       "nextPhase": "mcn_planning"
     },
     {
-      "id": "inquiry-fields-selected",
+      "id": "field-description-observed",
       "from": "mcn_planning",
-      "trigger": {
-        "type": "tool",
-        "name": "select_inquiry_form_fields"
-      },
-      "guards": [
-        "params.mcn_recommendation_id === authoritative.mcn_recommendation_id",
-        "authoritative.allowed_actions includes select_inquiry_form_fields"
-      ],
-      "evidence": [
-        "success === true",
-        "fields",
-        "items",
-        "selected_count === items.length",
-        "selected_count > 0"
-      ],
+      "trigger": { "type": "tool", "name": "select_inquiry_form_fields" },
+      "guards": ["description parses as unique 数据库字段名：字段备注 lines"],
+      "evidence": ["actual success === true", "actual description"],
       "nextPhase": "field_selection_ready"
     },
     {
       "id": "distribution-sent",
       "from": "field_selection_ready",
-      "trigger": {
-        "type": "tool",
-        "name": "create_with_distributions"
-      },
+      "trigger": { "type": "tool", "name": "create_with_distributions" },
       "guards": [
-        "authoritative.allowed_actions includes create_with_distributions",
-        "persisted-selection-matches-ordered-columns",
-        "selection-state-version-matches-authoritative-state",
-        "params.preview_only === false"
+        "sessionKey and toolCallId present",
+        "operator.write confirmation binds local mcn recommendation evidence",
+        "columns bind one-to-one to selected description",
+        "all live required inputs present"
       ],
-      "evidence": [
-        "success === true",
-        "data.provider_project_id",
-        "data.distribution_batch_ref",
-        "data.distributions.length > 0"
-      ],
+      "evidence": ["actual success === true", "actual project_id", "actual mcn_id"],
       "nextPhase": "distribution_sync_pending"
     },
     {
-      "id": "first-distribution-refresh",
+      "id": "initial-sync-observed",
       "from": "distribution_sync_pending",
-      "trigger": {
-        "type": "tool",
-        "name": "sync_mcn_inquiry_status"
-      },
-      "guards": [
-        "params.mcn_recommendation_id === authoritative.mcn_recommendation_id",
-        "params.requirement_id === authoritative.requirement_id",
-        "authoritative.allowed_actions includes refresh_recovery"
-      ],
-      "evidence": [
-        "success === true",
-        "data.inquiry_batch_id",
-        "data.inquiry_ids",
-        "data.snapshot_id",
-        "data.lifecycle_status",
-        "data.response_status"
-      ],
+      "trigger": { "type": "tool", "name": "sync_mcn_inquiry_status" },
+      "guards": ["requirement_id, project_id, and mcn_id match current evidence"],
+      "evidence": ["actual success === true"],
       "nextPhase": "waiting_return"
     },
     {
-      "id": "recovery-refreshed-requestable",
+      "id": "recovery-sync-observed",
       "from": "waiting_return",
-      "trigger": {
-        "type": "tool",
-        "name": "sync_mcn_inquiry_status"
-      },
-      "guards": [
-        "authoritative.allowed_actions includes refresh_recovery",
-        "result.data.allowed_actions includes request_recovery",
-        "result.data.lifecycle_status not in [recovered, closed]"
-      ],
-      "evidence": [
-        "success === true",
-        "data.inquiry_batch_id",
-        "data.inquiry_ids",
-        "data.snapshot_id",
-        "data.lifecycle_status",
-        "data.response_status"
-      ],
+      "trigger": { "type": "tool", "name": "sync_mcn_inquiry_status" },
+      "guards": ["current manual intent or scheduled cron evidence"],
+      "evidence": ["actual success === true", "actual inquiry_id required before ingest"],
       "nextPhase": "recovering"
     },
     {
-      "id": "recovery-refreshed-terminal",
-      "from": "waiting_return",
-      "trigger": {
-        "type": "tool",
-        "name": "sync_mcn_inquiry_status"
-      },
-      "guards": [
-        "authoritative.allowed_actions includes refresh_recovery",
-        "result.data.lifecycle_status in [recovered, closed]",
-        "result.data.allowed_actions excludes request_recovery"
-      ],
-      "evidence": [
-        "success === true",
-        "data.inquiry_batch_id",
-        "data.inquiry_ids",
-        "data.snapshot_id",
-        "data.lifecycle_status",
-        "data.response_status"
-      ],
-      "nextPhase": "recovered"
-    },
-    {
-      "id": "recovery-requested",
+      "id": "ingest-observed",
       "from": "recovering",
-      "trigger": {
-        "type": "tool",
-        "name": "ingest_mcn_submissions"
-      },
-      "guards": [
-        "authoritative.allowed_actions includes request_recovery",
-        "compare-and-swap authoritative.state_version succeeds",
-        "params.trigger is audit-only-not-authorization"
-      ],
-      "evidence": [
-        "success === true",
-        "data.id",
-        "data.accepted_count",
-        "data.rejected_count",
-        "data.created_submission_item_count"
-      ],
+      "trigger": { "type": "tool", "name": "ingest_mcn_submissions" },
+      "guards": ["inquiry_id and recovery origin match current sync evidence"],
+      "evidence": ["actual success === true"],
       "nextPhase": "recovery_sync_pending"
     },
     {
-      "id": "recovery-refreshed-after-failure",
-      "from": "recovering",
-      "trigger": {
-        "type": "tool",
-        "name": "sync_mcn_inquiry_status"
-      },
-      "guards": [
-        "authoritative.lifecycle_status === recover_failed",
-        "authoritative.allowed_actions includes refresh_recovery",
-        "result.data.allowed_actions includes request_recovery"
-      ],
-      "evidence": [
-        "success === true",
-        "data.inquiry_batch_id",
-        "data.inquiry_ids",
-        "data.snapshot_id",
-        "data.lifecycle_status",
-        "data.response_status"
-      ],
-      "nextPhase": "recovering"
-    },
-    {
-      "id": "recovery-finalized",
+      "id": "final-sync-observed",
       "from": "recovery_sync_pending",
-      "trigger": {
-        "type": "tool",
-        "name": "sync_mcn_inquiry_status"
-      },
-      "guards": [
-        "authoritative.allowed_actions includes finalize_recovery",
-        "authoritative.recovery_operation_id is present",
-        "result.data.lifecycle_status in [recovered, closed]"
-      ],
-      "evidence": [
-        "success === true",
-        "data.inquiry_batch_id",
-        "data.inquiry_ids",
-        "data.snapshot_id",
-        "data.lifecycle_status",
-        "data.response_status"
-      ],
+      "trigger": { "type": "tool", "name": "sync_mcn_inquiry_status" },
+      "guards": ["sync identifiers and recovery origin match current ingest evidence"],
+      "evidence": ["actual success === true"],
       "nextPhase": "recovered"
     },
     {
-      "id": "terminal-recovery-refresh-no-op",
+      "id": "recommendation-run-observed",
       "from": "recovered",
-      "trigger": {
-        "type": "tool",
-        "name": "sync_mcn_inquiry_status"
-      },
-      "guards": [
-        "authoritative.lifecycle_status in [recovered, closed]",
-        "authoritative.allowed_actions includes refresh_recovery",
-        "authoritative.allowed_actions excludes request_recovery",
-        "authoritative.allowed_actions excludes finalize_recovery"
-      ],
-      "evidence": [
-        "success === true",
-        "data.inquiry_batch_id",
-        "data.inquiry_ids",
-        "data.snapshot_id",
-        "data.lifecycle_status",
-        "data.response_status"
-      ],
-      "nextPhase": "recovered"
-    },
-    {
-      "id": "creators-ranked",
-      "from": "recovered",
-      "trigger": {
-        "type": "tool",
-        "name": "rank_creators"
-      },
-      "guards": [
-        "authoritative.allowed_actions includes rank_creators",
-        "authoritative.lifecycle_status in [recovered, closed]"
-      ],
-      "evidence": [
-        "success === true",
-        "data.run_id",
-        "data.ranked_count"
-      ],
+      "trigger": { "type": "tool", "name": "rank_creators" },
+      "guards": ["requirement_id matches current evidence"],
+      "evidence": ["actual success === true", "actual run_id promised by tool description"],
       "nextPhase": "recommendation_ready"
     },
     {
-      "id": "submission-batch-created",
+      "id": "submission-batch-observed",
       "from": "recommendation_ready",
-      "trigger": {
-        "type": "tool",
-        "name": "create_submission_batch"
-      },
-      "guards": [
-        "params.run_id === authoritative.run_id",
-        "authoritative.allowed_actions includes create_submission_batch"
-      ],
-      "evidence": [
-        "success === true",
-        "data.id",
-        "data.batch_no",
-        "data.submitted_count"
-      ],
+      "trigger": { "type": "tool", "name": "create_submission_batch" },
+      "guards": ["run_id matches current evidence"],
+      "evidence": ["actual success === true"],
       "nextPhase": "submission_batch_ready"
     },
     {
-      "id": "client-feedback-recorded",
+      "id": "feedback-observed",
       "from": "submission_batch_ready",
-      "trigger": {
-        "type": "tool",
-        "name": "record_client_feedback"
-      },
-      "guards": [
-        "params.run_id === authoritative.run_id",
-        "authoritative.allowed_actions includes record_client_feedback"
-      ],
-      "evidence": [
-        "success === true",
-        "data.updated_count",
-        "data.next_action"
-      ],
+      "trigger": { "type": "tool", "name": "record_client_feedback" },
+      "guards": ["run_id matches current evidence"],
+      "evidence": ["actual success === true"],
       "nextPhase": "feedback_routing"
     }
   ]
