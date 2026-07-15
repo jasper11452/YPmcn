@@ -20,7 +20,7 @@ description: Use for the live YPmcn media workflow: requirement validation, crea
 
 ## 需求写入前预检
 
-`validate_requirement` 会写业务数据。调用前只检查会导致错误写入的硬冲突，不提前展开完整问卷：
+`validate_requirement` 会写业务数据。调用前先读取 `references/creator_candidate_pool_schema.csv`，将用户筛选条件逐项映射到 CSV 中的真实字段名；只有 CSV 已声明的字段才能结构化，找不到对应字段的条件必须保留原文并请求最小确认，不得自造字段或同义列。随后只检查会导致错误写入的硬冲突，不提前展开完整问卷：
 
 - 平台必须能无歧义映射到运行时支持值；视频号不得映射为 `dy`，不支持时先确认降级或停止。
 - 档期必须有年份且未过期；相对 DDL 按当前时区换算后必须是未来时间。
