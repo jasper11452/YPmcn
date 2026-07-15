@@ -59,6 +59,7 @@ function namedVectorPoint(id, overrides = {}) {
       platform: "dy", kw_uid: `kw-${id}`, source_table: "dy_mz", source_row_id: String(id),
       source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
       embedding_model_id: "text-embedding-v4", vector_version: "local-v1",
+      commercial_vector_available: true,
     },
     ...overrides,
   };
@@ -151,7 +152,7 @@ describe("DashScope providers", () => {
 });
 
 describe("official Qdrant SDK adapter", () => {
-  it("creates named-vector collection, upserts provenance-only payload, queries by name and checks health", async () => {
+  it("creates named-vector collection, persists a content-only point, queries content and checks health", async () => {
     const calls = [];
     const client = {
       collectionExists: async (collectionName) => { calls.push(["collectionExists", collectionName]); return { exists: false }; },
@@ -167,18 +168,19 @@ describe("official Qdrant SDK adapter", () => {
     };
     const qdrant = new RealQdrantClient({ url: "http://q", collectionName: "c", vectorSize: 2, client });
     await qdrant.ensureCollection();
-    await qdrant.upsert([{ id: "p", vector: { content: [1, 0], commercial: [0, 1] }, payload: {
+    await qdrant.upsert([{ id: "p", vector: { content: [1, 0] }, payload: {
       platform: "dy", kw_uid: "kw-7", source_table: "dy_mz", source_row_id: "kw-7",
       source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
-      embedding_model_id: "text-embedding-v4", vector_version: "local-v1",
+      embedding_model_id: "text-embedding-v4", vector_version: "local-v1", commercial_vector_available: false,
     } }]);
-    await qdrant.search("commercial", [0, 1], 5, "dy");
+    await qdrant.search("content", [1, 0], 5, "dy");
     await qdrant.health();
     assert.deepEqual(calls[1][2].vectors, {
       content: { size: 2, distance: "Cosine" }, commercial: { size: 2, distance: "Cosine" },
     });
     assert.equal(calls[2][2].points[0].payload.normalized_text, undefined);
-    assert.equal(calls[3][2].using, "commercial");
+    assert.deepEqual(calls[2][2].points[0].vector, { content: [1, 0] });
+    assert.equal(calls[3][2].using, "content");
     assert.deepEqual(calls[3][2].filter, { must: [{ key: "platform", match: { value: "dy" } }] });
   });
 
@@ -196,7 +198,7 @@ describe("official Qdrant SDK adapter", () => {
     await assert.rejects(qdrant.upsert([{ id: "p", vector: { content: [1], commercial: [0, 1] }, payload: {
       platform: "dy", kw_uid: "kw-7", source_table: "dy_mz", source_row_id: "kw-7",
       source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
-      embedding_model_id: "text-embedding-v4", vector_version: "local-v1",
+      embedding_model_id: "text-embedding-v4", vector_version: "local-v1", commercial_vector_available: true,
     } }]), /exactly 2/);
   });
 
@@ -227,7 +229,7 @@ describe("official Qdrant SDK adapter", () => {
     assert.deepEqual(batchSizes, [2, 2, 1]);
   });
 
-  it("validates every point before issuing any SDK upsert", async () => {
+  it("validates every optional commercial vector before issuing any SDK upsert", async () => {
     let upsertCalls = 0;
     const client = {
       upsert: async () => { upsertCalls += 1; },
@@ -236,10 +238,27 @@ describe("official Qdrant SDK adapter", () => {
       url: "http://q", collectionName: "c", vectorSize: 2, upsertBatchSize: 2, client,
     });
     const points = Array.from({ length: 5 }, (_, index) => namedVectorPoint(index));
-    points[4] = namedVectorPoint(4, { vector: { content: [1], commercial: [0, 1] } });
+    points[4] = namedVectorPoint(4, { vector: { content: [1, 0], commercial: [0] } });
 
-    await assert.rejects(qdrant.upsert(points), /exactly 2/);
+    await assert.rejects(qdrant.upsert(points), /commercial vector must contain exactly 2/);
 
+    assert.equal(upsertCalls, 0);
+  });
+
+  it("rejects an inconsistent commercial availability marker before write", async () => {
+    let upsertCalls = 0;
+    const qdrant = new RealQdrantClient({
+      url: "http://q",
+      collectionName: "c",
+      vectorSize: 2,
+      client: { upsert: async () => { upsertCalls += 1; } },
+    });
+    const point = namedVectorPoint("content-only", {
+      vector: { content: [1, 0] },
+      payload: { ...namedVectorPoint("content-only").payload, commercial_vector_available: true },
+    });
+
+    await assert.rejects(qdrant.upsert([point]), /must match the written commercial vector/);
     assert.equal(upsertCalls, 0);
   });
 });
@@ -257,7 +276,7 @@ it("real Qdrant SDK smoke", { skip: process.env.RUN_QDRANT_SMOKE !== "1" }, asyn
     await qdrant.upsert([{ id: randomUUID(), vector: { content: [1, 0], commercial: [0, 1] }, payload: {
       platform: "dy", kw_uid: "smoke", source_table: "smoke", source_row_id: "1",
       source_snapshot_date: "2026-07-15", source_updated_at: "2026-07-15T00:00:00Z",
-      embedding_model_id: "smoke", vector_version: "smoke",
+      embedding_model_id: "smoke", vector_version: "smoke", commercial_vector_available: true,
     } }]);
     const hits = await qdrant.search("content", [1, 0], 1, "dy");
     assert.equal(hits[0]?.payload.kw_uid, "smoke");
@@ -310,14 +329,37 @@ describe("read-only MySQL source", () => {
 });
 
 describe("sync identity and search pipeline", () => {
-  it("builds deterministic two-vector points without raw text leakage", async () => {
-    const embedding = { modelId: () => "text-embedding-v4", embed: async (texts) => texts.map((_, index) => new Float32Array([index, 1])) };
-    const first = await buildNamedVectorPoints([creator()], embedding, "local-v1");
-    const second = await buildNamedVectorPoints([creator()], embedding, "local-v1");
+  it("builds mixed points with ordered provider inputs and skips only missing content", async () => {
+    const providerInputs = [];
+    const embedding = {
+      modelId: () => "text-embedding-v4",
+      embed: async (texts) => {
+        providerInputs.push([...texts]);
+        return texts.map((_, index) => new Float32Array([index, 1]));
+      },
+    };
+    const rows = [
+      creator(),
+      creator({ kwUid: "kw-content", description: "纯内容", dataJson: { contentThemeLabel: "测评" } }),
+      creator({ kwUid: "kw-commercial-only", description: undefined, dataJson: { tagBrand: "品牌" } }),
+    ];
+    const first = await buildNamedVectorPoints(rows, embedding, "local-v1");
+    const second = await buildNamedVectorPoints(rows, embedding, "local-v1");
     assert.equal(first.points[0].id, second.points[0].id);
+    assert.equal(first.skipped, 1);
+    assert.deepEqual(providerInputs[0], ["徒步露营 | 户外达人", "户外用品", "纯内容 | 测评"]);
     assert.deepEqual(Object.keys(first.points[0].vector).sort(), ["commercial", "content"]);
+    assert.deepEqual(first.points[0].vector, { content: [0, 1], commercial: [1, 1] });
+    assert.deepEqual(first.points[1].vector, { content: [2, 1] });
+    assert.equal(first.points[0].payload.commercial_vector_available, true);
+    assert.equal(first.points[1].payload.commercial_vector_available, false);
     const serializedPayload = JSON.stringify(first.points[0].payload);
     assert.doesNotMatch(serializedPayload, /徒步|户外用品|profile|normalized|raw_tags/);
+  });
+
+  it("rejects an embedding response whose count cannot preserve input ordering", async () => {
+    const embedding = { modelId: () => "e", embed: async () => [new Float32Array([1, 0])] };
+    await assert.rejects(buildNamedVectorPoints([creator()], embedding, "v"), /unexpected vector count/);
   });
 
   it("supports idempotent full sync and explicit manual incremental cursor", async () => {
@@ -357,7 +399,9 @@ describe("sync identity and search pipeline", () => {
       source,
       embedding: { modelId: () => "e", embed: async (texts) => { embedded.push(...texts); return texts.map(() => new Float32Array([1, 0])); } },
       qdrant: {
-        search: async (name) => [{ id: name, score: 0.5, payload: { platform: "dy", kw_uid: "kw-7" } }],
+        search: async (name) => [{ id: name, score: 0.5, payload: {
+          platform: "dy", kw_uid: "kw-7", commercial_vector_available: true,
+        } }],
         ensureCollection: async () => {}, upsert: async () => {}, health: async () => ({ ok: true }),
       },
       reranker: { modelId: () => "r", rerank: async (_q, docs) => docs.map((_, index) => ({ index, score: 0.7 })) },
@@ -369,6 +413,44 @@ describe("sync identity and search pipeline", () => {
     assert.match(embedded[0], /\[PHONE\]/);
     assert.doesNotMatch(JSON.stringify(result), /score/);
     assert.equal(result.matches[0].provenance.mysql_revalidated, true);
+    assert.equal(result.matches[0].provenance.commercial_vector_available, true);
+  });
+
+  it("merges content-only hits without a missing-commercial penalty", async () => {
+    const contentOnly = creator({ kwUid: "kw-content", description: "纯内容", dataJson: {} });
+    const both = creator({ kwUid: "kw-both" });
+    let rerankDocuments;
+    const pipeline = new LocalVectorPipeline({
+      source: {
+        loadProjectDescription: async () => null,
+        readCreators: async () => ({ status: "available", platform: "dy", rows: [] }),
+        rehydrate: async () => [contentOnly, both],
+      },
+      embedding: { modelId: () => "e", embed: async (texts) => texts.map(() => new Float32Array([1, 0])) },
+      qdrant: {
+        search: async (name) => name === "content" ? [
+          { id: "content", score: 0.9, payload: { platform: "dy", kw_uid: "kw-content", commercial_vector_available: false } },
+          { id: "both", score: 0.8, payload: { platform: "dy", kw_uid: "kw-both", commercial_vector_available: true } },
+        ] : [
+          { id: "both", score: 0.95, payload: { platform: "dy", kw_uid: "kw-both", commercial_vector_available: true } },
+        ],
+        ensureCollection: async () => {}, upsert: async () => {}, health: async () => ({ ok: true }),
+      },
+      reranker: {
+        modelId: () => "r",
+        rerank: async (_query, docs) => {
+          rerankDocuments = docs;
+          return docs.map((_, index) => ({ index, score: 1 - index }));
+        },
+      },
+      vectorVersion: "v",
+    });
+
+    const result = await pipeline.search({ queryText: "露营", platform: "dy" });
+
+    assert.deepEqual(rerankDocuments, ["纯内容", "徒步露营 | 户外达人 户外用品"]);
+    assert.deepEqual(result.matches.map((match) => match.kw_uid), ["kw-content", "kw-both"]);
+    assert.deepEqual(result.matches.map((match) => match.provenance.commercial_vector_available), [false, true]);
   });
 
   it("returns explicit SQL-only degradation and stable failure when no SQL path exists", async () => {
@@ -383,6 +465,7 @@ describe("sync identity and search pipeline", () => {
     }).search({ queryText: "露营", platform: "dy" });
     assert.equal(degraded.retrieval_mode, "sql-only");
     assert.equal(degraded.degraded_reason, "embedding_unavailable");
+    assert.equal(degraded.matches[0].provenance.commercial_vector_available, false);
 
     const failed = await new LocalVectorPipeline({
       ...base,

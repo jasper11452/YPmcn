@@ -14,11 +14,12 @@ export interface DerivedVectorPayload {
   source_updated_at: string;
   embedding_model_id: string;
   vector_version: string;
+  commercial_vector_available: boolean;
 }
 
 export interface NamedVectorPoint {
   id: string;
-  vector: Record<NamedVectorName, number[]>;
+  vector: { content: number[]; commercial?: number[] };
   payload: DerivedVectorPayload;
 }
 
@@ -71,8 +72,8 @@ function vectorSchema(vectorSize: number) {
   };
 }
 
-function validateVector(vector: number[], vectorSize: number, label: string): void {
-  if (vector.length !== vectorSize || vector.some((value) => !Number.isFinite(value))) {
+function validateVector(vector: unknown, vectorSize: number, label: string): asserts vector is number[] {
+  if (!Array.isArray(vector) || vector.length !== vectorSize || vector.some((value) => !Number.isFinite(value))) {
     throw new TypeError(`${label} vector must contain exactly ${vectorSize} finite values`);
   }
 }
@@ -172,8 +173,13 @@ export class RealQdrantClient implements QdrantClientLike<NamedVectorPoint> {
   async upsert(points: NamedVectorPoint[]): Promise<void> {
     if (points.length === 0) return;
     for (const point of points) {
-      validateVector(point.vector.content, this.vectorSize, "content");
-      validateVector(point.vector.commercial, this.vectorSize, "commercial");
+      validateVector(point.vector?.content, this.vectorSize, "content");
+      if (point.vector?.commercial !== undefined) {
+        validateVector(point.vector.commercial, this.vectorSize, "commercial");
+      }
+      if (point.payload?.commercial_vector_available !== (point.vector?.commercial !== undefined)) {
+        throw new TypeError("commercial_vector_available must match the written commercial vector");
+      }
     }
     for (let offset = 0; offset < points.length; offset += this.upsertBatchSize) {
       const batch = points.slice(offset, offset + this.upsertBatchSize);

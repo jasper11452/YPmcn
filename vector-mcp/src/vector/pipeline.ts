@@ -52,7 +52,12 @@ function deterministicPointId(row: CreatorRow): string {
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
 }
 
-export function buildDerivedPayload(row: CreatorRow, modelId: string, vectorVersion: string): DerivedVectorPayload {
+export function buildDerivedPayload(
+  row: CreatorRow,
+  modelId: string,
+  vectorVersion: string,
+  commercialVectorAvailable: boolean,
+): DerivedVectorPayload {
   return {
     platform: row.platform,
     kw_uid: row.kwUid,
@@ -62,6 +67,7 @@ export function buildDerivedPayload(row: CreatorRow, modelId: string, vectorVers
     source_updated_at: row.sourceUpdatedAt,
     embedding_model_id: modelId,
     vector_version: vectorVersion,
+    commercial_vector_available: commercialVectorAvailable,
   };
 }
 
@@ -72,21 +78,28 @@ export async function buildNamedVectorPoints(
 ): Promise<{ points: NamedVectorPoint[]; skipped: number }> {
   const projected = rows.flatMap((row) => {
     const text = projectCreatorText({ description: row.description, profile: row.profile, data_json: row.dataJson });
-    return text.contentText && text.commercialText ? [{ row, ...text }] : [];
+    return text.contentText ? [{ row, ...text }] : [];
   });
   const skipped = rows.length - projected.length;
   if (projected.length === 0) return { points: [], skipped };
-  const inputs = projected.flatMap((item) => [item.contentText, item.commercialText]);
+  const inputs = projected.flatMap((item) => item.commercialText
+    ? [item.contentText, item.commercialText]
+    : [item.contentText]);
   const vectors = await embedding.embed(inputs);
   if (vectors.length !== inputs.length) throw new Error("Embedding provider returned an unexpected vector count");
-  const points = projected.map((item, index) => ({
-    id: deterministicPointId(item.row),
-    vector: {
-      content: Array.from(vectors[index * 2]),
-      commercial: Array.from(vectors[index * 2 + 1]),
-    },
-    payload: buildDerivedPayload(item.row, embedding.modelId(), vectorVersion),
-  }));
+  let vectorIndex = 0;
+  const points = projected.map((item) => {
+    const content = vectors[vectorIndex++];
+    const commercial = item.commercialText ? vectors[vectorIndex++] : undefined;
+    return {
+      id: deterministicPointId(item.row),
+      vector: {
+        content: Array.from(content),
+        ...(commercial ? { commercial: Array.from(commercial) } : {}),
+      },
+      payload: buildDerivedPayload(item.row, embedding.modelId(), vectorVersion, commercial !== undefined),
+    };
+  });
   return { points, skipped };
 }
 
@@ -116,7 +129,7 @@ function passesHardFilters(row: CreatorRow, filters: HardFilters): boolean {
   return true;
 }
 
-function provenance(row: CreatorRow) {
+function provenance(row: CreatorRow, commercialVectorAvailable: boolean) {
   return {
     authoritative_source: "mysql" as const,
     mysql_revalidated: true,
@@ -126,6 +139,7 @@ function provenance(row: CreatorRow) {
     source_row_id: row.sourceRowId,
     source_snapshot_date: row.sourceSnapshotDate,
     source_updated_at: row.sourceUpdatedAt,
+    commercial_vector_available: commercialVectorAvailable,
   };
 }
 
@@ -159,7 +173,12 @@ async function sqlOnlyResult(
       success: true as const,
       retrieval_mode: "sql-only" as const,
       degraded_reason: reason,
-      matches: rows.map((row, index) => ({ rank: index + 1, platform: row.platform, kw_uid: row.kwUid, provenance: provenance(row) })),
+      matches: rows.map((row, index) => ({
+        rank: index + 1,
+        platform: row.platform,
+        kw_uid: row.kwUid,
+        provenance: provenance(row, false),
+      })),
     };
   } catch {
     return { success: false as const, error: { code: "VECTOR_DEPENDENCY_ERROR", dependency: reason, source_status: "unavailable" } };
@@ -229,6 +248,10 @@ export class LocalVectorPipeline {
       return { success: false as const, error: { code: "SOURCE_DEPENDENCY_ERROR", dependency: "mysql_creator_source" } };
     }
     const byId = new Map(current.map((row) => [row.kwUid, row]));
+    const vectorAvailability = new Map(merged.map((hit) => [
+      `${hit.payload.platform}:${hit.payload.kw_uid}`,
+      hit.payload.commercial_vector_available === true,
+    ]));
     const candidates = merged
       .flatMap((hit) => byId.get(hit.payload.kw_uid) ? [byId.get(hit.payload.kw_uid)!] : [])
       .filter((row) => passesHardFilters(row, input.filters ?? {}));
@@ -242,7 +265,12 @@ export class LocalVectorPipeline {
       const matches = ranking.slice(0, limit).map((entry, index) => {
         const row = rerankable[entry.index]?.row;
         if (!row) throw new Error("Reranker returned an invalid index");
-        return { rank: index + 1, platform: row.platform, kw_uid: row.kwUid, provenance: provenance(row) };
+        return {
+          rank: index + 1,
+          platform: row.platform,
+          kw_uid: row.kwUid,
+          provenance: provenance(row, vectorAvailability.get(`${row.platform}:${row.kwUid}`) === true),
+        };
       });
       return { success: true as const, retrieval_mode: "local-vector" as const, degraded_reason: null, matches };
     } catch (error) {
