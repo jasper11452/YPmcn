@@ -52,15 +52,9 @@ export function buildCollectionSchema(config: QdrantConfig): QdrantCollectionSch
   };
 }
 
-export interface QdrantClientLike {
-  ensureCollection(schema: QdrantCollectionSchema): Promise<void>;
-  upsert(points: VectorPoint[]): Promise<void>;
-  search?(params: {
-    vector: number[];
-    limit: number;
-    filter?: Record<string, unknown>;
-    score_threshold?: number;
-  }): Promise<unknown>;
+export interface QdrantClientLike<TPoint = VectorPoint> {
+  ensureCollection(schema?: QdrantCollectionSchema): Promise<void>;
+  upsert(points: TPoint[]): Promise<void>;
 }
 
 export interface FakeQdrantClientOptions {
@@ -246,8 +240,9 @@ export class FakeQdrantClient implements QdrantClientLike {
     }
   }
 
-  async ensureCollection(schema: QdrantCollectionSchema): Promise<void> {
+  async ensureCollection(schema?: QdrantCollectionSchema): Promise<void> {
     this.assertAvailable();
+    if (!schema) throw new TypeError("Collection schema is required");
     this.schemas.push(schema);
   }
 

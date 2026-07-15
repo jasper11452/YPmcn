@@ -1,5 +1,4 @@
-import type { CreatorSourceRow } from "../vector/sync.js";
-import type { SourceMappings, SourcePlatform } from "../source/contract.js";
+export type CreatorPlatform = "dy" | "xhs";
 
 export interface MysqlSourceConfig {
   host: string;
@@ -9,146 +8,213 @@ export interface MysqlSourceConfig {
   database: string;
   ssl?: boolean;
   connectionLimit?: number;
+  dyTable: string;
+  xhsTable?: string;
+  projectTable: string;
+  allowedTables: string[];
 }
 
-function parseTags(value: unknown): string[] {
-  if (value === null || value === undefined) return [];
-  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
-  if (typeof value === "string") {
-    if (value.trim().length === 0) return [];
-    try {
-      const p = JSON.parse(value);
-      if (Array.isArray(p)) return p.filter((v): v is string => typeof v === "string");
-    } catch {
-      // not JSON — treat as delimiter-separated string
-    }
-    return value.split(/[、,，\s]+/).map((s) => s.trim()).filter((s) => s.length > 0);
+export interface CreatorRow {
+  platform: CreatorPlatform;
+  kwUid: string;
+  sourceTable: string;
+  sourceRowId: string;
+  sourceSnapshotDate: string;
+  sourceUpdatedAt: string;
+  itemId?: string;
+  douyinId?: string;
+  description?: string;
+  profile?: string;
+  province?: string;
+  city?: string;
+  followerCount?: number;
+  dataJson?: unknown;
+}
+
+export interface SourceReadResult {
+  status: "available" | "unavailable";
+  platform: CreatorPlatform;
+  rows: CreatorRow[];
+  reason?: "source_not_configured" | "source_table_missing";
+  cursor?: string;
+}
+
+export interface SqlExecutor {
+  query(sql: string, values?: unknown[]): Promise<[unknown, unknown?]>;
+  end?(): Promise<void>;
+}
+
+const CREATOR_COLUMNS = [
+  "id",
+  "item_id",
+  "douyinId",
+  "update_time",
+  "kwUid",
+  "kwProvince AS province",
+  "kwCity AS city",
+  "followercount AS follower_count",
+  "date",
+  "data_json",
+] as const;
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function envValue(env: NodeJS.ProcessEnv, yp: string, legacy: string, fallback = ""): string {
+  return env[yp] ?? env[legacy] ?? fallback;
+}
+
+export function mysqlSourceConfigFromEnv(env: NodeJS.ProcessEnv = process.env): MysqlSourceConfig {
+  const dyTable = env.VECTOR_DY_SOURCE_TABLE ?? "mz_item_data_dy";
+  const xhsTable = env.VECTOR_XHS_SOURCE_TABLE?.trim() || undefined;
+  const projectTable = env.VECTOR_PROJECT_SOURCE_TABLE ?? "core_project";
+  const configured = (env.VECTOR_SOURCE_TABLE_ALLOWLIST ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+  return {
+    host: envValue(env, "YP_MYSQL_HOST", "MYSQL_HOST", "localhost"),
+    port: Number(envValue(env, "YP_MYSQL_PORT", "MYSQL_PORT", "3306")) || 3306,
+    user: envValue(env, "YP_MYSQL_USER", "MYSQL_USER", "root"),
+    password: envValue(env, "YP_MYSQL_PASSWORD", "MYSQL_PASSWORD"),
+    database: envValue(env, "YP_MYSQL_DATABASE", "MYSQL_DATABASE", "test"),
+    ssl: envValue(env, "YP_MYSQL_SSL", "MYSQL_SSL") === "true",
+    connectionLimit: Number(env.VECTOR_MYSQL_CONNECTION_LIMIT) || 4,
+    dyTable,
+    xhsTable,
+    projectTable,
+    allowedTables: [...new Set(["mz_item_data_dy", "core_project", dyTable, projectTable, ...(xhsTable ? [xhsTable] : []), ...configured])],
+  };
+}
+
+export function validateTableIdentifier(table: string, allowlist: string[]): string {
+  if (!IDENTIFIER.test(table) || !allowlist.includes(table)) {
+    throw new TypeError("Source table is not in the configured allowlist");
   }
-  return [];
+  return table;
 }
 
-function collectTags(row: Record<string, unknown>, columns: string[]): string[] {
-  const all: string[] = [];
-  for (const col of columns) {
-    all.push(...parseTags(row[col]));
-  }
-  return [...new Set(all)];
+function isMissingTable(error: unknown): boolean {
+  const candidate = error as { code?: string; errno?: number };
+  return candidate?.code === "ER_NO_SUCH_TABLE" || candidate?.errno === 1146;
 }
 
-function getGeo(row: Record<string, unknown>): string {
-  const parts = [row["kw_city"], row["kw_province"], row["kw_ip_dependency"]]
-    .filter((v): v is string => typeof v === "string" && v.length > 0);
-  return parts.join(" ");
+function stringValue(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  return value === null || value === undefined ? "" : String(value);
 }
 
-export async function fetchCreatorRows(
-  config: MysqlSourceConfig,
-  _sourceMapping: SourceMappings,
-  maxRows?: number
-): Promise<CreatorSourceRow[]> {
-  let mysql2: typeof import("mysql2/promise");
+function numberValue(value: unknown): number | undefined {
+  const resolved = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(resolved) ? resolved : undefined;
+}
+
+function dataObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return {};
   try {
-    mysql2 = await import("mysql2/promise");
-  } catch {
-    throw new Error("mysql2 required: npm install mysql2");
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch { return {}; }
+}
+
+function mapRow(platform: CreatorPlatform, sourceTable: string, row: Record<string, unknown>): CreatorRow | null {
+  const kwUid = stringValue(row.kwUid).trim();
+  const sourceUpdatedAt = stringValue(row.update_time).trim();
+  const sourceSnapshotDate = stringValue(row.date).trim() || sourceUpdatedAt.slice(0, 10);
+  if (!kwUid || !sourceUpdatedAt || !sourceSnapshotDate) return null;
+  const data = dataObject(row.data_json);
+  return {
+    platform,
+    kwUid,
+    sourceTable,
+    sourceRowId: stringValue(row.id),
+    sourceSnapshotDate,
+    sourceUpdatedAt,
+    itemId: stringValue(row.item_id) || undefined,
+    douyinId: stringValue(row.douyinId) || undefined,
+    description: stringValue(data.description) || undefined,
+    province: stringValue(row.province) || undefined,
+    city: stringValue(row.city) || undefined,
+    followerCount: numberValue(row.follower_count),
+    dataJson: row.data_json,
+  };
+}
+
+export class MysqlReadonlySource {
+  constructor(private readonly config: MysqlSourceConfig, private readonly sql: SqlExecutor) {}
+
+  private tableFor(platform: CreatorPlatform): string | undefined {
+    return platform === "dy" ? this.config.dyTable : this.config.xhsTable;
   }
 
-  const conn = await mysql2.createConnection({
+  async readCreators(platform: CreatorPlatform, options: { cursor?: string; limit?: number } = {}): Promise<SourceReadResult> {
+    const configuredTable = this.tableFor(platform);
+    if (!configuredTable) return { status: "unavailable", platform, rows: [], reason: "source_not_configured" };
+    const table = validateTableIdentifier(configuredTable, this.config.allowedTables);
+    const limit = options.limit;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0 || limit > 10_000)) throw new TypeError("limit must be between 1 and 10000");
+    const cursorClause = options.cursor ? " WHERE update_time > ?" : "";
+    const limitClause = limit === undefined ? "" : " LIMIT ?";
+    const values: unknown[] = [...(options.cursor ? [options.cursor] : []), ...(limit === undefined ? [] : [limit])];
+    const sql = `SELECT ${CREATOR_COLUMNS.join(", ")} FROM \`${table}\`${cursorClause} ORDER BY update_time ASC, kwUid ASC, id ASC${limitClause}`;
+    try {
+      const [rawRows] = await this.sql.query(sql, values);
+      const rows = (Array.isArray(rawRows) ? rawRows : [])
+        .map((row) => mapRow(platform, table, row as Record<string, unknown>))
+        .filter((row): row is CreatorRow => row !== null);
+      return {
+        status: "available",
+        platform,
+        rows,
+        cursor: rows.length > 0 ? rows[rows.length - 1].sourceUpdatedAt : options.cursor,
+      };
+    } catch (error) {
+      if (isMissingTable(error)) return { status: "unavailable", platform, rows: [], reason: "source_table_missing" };
+      throw error;
+    }
+  }
+
+  async rehydrate(platform: CreatorPlatform, kwUids: string[]): Promise<CreatorRow[]> {
+    if (kwUids.length === 0) return [];
+    const configuredTable = this.tableFor(platform);
+    if (!configuredTable) return [];
+    const table = validateTableIdentifier(configuredTable, this.config.allowedTables);
+    const identities = [...new Set(kwUids)].sort();
+    if (identities.length > 1000) throw new TypeError("rehydrate identity limit exceeded");
+    const placeholders = identities.map(() => "?").join(", ");
+    const sql = `SELECT ${CREATOR_COLUMNS.join(", ")} FROM \`${table}\` WHERE kwUid IN (${placeholders}) ORDER BY kwUid ASC, update_time DESC, id DESC`;
+    try {
+      const [rawRows] = await this.sql.query(sql, identities);
+      const latest = new Map<string, CreatorRow>();
+      for (const raw of Array.isArray(rawRows) ? rawRows : []) {
+        const row = mapRow(platform, table, raw as Record<string, unknown>);
+        if (row && !latest.has(row.kwUid)) latest.set(row.kwUid, row);
+      }
+      return identities.flatMap((id) => latest.get(id) ? [latest.get(id)!] : []);
+    } catch (error) {
+      if (isMissingTable(error)) return [];
+      throw error;
+    }
+  }
+
+  async loadProjectDescription(projectId: string | number): Promise<string | null> {
+    const table = validateTableIdentifier(this.config.projectTable, this.config.allowedTables);
+    const [rows] = await this.sql.query(
+      `SELECT description FROM \`${table}\` WHERE id = ? LIMIT 1`,
+      [projectId],
+    );
+    const first = Array.isArray(rows) ? rows[0] as Record<string, unknown> | undefined : undefined;
+    return first && typeof first.description === "string" ? first.description : null;
+  }
+}
+
+export async function createMysqlReadonlySource(config: MysqlSourceConfig): Promise<{ source: MysqlReadonlySource; close: () => Promise<void> }> {
+  const mysql2 = await import("mysql2/promise");
+  const pool = mysql2.createPool({
     host: config.host,
     port: config.port,
     user: config.user,
     password: config.password,
     database: config.database,
+    ssl: config.ssl ? {} : undefined,
+    connectionLimit: config.connectionLimit,
+    dateStrings: true,
   });
-
-  const limitClause = maxRows && maxRows > 0 ? ` LIMIT ${maxRows}` : "";
-  const allRows: CreatorSourceRow[] = [];
-
-  try {
-    const xhsTagCols = [
-      "content_type_label",
-      "content_theme_label",
-      "industry_tag_label",
-      "xt_talent_type_label",
-      "grow_talent_type_label",
-      "talent_type_label",
-    ];
-    const xhsCols = [
-      "id",
-      "nickname",
-      "kw_city",
-      "kw_province",
-      "kw_ip_dependency",
-      "kw_user_url",
-      "date",
-      ...xhsTagCols,
-    ];
-    const [xhsRows] = await conn.query(
-      `SELECT ${xhsCols.join(", ")} FROM xhs_creator_accounts WHERE date IS NOT NULL${limitClause}`
-    );
-    if (Array.isArray(xhsRows)) {
-      for (const r of xhsRows as Record<string, unknown>[]) {
-        const tags = collectTags(r, xhsTagCols);
-        if (tags.length === 0) continue;
-        const geo = getGeo(r);
-        if (geo) tags.push(geo);
-        allRows.push({
-          platform: "xhs",
-          platform_account_id: String(r["id"] ?? ""),
-          source_table: "xhs_creator_accounts",
-          content_tags: tags,
-          grow_tags: [],
-          source_updated_at: String(r["date"] ?? ""),
-          display_name: r["nickname"] ? String(r["nickname"]) : undefined,
-          profile_url: r["kw_user_url"] ? String(r["kw_user_url"]) : undefined,
-        } as CreatorSourceRow);
-      }
-    }
-
-    const dyTagCols = [
-      "content_type_label",
-      "kol_persona_label",
-      "content_feature_label",
-      "content_tag",
-      "business_industry",
-      "pgy_blogger_type_label",
-      "grow_blogger_type_label",
-      "talent_type_label",
-    ];
-    const dyCols = [
-      "id",
-      "nickname",
-      "kw_city",
-      "kw_province",
-      "kw_ip_dependency",
-      "kw_user_url",
-      "date",
-      ...dyTagCols,
-    ];
-    const [dyRows] = await conn.query(
-      `SELECT ${dyCols.join(", ")} FROM dy_creator_accounts WHERE date IS NOT NULL${limitClause}`
-    );
-    if (Array.isArray(dyRows)) {
-      for (const r of dyRows as Record<string, unknown>[]) {
-        const tags = collectTags(r, dyTagCols);
-        if (tags.length === 0) continue;
-        const geo = getGeo(r);
-        if (geo) tags.push(geo);
-        allRows.push({
-          platform: "dy",
-          platform_account_id: String(r["id"] ?? ""),
-          source_table: "dy_creator_accounts",
-          content_tags: tags,
-          grow_tags: [],
-          source_updated_at: String(r["date"] ?? ""),
-          display_name: r["nickname"] ? String(r["nickname"]) : undefined,
-          profile_url: r["kw_user_url"] ? String(r["kw_user_url"]) : undefined,
-        } as CreatorSourceRow);
-      }
-    }
-  } finally {
-    await conn.end();
-  }
-
-  return allRows;
+  return { source: new MysqlReadonlySource(config, pool as unknown as SqlExecutor), close: () => pool.end() };
 }

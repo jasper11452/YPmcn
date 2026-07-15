@@ -4,7 +4,7 @@
  *
  * Supports two modes via VECTOR_MCP_MODE env var:
  * - "fake" (default): deterministic fake embeddings + in-memory Qdrant
- * - "real": SiliconFlow embedding/reranker + MySQL data source
+ * - "real": local-only Qdrant + DashScope + read-only MySQL pipeline
  */
 import { randomUUID } from "node:crypto";
 import { extractVectorQuery, } from "../query/normalize.js";
@@ -13,20 +13,10 @@ import { reciprocalRankFusion } from "../vector/rrf.js";
 import { buildVectorPoints } from "../vector/sync.js";
 import { createFakeEmbeddingProvider, createFakeRerankProvider, } from "../config/providers.js";
 import { buildCollectionSchema } from "../vector/qdrant.js";
-import { createSiliconFlowEmbeddingProvider, createSiliconFlowRerankerProvider, } from "../providers/index.js";
-import { fetchCreatorRows } from "../db/index.js";
-import { loadSourceMapping } from "../source/contract.js";
+import { createRealRuntime } from "../runtime.js";
 import {
   MODE,
   FAKE_PERSIST_PATH,
-  REAL_PERSIST_PATH,
-  requireSiliconFlowApiKey,
-  FORCE_RESYNC,
-  SOURCE_MAPPING_PATH,
-  MYSQL_FETCH_LIMIT,
-  mysqlConfigFromEnv,
-  HAS_SILICONFLOW_API_KEY,
-  HAS_MYSQL_CONFIG,
 } from "../config/runtime-config.js";
 // ── Fake dataset ────────────────────────────────────────────────────────────
 const FAKE_VECTOR_VERSION = "v1";
@@ -570,92 +560,8 @@ const fakeQdrantInitializer = createSharedInitializer(loadSeededQdrant);
 async function getSeededQdrant() {
     return fakeQdrantInitializer.get();
 }
-// ── Real-mode infrastructure ────────────────────────────────────────────────
-let _realEmbeddingProvider = null;
-let _realRerankProvider = null;
-const REAL_VECTOR_VERSION = "v1";
-const REAL_DIM = 1024;
-const REAL_QDRANT_CONFIG = {
-    url: "real://siliconflow",
-    collectionName: "creator_tags",
-    vectorSize: REAL_DIM,
-    distance: "Cosine",
-};
-function getRealEmbeddingProvider() {
-    if (!_realEmbeddingProvider) {
-        const apiKey = requireSiliconFlowApiKey();
-        _realEmbeddingProvider = createSiliconFlowEmbeddingProvider({ apiKey });
-    }
-    return _realEmbeddingProvider;
-}
-function getRealRerankProvider() {
-    if (!_realRerankProvider) {
-        const apiKey = requireSiliconFlowApiKey();
-        _realRerankProvider = createSiliconFlowRerankerProvider({ apiKey });
-    }
-    return _realRerankProvider;
-}
-
-function forceResync(): boolean {
-    return FORCE_RESYNC;
-}
-
-async function loadRealSeededQdrant() {
-    const qdrant = new FakeQdrantClient();
-
-    if (!forceResync() && qdrant.loadFromFile(REAL_PERSIST_PATH)) {
-        process.stderr.write(`[vector-mcp] loaded ${qdrant.pointCount} points from ${REAL_PERSIST_PATH}\n`);
-        return qdrant;
-    }
-
-    const embeddingProvider = getRealEmbeddingProvider();
-    const mysqlConfig = mysqlConfigFromEnv();
-    let sourceMapping;
-    try {
-        sourceMapping = loadSourceMapping(SOURCE_MAPPING_PATH);
-    }
-    catch {
-        sourceMapping = {
-            xhs: {
-                platform: "platform",
-                platform_account_id: "xhs_creator_id",
-                display_name: "xhs_nickname",
-                content_tags: "xhs_content_tags_json",
-                grow_tags: "xhs_grow_tags_json",
-                source_updated_at: "xhs_updated_at",
-                source_table: "xhs_source_table",
-                profile_url: "xhs_homepage_url",
-            },
-            dy: {
-                platform: "platform",
-                platform_account_id: "dy_creator_id",
-                display_name: "dy_nickname",
-                content_tags: "dy_content_tags_json",
-                grow_tags: "dy_grow_tags_json",
-                source_updated_at: "dy_updated_at",
-                source_table: "dy_source_table",
-                profile_url: "dy_homepage_url",
-            },
-        };
-    }
-    const maxRows = MYSQL_FETCH_LIMIT;
-    const rows = await fetchCreatorRows(mysqlConfig, sourceMapping, maxRows);
-    const schema = buildCollectionSchema(REAL_QDRANT_CONFIG);
-    const points = await buildVectorPoints(rows, embeddingProvider, REAL_VECTOR_VERSION);
-    await qdrant.ensureCollection(schema);
-    qdrant.setPersistencePath(REAL_PERSIST_PATH);
-    await qdrant.upsert(points);
-    process.stderr.write(`[vector-mcp] synced ${points.length} points, persisted to ${REAL_PERSIST_PATH}\n`);
-    return qdrant;
-}
-const realQdrantInitializer = createSharedInitializer(loadRealSeededQdrant);
-async function getRealSeededQdrant() {
-    return realQdrantInitializer.get();
-}
-
 export function resetVectorStateForTests() {
     fakeQdrantInitializer.reset();
-    realQdrantInitializer.reset();
 }
 function deduplicateByAccountId(candidates) {
     const groups = new Map();
@@ -782,6 +688,35 @@ export async function searchVectorCandidates(qdrant, options) {
 // ── Main handler ────────────────────────────────────────────────────────────
 async function handleSearch(params, traceId) {
     const args = (params ?? {});
+    if (MODE === "real") {
+        const runtime = await createRealRuntime();
+        try {
+            const direct = typeof args.queryText === "string"
+                ? args.queryText
+                : Array.isArray(args.positiveRequirements)
+                    ? args.positiveRequirements.filter((value) => typeof value === "string").join(" ")
+                    : undefined;
+            const result = await runtime.pipeline.search({
+                queryText: direct,
+                projectId: typeof args.projectId === "string" || typeof args.projectId === "number" ? args.projectId : undefined,
+                platform: args.platform === "xhs" ? "xhs" : "dy",
+                limit: typeof args.limit === "number" ? args.limit : undefined,
+                candidateLimit: typeof args.candidateLimit === "number" ? args.candidateLimit : undefined,
+                filters: {
+                    platform: args.platform === "xhs" ? "xhs" : "dy",
+                    region: typeof args.region === "string" ? args.region : undefined,
+                    followerMin: typeof args.followerMin === "number" ? args.followerMin : undefined,
+                    followerMax: typeof args.followerMax === "number" ? args.followerMax : undefined,
+                    priceMin: typeof args.priceMin === "number" ? args.priceMin : undefined,
+                    priceMax: typeof args.priceMax === "number" ? args.priceMax : undefined,
+                    compliance: typeof args.compliance === "string" ? args.compliance : undefined,
+                },
+            });
+            return { ...result, trace_id: traceId };
+        } finally {
+            await runtime.close();
+        }
+    }
     const limit = typeof args.limit === "number" && args.limit > 0 ? args.limit : 10;
     const platformFilter = typeof args.platform === "string" && args.platform.length > 0
         ? args.platform
@@ -804,13 +739,9 @@ async function handleSearch(params, traceId) {
     const positiveQuery = geoTerm
         ? `${basePositiveQuery} ${geoTerm}`
         : basePositiveQuery;
-    const isRealMode = MODE === "real";
-    const qdrant = isRealMode
-        ? await getRealSeededQdrant()
-        : await getSeededQdrant();
-    const embeddingProvider = isRealMode
-        ? getRealEmbeddingProvider()
-        : createFakeEmbeddingProvider(FAKE_DIM);
+    const isRealMode = false;
+    const qdrant = await getSeededQdrant();
+    const embeddingProvider = createFakeEmbeddingProvider(FAKE_DIM);
     const [queryVec] = await embeddingProvider.embed([positiveQuery]);
     // Dense search — fetch all candidates
     const searchLimit = 1000;
@@ -854,9 +785,7 @@ async function handleSearch(params, traceId) {
     const safe = deduped.filter((c) => c.negativeMatched.length === 0);
     const penalized = deduped.filter((c) => c.negativeMatched.length > 0);
     // 7. Rerank safe candidates (mode-aware)
-    const reranker = isRealMode
-        ? getRealRerankProvider()
-        : createFakeRerankProvider();
+    const reranker = createFakeRerankProvider();
     let rerankMap = null;
     if (safe.length > 0) {
         const RERANK_CAP = 50;
@@ -948,18 +877,16 @@ export async function handleToolCall(name, params) {
     switch (name) {
         case "sync_creator_tag_vectors": {
             if (MODE === "real") {
+                let runtime;
                 try {
-                    const qdrant = await getRealSeededQdrant();
-                    return {
-                        success: true,
-                        data: {
-                            status: "SYNCED",
-                            mode: "real",
-                            provider: "siliconflow",
-                            echo: params,
-                        },
-                        trace_id: traceId,
-                    };
+                    runtime = await createRealRuntime();
+                    const args = params ?? {};
+                    const result = await runtime.pipeline.sync(args.platform === "xhs" ? "xhs" : "dy", {
+                        cursor: typeof args.cursor === "string" ? args.cursor : undefined,
+                        limit: typeof args.limit === "number" ? args.limit : undefined,
+                        dryRun: args.dryRun === true,
+                    });
+                    return { ...result, trace_id: traceId };
                 }
                 catch (err) {
                     return {
@@ -970,6 +897,9 @@ export async function handleToolCall(name, params) {
                         },
                         trace_id: traceId,
                     };
+                }
+                finally {
+                    if (runtime) await runtime.close();
                 }
             }
             return {
@@ -986,19 +916,16 @@ export async function handleToolCall(name, params) {
             return handleSearch(params, traceId);
         case "health_check_vector_store": {
             if (MODE === "real") {
-                const hasApiKey = HAS_SILICONFLOW_API_KEY;
-                const hasMysql = HAS_MYSQL_CONFIG;
-                return {
-                    success: true,
-                    data: {
-                        mode: "real",
-                        embedding: hasApiKey ? "configured" : "missing_api_key",
-                        reranker: hasApiKey ? "configured" : "missing_api_key",
-                        mysql: hasMysql ? "configured" : "missing_config",
-                        provider: "siliconflow",
-                    },
-                    trace_id: traceId,
-                };
+                let runtime;
+                try {
+                    runtime = await createRealRuntime();
+                    await runtime.qdrant.health();
+                    return { success: true, data: { mode: "real", qdrant: "available", mysql: "configured", embedding: "dashscope:text-embedding-v4", reranker: "dashscope:qwen3-rerank" }, trace_id: traceId };
+                } catch (error) {
+                    return { success: false, error: { code: error?.code ?? "VECTOR_CONFIGURATION_INVALID", message: error instanceof Error ? error.message : "Vector dependency unavailable" }, trace_id: traceId };
+                } finally {
+                    if (runtime) await runtime.close();
+                }
             }
             try {
                 const qdrant = await getSeededQdrant();

@@ -20,10 +20,11 @@
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
 当前 Spec：`mvp-v2` · `sha256:2c134982c85bb723dca2a198a791d94fd1f931fbeb222354d329cbc96eea086b`
-变更记录摘要：`sha256:047d096e1e7ddb39cbd12769db8567490dfd0d2111839f3aa58726cc19b705b0`
+变更记录摘要：`sha256:35c7d748210917a5cfc2db97697d4bc73c4ef89fbc319e188a2e31219732d34a`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-014 | `IMPLEMENTED_LOCAL_TEST_ONLY` | [本地独立向量管线](../changes/CHG-2026-014-local-vector-integration.md) |
 | CHG-2026-013 | `SPEC_APPROVED` | [建立向量检索 MVP 正式契约基线](../changes/CHG-2026-013-vector-contract-baseline.md) |
 | CHG-2026-011 | `SPEC_APPROVED` | [修正 Hook 与 OpenClaw 宿主接口对接](../changes/CHG-2026-011-hook-host-integration.md) |
 | CHG-2026-010 | `SPEC_APPROVED` | [Reference MCP 实现正式输出与恢复契约](../changes/CHG-2026-010-reference-mcp-runtime.md) |
