@@ -51,6 +51,19 @@ function creator(overrides = {}) {
   };
 }
 
+function namedVectorPoint(id, overrides = {}) {
+  return {
+    id: String(id),
+    vector: { content: [1, 0], commercial: [0, 1] },
+    payload: {
+      platform: "dy", kw_uid: `kw-${id}`, source_table: "dy_mz", source_row_id: String(id),
+      source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
+      embedding_model_id: "text-embedding-v4", vector_version: "local-v1",
+    },
+    ...overrides,
+  };
+}
+
 it("preserves the three public operation tool interfaces", () => {
   assert.deepEqual(TOOL_DEFINITIONS.map((tool) => tool.name), [
     "sync_creator_tag_vectors", "search_creator_tag_vectors", "health_check_vector_store",
@@ -185,6 +198,49 @@ describe("official Qdrant SDK adapter", () => {
       source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
       embedding_model_id: "text-embedding-v4", vector_version: "local-v1",
     } }]), /exactly 2/);
+  });
+
+  it("batches 201 upsert points as 100, 100 and 1", async () => {
+    const batches = [];
+    const client = {
+      upsert: async (_collectionName, options) => { batches.push(options); },
+    };
+    const qdrant = new RealQdrantClient({ url: "http://q", collectionName: "c", vectorSize: 2, client });
+
+    await qdrant.upsert(Array.from({ length: 201 }, (_, index) => namedVectorPoint(index)));
+
+    assert.deepEqual(batches.map((batch) => batch.points.length), [100, 100, 1]);
+    assert.ok(batches.every((batch) => batch.wait === true));
+  });
+
+  it("supports a custom upsert batch size", async () => {
+    const batchSizes = [];
+    const client = {
+      upsert: async (_collectionName, options) => { batchSizes.push(options.points.length); },
+    };
+    const qdrant = new RealQdrantClient({
+      url: "http://q", collectionName: "c", vectorSize: 2, upsertBatchSize: 2, client,
+    });
+
+    await qdrant.upsert(Array.from({ length: 5 }, (_, index) => namedVectorPoint(index)));
+
+    assert.deepEqual(batchSizes, [2, 2, 1]);
+  });
+
+  it("validates every point before issuing any SDK upsert", async () => {
+    let upsertCalls = 0;
+    const client = {
+      upsert: async () => { upsertCalls += 1; },
+    };
+    const qdrant = new RealQdrantClient({
+      url: "http://q", collectionName: "c", vectorSize: 2, upsertBatchSize: 2, client,
+    });
+    const points = Array.from({ length: 5 }, (_, index) => namedVectorPoint(index));
+    points[4] = namedVectorPoint(4, { vector: { content: [1], commercial: [0, 1] } });
+
+    await assert.rejects(qdrant.upsert(points), /exactly 2/);
+
+    assert.equal(upsertCalls, 0);
   });
 });
 

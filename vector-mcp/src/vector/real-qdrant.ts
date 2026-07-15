@@ -46,6 +46,7 @@ export interface RealQdrantConfig {
   vectorSize: number;
   apiKey?: string;
   timeoutMs?: number;
+  upsertBatchSize?: number;
   client?: QdrantSdkLike;
 }
 
@@ -115,12 +116,14 @@ function validateHit(hit: unknown): NamedVectorHit {
 export class RealQdrantClient implements QdrantClientLike<NamedVectorPoint> {
   private readonly collectionName: string;
   private readonly vectorSize: number;
+  private readonly upsertBatchSize: number;
   private readonly client: QdrantSdkLike;
 
   constructor(config: RealQdrantConfig) {
     if (!config.url?.trim()) throw new TypeError("Qdrant URL is required");
     if (!config.collectionName?.trim()) throw new TypeError("Qdrant collection is required");
     this.vectorSize = positiveInteger(config.vectorSize, "vectorSize");
+    this.upsertBatchSize = positiveInteger(config.upsertBatchSize ?? 100, "upsertBatchSize");
     const timeout = positiveInteger(config.timeoutMs ?? 15_000, "timeoutMs");
     this.collectionName = config.collectionName;
     if (config.client) {
@@ -172,10 +175,13 @@ export class RealQdrantClient implements QdrantClientLike<NamedVectorPoint> {
       validateVector(point.vector.content, this.vectorSize, "content");
       validateVector(point.vector.commercial, this.vectorSize, "commercial");
     }
-    await this.sdkCall(
-      () => this.client.upsert(this.collectionName, { wait: true, points }),
-      "Qdrant upsert failed",
-    );
+    for (let offset = 0; offset < points.length; offset += this.upsertBatchSize) {
+      const batch = points.slice(offset, offset + this.upsertBatchSize);
+      await this.sdkCall(
+        () => this.client.upsert(this.collectionName, { wait: true, points: batch }),
+        "Qdrant upsert failed",
+      );
+    }
   }
 
   async search(name: NamedVectorName, vector: number[], limit: number, platform?: "dy" | "xhs"): Promise<NamedVectorHit[]> {
