@@ -27,7 +27,7 @@ EXPECTED_REFERENCE_FILES = {
     "validation-playbook.md",
     "workflow-state-machine.md",
 }
-EXPECTED_CSV_SHA256 = "63261c8b9c727ed7992dba8ef474656b51c4dc9fff0d22df8533509a02071ed5"
+EXPECTED_CSV_SHA256 = "da167293e0426c64dd1d92864915bdfa8cf8c48adfd12100e6f2810462b0812a"
 
 
 def read(path: Path) -> str:
@@ -180,16 +180,17 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertEqual(EXPECTED_CSV_SHA256, hashlib.sha256(raw).hexdigest())
         with CSV_SCHEMA.open("r", encoding="utf-8-sig", newline="") as handle:
             rows = list(csv.DictReader(handle))
-        self.assertEqual(153, len(rows))
-        fields = [row["字段"] for row in rows]
+        self.assertEqual(310, len(rows))
+        fields = [row["Field"] for row in rows]
         self.assertEqual(len(fields), len(set(fields)))
         for field in (
-            "platform",
-            "raw_messages_json",
-            "budget_min_cents",
-            "rebate_min_rate",
-            "quantity_total",
+            "id",
+            "demand_id",
             "project_name",
+            "brand_name",
+            "status",
+            "platform",
+            "kwUid",
         ):
             self.assertIn(field, fields)
 
