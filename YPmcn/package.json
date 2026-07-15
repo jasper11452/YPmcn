@@ -1,6 +1,6 @@
 {
   "name": "ypmcn-media-assistant",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "YPmcn mvp-v2 媒介助手：契约优先的 OpenClaw 流程门禁与可恢复状态管理",
   "type": "module",
   "main": "./dist/index.js",

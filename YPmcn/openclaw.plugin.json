@@ -1,6 +1,6 @@
 {
   "id": "ypmcn-media-assistant",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "YPmcn mvp-v2 媒介助手：契约优先的工具门禁、语义 ID 链路与可恢复状态机。",
   "author": {
     "name": "Jasper"
