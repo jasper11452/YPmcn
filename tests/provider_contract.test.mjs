@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
-import { createToolDefinitions } from "../reference-mcp/state.mjs";
 import {
   checkProviderUrl,
   compareProviderTools,
@@ -15,6 +13,21 @@ const legacyProfilePath = fileURLToPath(
   new URL("../spec/profiles/legacy-1.9.4.json", import.meta.url),
 );
 const legacyProfile = JSON.parse(readFileSync(legacyProfilePath, "utf8"));
+const targetProfile = JSON.parse(
+  readFileSync(new URL("../spec/mcp.json", import.meta.url), "utf8"),
+);
+
+function currentToolDefinitions() {
+  return [...targetProfile.requiredTools, ...targetProfile.optionalTools].map((name) => ({
+    name,
+    description: `current ${name}`,
+    inputSchema: {
+      type: "object",
+      required: targetProfile.tools[name].required,
+      properties: structuredClone(targetProfile.tools[name].properties),
+    },
+  }));
+}
 
 function legacyToolDefinitions() {
   return legacyProfile.observedSummary.toolNames.map((name) => {
@@ -34,7 +47,7 @@ function legacyToolDefinitions() {
 
 describe("read-only provider contract checker", () => {
   it("keeps the provider tool set closed without vector operations tools", () => {
-    const names = createToolDefinitions().map(({ name }) => name);
+    const names = currentToolDefinitions().map(({ name }) => name);
     assert.deepEqual(names, [
       "validate_requirement", "search_creators", "rank_mcns",
       "select_inquiry_form_fields", "create_with_distributions",
@@ -66,14 +79,51 @@ describe("read-only provider contract checker", () => {
   });
 
   it("passes a complete compatible target snapshot with a stable hash", () => {
-    const definitions = createToolDefinitions();
+    const definitions = currentToolDefinitions();
     const first = compareProviderTools(definitions);
     const second = compareProviderTools(structuredClone(definitions));
     assert.deepEqual(first, second);
     assert.equal(first.status, "PASS");
-    assert.equal(first.detectedProfile, "mvp-v2");
+    assert.equal(first.detectedProfile, "current-endpoint");
     assert.deepEqual(first.missingTools, []);
     assert.deepEqual(first.schemaDiffs, []);
+  });
+
+  it("compares nullable anyOf branches recursively", () => {
+    const definitions = currentToolDefinitions();
+    const select = definitions.find((tool) => tool.name === "select_inquiry_form_fields");
+    select.inputSchema.properties.url.anyOf[0].type = "number";
+
+    const report = compareProviderTools(definitions);
+
+    assert.equal(report.status, "FAIL");
+    assert.deepEqual(report.schemaDiffs, [{
+      tool: "select_inquiry_form_fields",
+      path: "inputSchema.properties.url.anyOf[0].type",
+      reason: "value_mismatch",
+      expected: "string",
+      actual: "number",
+    }]);
+  });
+
+  it("does not synthesize or ignore a root additionalProperties constraint", () => {
+    const definitions = currentToolDefinitions();
+    for (const tool of definitions) tool.inputSchema.additionalProperties = false;
+    const report = compareProviderTools(definitions);
+    assert.equal(report.status, "FAIL");
+    assert.equal(report.schemaDiffs.length, definitions.length);
+    assert.ok(report.schemaDiffs.every((diff) =>
+      diff.path === "inputSchema.additionalProperties" && diff.reason === "unexpected_schema"
+    ));
+  });
+
+  it("ignores every pgy-prefixed tool", () => {
+    const baseline = compareProviderTools(currentToolDefinitions());
+    const withPgy = compareProviderTools([
+      ...currentToolDefinitions(),
+      { name: "pgy_secret", inputSchema: { type: "object" } },
+    ]);
+    assert.deepEqual(withPgy, baseline);
   });
 
   it("extracts tools/list snapshots without accepting malformed payloads", () => {
@@ -83,17 +133,14 @@ describe("read-only provider contract checker", () => {
     assert.throws(() => extractSnapshotTools({ result: {} }), /tools\/list snapshot/i);
   });
 
-  it("uses only initialize, initialized notification, and tools/list over HTTP", async (testContext) => {
+  it("uses only initialize, initialized notification, and tools/list over HTTP", async () => {
     const methods = [];
-    const tools = createToolDefinitions();
-    const server = createServer(async (request, response) => {
-      const chunks = [];
-      for await (const chunk of request) chunks.push(chunk);
-      const message = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const tools = currentToolDefinitions();
+    const fetch = async (_url, options) => {
+      const message = JSON.parse(options.body);
       methods.push(message.method);
       if (message.method === "notifications/initialized") {
-        response.writeHead(202).end();
-        return;
+        return new Response(null, { status: 202 });
       }
       const result = message.method === "initialize"
         ? {
@@ -102,13 +149,12 @@ describe("read-only provider contract checker", () => {
             serverInfo: { name: "test-provider", version: "3.0.0" },
           }
         : { tools };
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
-    });
-    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-    testContext.after(() => server.close());
-    const address = server.address();
-    const report = await checkProviderUrl(`http://127.0.0.1:${address.port}/mcp`);
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const report = await checkProviderUrl("https://provider.invalid/mcp", { fetch });
 
     assert.equal(report.status, "PASS");
     assert.deepEqual(methods, ["initialize", "notifications/initialized", "tools/list"]);

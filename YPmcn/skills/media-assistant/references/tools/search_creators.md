@@ -2,24 +2,20 @@
 
 ## 何时调用
 
-仅在 requirement ready 且有当前会话 requirement ID 时调用。
+已有 provider 接受的当前需求标识时调用。
 
 ## 输入
 
-必填 `requirement_id`，值来自 validate_requirement.data.id。
+必填 `id`。
 
 ## 输出成功证据
 
-- success === true
-- data.id
-- data.candidate_pool_written
-
-data.id 记录为 candidate_pool_id。
+- retain actual returned payload as downstream evidence
 
 ## 调用后必须停在哪里
 
-进入 `candidate_pool_ready`，展示候选数量与供给缺口，再调用 `rank_mcns`。
+展示实际候选摘要；只有返回证据明确下游 ID 时才继续。
 
 ## 错误与停止条件
 
-禁止 `demand_id`、`demand_version`。ID 不匹配、候选池未写入或结果未知时停止并对账。
+不得把旧 `requirement_id` 或推测的 candidate pool ID 代入 `id`。

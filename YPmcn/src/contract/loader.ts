@@ -118,92 +118,30 @@ function validateOutputEnvelopes(value: unknown): Record<string, unknown> {
   const envelopes = requireRecord(value, "mvp-v2.outputEnvelopes");
   requireExactStrings(
     Object.keys(envelopes),
-    ["standard", "top-level-field-selection"],
+    ["observed-runtime"],
     "mvp-v2.outputEnvelopes keys",
   );
-
-  const standard = requireRecord(envelopes.standard, "mvp-v2.outputEnvelopes.standard");
-  requireExactStrings(
-    standard.required,
-    ["success", "data", "error"],
-    "mvp-v2.outputEnvelopes.standard.required",
+  const observed = requireRecord(
+    envelopes["observed-runtime"],
+    "mvp-v2.outputEnvelopes.observed-runtime",
   );
-  if (standard.type !== "object" || standard.additionalProperties !== false) {
-    throw new Error("mvp-v2.outputEnvelopes.standard must be a closed object");
-  }
-  const standardProperties = requireRecord(
-    standard.properties,
-    "mvp-v2.outputEnvelopes.standard.properties",
-  );
-  const errorProperty = requireRecord(
-    standardProperties.error,
-    "mvp-v2.outputEnvelopes.standard.properties.error",
-  );
-  const errorAlternatives = requireArray(
-    errorProperty.oneOf,
-    "mvp-v2.outputEnvelopes.standard.properties.error.oneOf",
-  );
-  if (errorAlternatives.length !== 2) {
-    throw new Error("mvp-v2.outputEnvelopes.standard error must be object-or-null");
-  }
-  const errorObject = errorAlternatives
-    .map((entry, index) => requireRecord(
-      entry,
-      `mvp-v2.outputEnvelopes.standard.properties.error.oneOf[${index}]`,
-    ))
-    .find((entry) => entry.type === "object");
-  if (!errorObject || errorObject.additionalProperties !== false) {
-    throw new Error("mvp-v2.outputEnvelopes.standard error object must be closed");
-  }
-  requireExactStrings(
-    errorObject.required,
-    ["code", "message", "retryable"],
-    "mvp-v2.outputEnvelopes.standard error required",
-  );
-
-  const alternatives = requireArray(
-    standard.oneOf,
-    "mvp-v2.outputEnvelopes.standard.oneOf",
-  );
-  if (alternatives.length !== 2) {
-    throw new Error("mvp-v2.outputEnvelopes.standard must encode success/failure exclusivity");
-  }
-  const signatures = alternatives.map((entry, index) => {
-    const branch = requireRecord(entry, `mvp-v2.outputEnvelopes.standard.oneOf[${index}]`);
-    const properties = requireRecord(
-      branch.properties,
-      `mvp-v2.outputEnvelopes.standard.oneOf[${index}].properties`,
-    );
-    return [
-      requireRecord(properties.success, "standard branch success").const,
-      requireRecord(properties.data, "standard branch data").type,
-      requireRecord(properties.error, "standard branch error").type,
-    ];
-  });
   if (
-    JSON.stringify(signatures) !==
-      JSON.stringify([[true, "object", "null"], [false, "null", "object"]])
+    observed.contractStatus !== "not-advertised" ||
+    typeof observed.observationBasis !== "string" ||
+    observed.type !== "object" ||
+    observed.additionalProperties !== true
   ) {
-    throw new Error("mvp-v2.outputEnvelopes.standard success/data/error branches are invalid");
+    throw new Error("mvp-v2 observed runtime envelope must remain permissive and non-advertised");
   }
-
-  const selection = requireRecord(
-    envelopes["top-level-field-selection"],
-    "mvp-v2.outputEnvelopes.top-level-field-selection",
+  const properties = requireRecord(
+    observed.properties,
+    "mvp-v2.outputEnvelopes.observed-runtime.properties",
   );
   requireExactStrings(
-    selection.required,
-    [
-      "success",
-      "fields",
-      "items",
-      "selected_count",
-    ],
-    "mvp-v2.outputEnvelopes.top-level-field-selection.required",
+    Object.keys(properties),
+    ["success", "trace_id", "data", "error", "workflow_state", "allowed_actions"],
+    "mvp-v2.outputEnvelopes.observed-runtime.properties keys",
   );
-  if (selection.type !== "object" || selection.additionalProperties !== false) {
-    throw new Error("mvp-v2.outputEnvelopes.top-level-field-selection must be closed");
-  }
   return envelopes;
 }
 
@@ -379,6 +317,8 @@ function validateOutputContractMap(
   for (const [name, rawContract] of Object.entries(contracts)) {
     const contract = requireRecord(rawContract, `${label}.${name}`);
     const expectedKeys = new Set([
+      "advertisedOutputSchema",
+      "evidenceBasis",
       "successEnvelope",
       "failureEnvelope",
       "successSchema",
@@ -421,25 +361,19 @@ function validateOutputContractMap(
       if (successSchema.type !== "object") {
         throw new Error(`${label}.${name}.successSchema must describe an object`);
       }
-      if (!isStringArray(successSchema.required) || successSchema.required.length === 0) {
-        throw new Error(`${label}.${name}.successSchema.required must be nonempty`);
-      }
-      requireUnique(successSchema.required, `${label}.${name}.successSchema.required`);
-      const properties = requireRecord(
-        successSchema.properties,
-        `${label}.${name}.successSchema.properties`,
-      );
-      for (const required of successSchema.required) {
-        if (!hasOwn(properties, required)) {
-          throw new Error(`${label}.${name}.successSchema requires undeclared ${required}`);
-        }
-      }
-      if (successSchema.additionalProperties !== false) {
-        throw new Error(`${label}.${name}.successSchema must reject undeclared fields`);
+      if (successSchema.additionalProperties !== true) {
+        throw new Error(`${label}.${name}.successSchema must remain permissive`);
       }
     }
-    if (!isStringArray(contract.errorCodes) || contract.errorCodes.length === 0) {
-      throw new Error(`${label}.${name}.errorCodes must be a nonempty string array`);
+    if (
+      contract.advertisedOutputSchema !== false ||
+      typeof contract.evidenceBasis !== "string" ||
+      contract.evidenceBasis.length === 0
+    ) {
+      throw new Error(`${label}.${name} must mark outputs as non-advertised observations`);
+    }
+    if (!isStringArray(contract.errorCodes)) {
+      throw new Error(`${label}.${name}.errorCodes must be a string array`);
     }
     requireUnique(contract.errorCodes, `${label}.${name}.errorCodes`);
   }
@@ -535,7 +469,7 @@ function validateMvpProfile(value: unknown): MvpContractProfile {
   validateExternalSchemaReferences(profile.outputContracts, "mvp-v2.outputContracts");
   requireExactStrings(
     tools.select_inquiry_form_fields?.required,
-    ["mcn_recommendation_id"],
+    [],
     "mvp-v2.tools.select_inquiry_form_fields.required",
   );
   return profile as unknown as MvpContractProfile;
@@ -1042,193 +976,37 @@ export function loadRequirementsContract(): RequirementsContract {
   return requirementsCache;
 }
 
-function assertExactRecoveryOperations(operations: Array<Record<string, unknown>>): void {
-  const expected = [
-    {
-      name: "refresh",
-      action: "refresh_recovery",
-      tool: "sync_mcn_inquiry_status",
-      order: 1,
-      authority: "server-state-version-and-allowed-actions",
-      nextOperations: ["request", "finalize"],
-    },
-    {
-      name: "request",
-      action: "request_recovery",
-      tool: "ingest_mcn_submissions",
-      order: 2,
-      authority: "server-compare-and-swap-on-state-version",
-      nextOperations: ["finalize"],
-    },
-    {
-      name: "finalize",
-      action: "finalize_recovery",
-      tool: "sync_mcn_inquiry_status",
-      order: 3,
-      authority: "server-state-version-and-recovery-operation-id",
-      nextOperations: [],
-    },
-  ];
-  if (operations.length !== expected.length) {
-    throw new Error("workflow recovery operations must be refresh, request, finalize");
-  }
-  operations.forEach((operation, index) => {
-    const expectedOperation = expected[index];
-    if (
-      operation.name !== expectedOperation.name ||
-      operation.action !== expectedOperation.action ||
-      operation.tool !== expectedOperation.tool ||
-      operation.order !== expectedOperation.order ||
-      operation.authority !== expectedOperation.authority ||
-      operation.sessionContextRequired !== false ||
-      JSON.stringify(operation.nextOperations) !== JSON.stringify(expectedOperation.nextOperations)
-    ) {
-      throw new Error(`workflow recovery operation ${expectedOperation.name} is invalid`);
-    }
-  });
-}
-
 export function loadWorkflowContract(): WorkflowContract {
   if (workflowCache) return workflowCache;
   const value = requireRecord(readSpec("workflow.json"), "workflow contract");
-  if (value.schemaVersion !== 1 || value.profile !== "mvp-v2") {
+  if (
+    value.schemaVersion !== 1 ||
+    value.profile !== "mvp-v2" ||
+    value.projectionStatus !== "local-session-projection"
+  ) {
     throw new Error("workflow contract identity is invalid");
   }
   if (!isStringArray(value.phases)) throw new Error("workflow phases must be a string array");
   const phases = value.phases;
   requireUnique(phases, "workflow phases");
-  if (!isStringArray(value.lifecycleStatuses) || !isStringArray(value.responseStatuses)) {
-    throw new Error("workflow status vocabularies must be string arrays");
-  }
   if (!isStringArray(value.allowedActions)) {
     throw new Error("workflow allowedActions must be a string array");
   }
   requireUnique(value.allowedActions, "workflow allowedActions");
   const stateAuthority = requireRecord(value.stateAuthority, "workflow stateAuthority");
   if (
-    stateAuthority.source !== "provider-persisted-workflow-state" ||
-    stateAuthority.stateVersionRequired !== true ||
-    stateAuthority.allowedActionsRequired !== true ||
-    stateAuthority.allowedActionsAreClosedWorld !== true ||
-    stateAuthority.hookSessionContextAuthoritative !== false ||
-    stateAuthority.hookSessionContextMayGrantActions !== false ||
-    stateAuthority.missingOrUnknownCombinationBehavior !== "fail-closed" ||
-    stateAuthority.missingOrUnknownCombinationError !== "STATE_COMBINATION_INVALID"
+    stateAuthority.source !== "hook-session-projection" ||
+    stateAuthority.providerFacts !== false ||
+    stateAuthority.providerOutputSchemaAdvertised !== false ||
+    stateAuthority.phaseAdvance !== "explicit-actual-returned-evidence-only" ||
+    stateAuthority.missingEvidenceBehavior !== "no-phase-advance" ||
+    stateAuthority.unknownWriteResult !== "WRITE_RESULT_UNKNOWN" ||
+    stateAuthority.mayGrantProviderAuthority !== false ||
+    stateAuthority.mayDenyForSafety !== true
   ) {
-    throw new Error("workflow state authority must be server-owned and fail closed");
+    throw new Error("workflow state must be a fail-closed local projection");
   }
-  const stateSchema = loadContractSchema("workflow-state.schema.json");
-  const stateProperties = requireRecord(stateSchema.properties, "workflow state schema properties");
-  const phaseSchema = requireRecord(stateProperties.phase, "workflow state schema phase");
-  const actionSchema = requireRecord(
-    requireRecord(stateProperties.allowed_actions, "workflow state schema allowed_actions").items,
-    "workflow state schema allowed_actions.items",
-  );
-  if (
-    !Array.isArray(phaseSchema.enum) ||
-    JSON.stringify(phaseSchema.enum) !== JSON.stringify(value.phases) ||
-    !Array.isArray(actionSchema.enum) ||
-    JSON.stringify(actionSchema.enum) !== JSON.stringify(value.allowedActions)
-  ) {
-    throw new Error("workflow state schema vocabularies drifted from workflow.json");
-  }
-
-  const operations = requireArray(value.recoveryOperations, "workflow recoveryOperations").map(
-    (rawOperation, index) => requireRecord(rawOperation, `workflow recoveryOperations[${index}]`),
-  );
-  assertExactRecoveryOperations(operations);
-
-  const combinations = requireArray(value.stateCombinations, "workflow stateCombinations");
-  const combinationIds: string[] = [];
-  const stateTuples = new Set<string>();
-  const coveredPhases = new Set<string>();
-  const lifecycleStatuses = new Set(value.lifecycleStatuses);
-  const responseStatuses = new Set(value.responseStatuses);
-  const allowedActions = new Set(value.allowedActions);
-  combinations.forEach((rawCombination, index) => {
-    const combination = requireRecord(rawCombination, `workflow stateCombinations[${index}]`);
-    if (typeof combination.id !== "string" || combination.id.length === 0) {
-      throw new Error(`workflow stateCombinations[${index}].id is invalid`);
-    }
-    combinationIds.push(combination.id);
-    if (typeof combination.phase !== "string" || !phases.includes(combination.phase)) {
-      throw new Error(`workflow stateCombinations[${index}].phase is not declared`);
-    }
-    coveredPhases.add(combination.phase);
-    for (const [key, vocabulary] of [
-      ["lifecycleStatuses", lifecycleStatuses],
-      ["responseStatuses", responseStatuses],
-    ] as const) {
-      const statuses = requireArray(combination[key], `workflow stateCombinations[${index}].${key}`);
-      if (statuses.length === 0 || statuses.some((status) => status !== null && !vocabulary.has(status as string))) {
-        throw new Error(`workflow stateCombinations[${index}].${key} contains an unknown status`);
-      }
-    }
-    if (!isStringArray(combination.allowedActions)) {
-      throw new Error(`workflow stateCombinations[${index}].allowedActions must be a string array`);
-    }
-    requireUnique(combination.allowedActions, `workflow stateCombinations[${index}].allowedActions`);
-    if (combination.allowedActions.some((action) => !allowedActions.has(action))) {
-      throw new Error(`workflow stateCombinations[${index}].allowedActions contains an unknown action`);
-    }
-    if (typeof combination.terminal !== "boolean") {
-      throw new Error(`workflow stateCombinations[${index}].terminal must be boolean`);
-    }
-    if (combination.terminal && combination.allowedActions.length > 0) {
-      throw new Error(`workflow stateCombinations[${index}] cannot be terminal with actions`);
-    }
-    for (const lifecycleStatus of combination.lifecycleStatuses as unknown[]) {
-      for (const responseStatus of combination.responseStatuses as unknown[]) {
-        const tuple = JSON.stringify([combination.phase, lifecycleStatus, responseStatus]);
-        if (stateTuples.has(tuple)) {
-          throw new Error(`workflow stateCombinations[${index}] overlaps another combination`);
-        }
-        stateTuples.add(tuple);
-      }
-    }
-  });
-  requireUnique(combinationIds, "workflow state combination ids");
-  for (const phase of phases) {
-    if (!coveredPhases.has(phase)) throw new Error(`workflow phase ${phase} has no state combination`);
-  }
-  const recoveredCombination = combinations
-    .map((entry, index) => requireRecord(entry, `workflow stateCombinations[${index}]`))
-    .find((combination) => combination.id === "recovered-for-ranking");
-  if (
-    !recoveredCombination ||
-    recoveredCombination.terminal !== false ||
-    JSON.stringify(recoveredCombination.allowedActions) !==
-      JSON.stringify(["refresh_recovery", "rank_creators"])
-  ) {
-    throw new Error("workflow recovered state must allow refresh no-op and ranking");
-  }
-
   const profile = loadContractProfile("mvp-v2");
-  const workflowStateOutput = requireRecord(
-    profile.outputContracts.get_workflow_state?.successSchema,
-    "mvp-v2.outputContracts.get_workflow_state.successSchema",
-  );
-  const workflowStateOutputProperties = requireRecord(
-    workflowStateOutput.properties,
-    "mvp-v2.outputContracts.get_workflow_state.successSchema.properties",
-  );
-  const outputPhase = requireRecord(
-    workflowStateOutputProperties.phase,
-    "get_workflow_state output phase",
-  );
-  const outputActions = requireRecord(
-    requireRecord(
-      workflowStateOutputProperties.allowed_actions,
-      "get_workflow_state output allowed_actions",
-    ).items,
-    "get_workflow_state output allowed_actions.items",
-  );
-  if (
-    JSON.stringify(outputPhase.enum) !== JSON.stringify(phases) ||
-    JSON.stringify(outputActions.enum) !== JSON.stringify(value.allowedActions)
-  ) {
-    throw new Error("get_workflow_state output vocabularies drifted from workflow.json");
-  }
   const transitions = requireArray(value.transitions, "workflow transitions").map(
     (rawTransition, index) => requireRecord(rawTransition, `workflow transitions[${index}]`),
   );
@@ -1255,11 +1033,8 @@ export function loadWorkflowContract(): WorkflowContract {
     if (!isStringArray(transition.guards) || transition.guards.length === 0) {
       throw new Error(`workflow transitions[${index}] must fail closed with explicit guards`);
     }
-    if (
-      !isStringArray(transition.evidence) ||
-      JSON.stringify(transition.evidence) !== JSON.stringify(tool.successEvidence)
-    ) {
-      throw new Error(`workflow transitions[${index}] evidence drifted from ${trigger.name}`);
+    if (!isStringArray(transition.evidence) || transition.evidence.length === 0) {
+      throw new Error(`workflow transitions[${index}] must require explicit actual evidence`);
     }
   });
   requireUnique(transitionIds, "workflow transition ids");
@@ -1468,16 +1243,8 @@ export function loadDatabaseContract(): DatabaseContract {
     throw new Error("database writerOwnership must cover every target tool exactly once");
   }
   ownership.forEach((entry, index) => {
-    const toolName = entry.tool as string;
-    const tool = profile.tools[toolName];
-    const writers = requireRecord(tool.writers, `mvp-v2.tools.${toolName}.writers`);
-    if (
-      !isStringArray(entry.always) ||
-      !isStringArray(entry.conditional) ||
-      JSON.stringify(entry.always) !== JSON.stringify(writers.always) ||
-      JSON.stringify(entry.conditional) !== JSON.stringify(writers.conditional)
-    ) {
-      throw new Error(`database writerOwnership[${index}] drifted from ${toolName}`);
+    if (!isStringArray(entry.always) || !isStringArray(entry.conditional)) {
+      throw new Error(`database writerOwnership[${index}] must contain string arrays`);
     }
   });
 

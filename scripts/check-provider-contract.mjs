@@ -62,12 +62,41 @@ function compareSchemaNode(tool, expected, actual, path, diffs) {
     return;
   }
   for (const key of COMPARED_SCHEMA_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(expected, key) && !sameValue(expected[key], actual[key])) {
+    const expectedHasKey = Object.prototype.hasOwnProperty.call(expected, key);
+    const actualHasKey = Object.prototype.hasOwnProperty.call(actual, key);
+    if (expectedHasKey !== actualHasKey || (expectedHasKey && !sameValue(expected[key], actual[key]))) {
       pushDiff(diffs, tool, `${path}.${key}`, "value_mismatch", expected[key], actual[key] ?? null);
     }
   }
 
-  if (Array.isArray(expected.required)) {
+  if (Array.isArray(expected.anyOf) || Array.isArray(actual.anyOf)) {
+    if (!Array.isArray(actual.anyOf)) {
+      pushDiff(diffs, tool, `${path}.anyOf`, "missing_schema", expected.anyOf, actual.anyOf ?? null);
+    } else if (!Array.isArray(expected.anyOf)) {
+      pushDiff(diffs, tool, `${path}.anyOf`, "unexpected_schema", null, actual.anyOf);
+    } else if (actual.anyOf.length !== expected.anyOf.length) {
+      pushDiff(
+        diffs,
+        tool,
+        `${path}.anyOf`,
+        "length_mismatch",
+        expected.anyOf.length,
+        actual.anyOf.length,
+      );
+    } else {
+      for (let index = 0; index < expected.anyOf.length; index += 1) {
+        compareSchemaNode(
+          tool,
+          expected.anyOf[index],
+          actual.anyOf[index],
+          `${path}.anyOf[${index}]`,
+          diffs,
+        );
+      }
+    }
+  }
+
+  if (Array.isArray(expected.required) || Array.isArray(actual.required)) {
     const actualRequired = Array.isArray(actual.required) ? actual.required : [];
     for (const key of expected.required) {
       if (!actualRequired.includes(key)) {
@@ -81,7 +110,7 @@ function compareSchemaNode(tool, expected, actual, path, diffs) {
     }
   }
 
-  if (isRecord(expected.properties)) {
+  if (isRecord(expected.properties) || isRecord(actual.properties)) {
     const actualProperties = isRecord(actual.properties) ? actual.properties : {};
     for (const [key, expectedChild] of Object.entries(expected.properties)) {
       if (!Object.prototype.hasOwnProperty.call(actualProperties, key)) {
@@ -97,10 +126,24 @@ function compareSchemaNode(tool, expected, actual, path, diffs) {
     }
   }
 
-  if (expected.items !== undefined) {
-    compareSchemaNode(tool, expected.items, actual.items, `${path}.items`, diffs);
+  if (expected.items !== undefined || actual.items !== undefined) {
+    if (expected.items === undefined) {
+      pushDiff(diffs, tool, `${path}.items`, "unexpected_schema", null, actual.items);
+    } else {
+      compareSchemaNode(tool, expected.items, actual.items, `${path}.items`, diffs);
+    }
   }
-  if (expected.additionalProperties !== undefined) {
+  if (expected.additionalProperties !== undefined || actual.additionalProperties !== undefined) {
+    if (expected.additionalProperties === undefined) {
+      pushDiff(
+        diffs,
+        tool,
+        `${path}.additionalProperties`,
+        "unexpected_schema",
+        null,
+        actual.additionalProperties,
+      );
+    } else
     if (isRecord(expected.additionalProperties)) {
       compareSchemaNode(
         tool,
@@ -127,7 +170,6 @@ function targetInputSchema(contract) {
     type: "object",
     required: contract.required,
     properties: contract.properties,
-    additionalProperties: false,
   };
 }
 
@@ -138,7 +180,7 @@ function detectedProfile(toolNames, missingTools) {
     missingTools.every((name) => expectedGap.has(name));
   const containsLegacySurface = legacyNames.every((name) => toolNames.has(name));
   if (exactLegacyGap && containsLegacySurface) return "legacy-1.9.4";
-  if (missingTools.length === 0) return "mvp-v2";
+  if (missingTools.length === 0) return "current-endpoint";
   return "unknown";
 }
 
@@ -147,12 +189,13 @@ export function compareProviderTools(tools) {
   const toolMap = new Map();
   for (const tool of tools) {
     if (!isRecord(tool) || typeof tool.name !== "string" || toolMap.has(tool.name)) continue;
+    if (tool.name.startsWith("pgy")) continue;
     toolMap.set(tool.name, tool);
   }
   const missingTools = targetProfile.requiredTools.filter((name) => !toolMap.has(name));
   const schemaDiffs = [];
 
-  for (const name of targetProfile.requiredTools) {
+  for (const name of [...targetProfile.requiredTools, ...targetProfile.optionalTools]) {
     const providerTool = toolMap.get(name);
     if (!providerTool) continue;
     const providerSchema = providerTool.inputSchema ?? providerTool.input_schema;

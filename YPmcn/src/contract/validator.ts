@@ -7,14 +7,6 @@ import type {
   ValidationIssue,
 } from "./types.js";
 
-const FIELD_DEFINITION_KEYS = ["key", "name", "type", "required"] as const;
-const FIELD_SELECTION_REQUIRED_KEYS = ["success", "fields", "items", "selected_count"] as const;
-const FIELD_SELECTION_DISPLAY_KEYS = ["url", "message", "description", "output_format"] as const;
-const FIELD_SELECTION_KEYS: ReadonlySet<string> = new Set([
-  ...FIELD_SELECTION_REQUIRED_KEYS,
-  ...FIELD_SELECTION_DISPLAY_KEYS,
-]);
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -126,6 +118,12 @@ function collectSchemaMismatches(
 
 function validateSchema(schema: ContractSchema, value: unknown, path: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  if (schema.anyOf) {
+    const matched = schema.anyOf.some((candidate) => validateSchema(candidate, value, path).length === 0);
+    if (!matched) {
+      return [issue("INVALID_INPUT", path, "Value does not match any allowed schema alternative.")];
+    }
+  }
   const types = expectedTypes(schema);
   if (types.length > 0 && !types.some((type) => matchesType(value, type))) {
     return [
@@ -258,6 +256,28 @@ function loadTargetProfile(): MvpContractProfile | undefined {
   }
 }
 
+function validateSemanticRequirements(
+  tool: string,
+  params: Record<string, unknown>,
+): ValidationIssue[] {
+  if (tool === "get_workflow_state") {
+    const traceMode = typeof params.trace_id === "string" && params.trace_id.trim().length > 0;
+    const demandMode = typeof params.demand_id === "string" && params.demand_id.trim().length > 0 &&
+      Number.isInteger(params.demand_version);
+    if (traceMode !== demandMode) return [];
+    return [issue(
+      "INVALID_INPUT",
+      "$",
+      "Provide exactly one lookup mode: trace_id, or demand_id with demand_version.",
+    )];
+  }
+  if (tool === "get_recommendation_run_detail") {
+    if (typeof params.run_id === "string" && /^[1-9]\d*$/.test(params.run_id)) return [];
+    return [issue("INVALID_INPUT", "$.run_id", "run_id must represent a positive integer.")];
+  }
+  return [];
+}
+
 export function validateToolParams(
   tool: string,
   params: unknown,
@@ -323,144 +343,21 @@ export function validateToolParams(
     ...validateInputModes(contract, params),
     ...validateAlternatives(contract, params),
     ...validateSchema(rootSchema, params, "$"),
+    ...validateSemanticRequirements(tool, params),
   ];
 }
 
-function fieldIssue(path: string, message: string): ValidationIssue {
-  return issue("FIELD_SELECTION_INVALID", path, message);
-}
-
-function validateFieldDefinition(
-  definition: unknown,
-  path: string,
-  expectedKey?: string,
-): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  if (!isRecord(definition)) {
-    return [fieldIssue(path, "Field definition must be an object.")];
+export function parseFieldSelectionDescription(description: unknown): string[] | undefined {
+  if (typeof description !== "string" || description.trim().length === 0) return undefined;
+  const fieldNames: string[] = [];
+  for (const rawLine of description.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = /^([^：:]+)[：:]\s*(.+)$/.exec(line);
+    if (!match) return undefined;
+    const fieldName = match[1].trim();
+    if (!fieldName || fieldNames.includes(fieldName)) return undefined;
+    fieldNames.push(fieldName);
   }
-  const keys = Object.keys(definition);
-  for (const key of FIELD_DEFINITION_KEYS) {
-    if (!hasOwn(definition, key)) {
-      issues.push(fieldIssue(propertyPath(path, key), "Field definition property is missing."));
-    }
-  }
-  for (const key of keys) {
-    if (!(FIELD_DEFINITION_KEYS as readonly string[]).includes(key)) {
-      issues.push(fieldIssue(propertyPath(path, key), "Field definition property is not allowed."));
-    }
-  }
-  for (const key of ["key", "name", "type"] as const) {
-    if (typeof definition[key] !== "string" || definition[key].length === 0) {
-      issues.push(fieldIssue(propertyPath(path, key), "Field definition value must be a nonempty string."));
-    }
-  }
-  if (typeof definition.required !== "boolean") {
-    issues.push(fieldIssue(`${path}.required`, "Field required must be a boolean."));
-  }
-  if (expectedKey !== undefined && definition.key !== expectedKey) {
-    issues.push(fieldIssue(`${path}.key`, "Field-map key must match definition.key."));
-  }
-  return issues;
-}
-
-function validateFieldMap(value: unknown): ValidationIssue[] {
-  if (!isRecord(value)) return [fieldIssue("$.fields", "Fields must be an object map.")];
-  const issues: ValidationIssue[] = [];
-  for (const [key, definition] of Object.entries(value)) {
-    issues.push(...validateFieldDefinition(definition, propertyPath("$.fields", key), key));
-  }
-  return issues;
-}
-
-function validateOrderedItems(value: unknown): ValidationIssue[] {
-  if (!Array.isArray(value)) return [fieldIssue("$.items", "Items must be an array.")];
-  const issues: ValidationIssue[] = [];
-  const seenKeys = new Set<string>();
-  value.forEach((definition, index) => {
-    const itemPath = `$.items[${index}]`;
-    issues.push(...validateFieldDefinition(definition, itemPath));
-    if (isRecord(definition) && typeof definition.key === "string" && definition.key.length > 0) {
-      if (seenKeys.has(definition.key)) {
-        issues.push(fieldIssue(`${itemPath}.key`, "Item keys must be unique."));
-      }
-      seenKeys.add(definition.key);
-    }
-  });
-  return issues;
-}
-
-export function validateFieldSelection(result: unknown): ValidationIssue[] {
-  if (!isRecord(result)) {
-    return [fieldIssue("$", "Field-selection result must be an object.")];
-  }
-
-  const issues: ValidationIssue[] = [];
-  for (const key of FIELD_SELECTION_REQUIRED_KEYS) {
-    if (!hasOwn(result, key)) {
-      issues.push(fieldIssue(propertyPath("$", key), "Required top-level property is missing."));
-    }
-  }
-  for (const key of Object.keys(result)) {
-    if (!FIELD_SELECTION_KEYS.has(key)) {
-      issues.push(fieldIssue(propertyPath("$", key), "Top-level property is not allowed."));
-    }
-  }
-  if (result.success !== true) {
-    issues.push(fieldIssue("$.success", "Field selection must report success=true."));
-  }
-  for (const key of FIELD_SELECTION_DISPLAY_KEYS) {
-    if (hasOwn(result, key) && typeof result[key] !== "string") {
-      issues.push(fieldIssue(propertyPath("$", key), "Display metadata must be a string."));
-    }
-  }
-
-  issues.push(...validateFieldMap(result.fields));
-  issues.push(...validateOrderedItems(result.items));
-
-  if (!isRecord(result.fields) || Object.keys(result.fields).length === 0) {
-    issues.push(fieldIssue("$.fields", "Field map must be nonempty."));
-  }
-  if (!Array.isArray(result.items) || result.items.length === 0) {
-    issues.push(fieldIssue("$.items", "Items must be nonempty."));
-  }
-  if (!Number.isInteger(result.selected_count) || (result.selected_count as number) < 1) {
-    issues.push(fieldIssue("$.selected_count", "Selected count must be a positive integer."));
-  }
-  if (Array.isArray(result.items) && result.selected_count !== result.items.length) {
-    issues.push(fieldIssue("$.selected_count", "Selected count must equal items.length."));
-  }
-
-  if (isRecord(result.fields) && Array.isArray(result.items)) {
-    const fieldMap = result.fields;
-    const items = result.items;
-    const itemKeys = new Set(
-      items
-        .filter(isRecord)
-        .map((item) => item.key)
-        .filter((key): key is string => typeof key === "string"),
-    );
-    for (const key of Object.keys(fieldMap)) {
-      if (!itemKeys.has(key)) {
-        issues.push(fieldIssue(propertyPath("$.fields", key), "Field-map key has no matching item."));
-      }
-    }
-    items.forEach((item, index) => {
-      if (!isRecord(item) || typeof item.key !== "string") return;
-      if (!hasOwn(fieldMap, item.key)) {
-        issues.push(fieldIssue(`$.items[${index}].key`, "Item key is missing from the field map."));
-        return;
-      }
-      if (!deepEqual(fieldMap[item.key], item)) {
-        issues.push(
-          fieldIssue(`$.items[${index}]`, "Field map and item definitions must be identical."),
-        );
-      }
-    });
-    if (Object.keys(fieldMap).length !== items.length) {
-      issues.push(fieldIssue("$.fields", "Field map and items must contain the same unique keys."));
-    }
-  }
-
-  return issues;
+  return fieldNames.length > 0 ? fieldNames : undefined;
 }

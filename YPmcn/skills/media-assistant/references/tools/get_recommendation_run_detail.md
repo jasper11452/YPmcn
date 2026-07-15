@@ -2,22 +2,20 @@
 
 ## 何时调用
 
-恢复或核对推荐运行、提报和反馈事实时只读调用。
+只读核对推荐运行、提报或反馈事实时调用。
 
 ## 输入
 
-必填 `run_id`。
+必填 `run_id`；可选 `include_submissions`、`include_creator_detail`、`include_feedback`。字符串值必须表示正整数。
 
 ## 输出成功证据
 
-- success === true
-- data.run_id
-- data.recommendation_snapshot
+- retain actual returned payload as downstream evidence
 
 ## 调用后必须停在哪里
 
-查询本身不推进 phase；根据权威快照决定下一安全动作。
+查询本身不推进流程，只为下一安全动作提供证据。
 
 ## 错误与停止条件
 
-禁止 `demand_id`、`demand_version`。查询不到时报告未知，不补造历史状态。
+无效或非正整数 run ID 时停止；查询不到不得补造历史状态。

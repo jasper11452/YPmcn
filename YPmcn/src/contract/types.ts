@@ -55,12 +55,15 @@ export interface ContractSchema {
   properties?: Record<string, ContractSchema>;
   items?: ContractSchema;
   additionalProperties?: boolean | ContractSchema;
+  anyOf?: ContractSchema[];
   oneOf?: ContractSchema[];
   $ref?: string;
   [key: string]: unknown;
 }
 
 export interface ToolOutputContract {
+  advertisedOutputSchema: false;
+  evidenceBasis: string;
   successEnvelope: string;
   failureEnvelope: string;
   successSchema: ContractSchema;
@@ -164,11 +167,10 @@ export type ContractProfile = MvpContractProfile | LegacyContractProfile;
 export interface WorkflowContract {
   schemaVersion: number;
   profile: "mvp-v2";
+  projectionStatus: "local-session-projection";
   phases: string[];
   allowedActions: string[];
   stateAuthority: Record<string, unknown>;
-  recoveryOperations: Array<Record<string, unknown>>;
-  stateCombinations: Array<Record<string, unknown>>;
   transitions: Array<Record<string, unknown>>;
   [key: string]: unknown;
 }

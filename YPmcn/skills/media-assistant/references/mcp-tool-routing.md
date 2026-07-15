@@ -1,46 +1,30 @@
 # MCP 工具路由
 
-## 固定顺序
+生产调用只使用当前 `tools/list` 中的非 `pgy` 工具。
 
 ```text
-validate_requirement
-→ search_creators
-→ rank_mcns
-→ select_inquiry_form_fields
-→ create_with_distributions
-→ sync_mcn_inquiry_status
-→ waiting_return
-→ sync_mcn_inquiry_status → ingest_mcn_submissions → sync_mcn_inquiry_status
-→ manual_source_creators（可选补量）
-→ rank_creators
-→ create_submission_batch
-→ record_client_feedback
+validate_requirement(payload)
+→ search_creators(id)
+→ rank_mcns(id, platform)
+→ 人工确认
+→ select_inquiry_form_fields(url?, timeout_seconds?)
+→ create_with_distributions(...)
+→ sync_mcn_inquiry_status(requirement_id, project_id, mcn_id)
+→ ingest_mcn_submissions(inquiry_id, items)
+→ sync_mcn_inquiry_status(...)
+→ rank_creators(requirement_id, limit)
+→ create_submission_batch(run_id)
+→ record_client_feedback(run_id, feedback_items)
 ```
 
-`get_recommendation_run_detail`、`get_creator_detail` 是只读详情查询；`audit_manual_adjustment` 只记录已明确的人工调整。可选 `get_workflow_state` 只能读取权威状态，不能替代链路证据。
+`manual_source_creators` 用于真实人工来源补量；`get_recommendation_run_detail`、`get_creator_detail`、`get_workflow_state` 是只读查询；`audit_manual_adjustment` 记录明确的人工调整。`business_health` 仅检查 provider 健康，不证明任何业务步骤成功。
 
-## 语义 ID 传递
+## ID 路由
 
-| 成功证据 | 下游参数 |
-|---|---|
-| validate_requirement.data.id → requirement_id | `search_creators.requirement_id`、sync/ingest 的 `requirement_id` |
-| search_creators.data.id → candidate_pool_id | `rank_mcns.candidate_pool_id` |
-| rank_mcns.data.id → mcn_recommendation_id | 字段选择、发送、sync、ingest、精排的 `mcn_recommendation_id` |
-| rank_creators.data.run_id → run_id | 提报、反馈、详情、人工调整的 `run_id` |
+当前 provider 未广告 outputSchema。只有拿到实际返回并确认字段语义后，才能把 ID 传给下游。`rank_creators` 的工具描述明确承诺返回 `run_id`；其他 ID 不沿用旧 `candidate_pool_id` / `mcn_recommendation_id` 映射。证据不足时返回 `integration_required`。
 
-不凭位置猜 ID，不使用旧版本字段替代语义 ID。任何来源不明或跨 provider 的 ID 都报 `STATE_CONFLICT`/`integration_required` 并停止。
+`get_recommendation_run_detail.run_id` 虽为 JSON string，值必须表示正整数。`get_workflow_state` 必须提供 `demand_id` + `demand_version`，或提供 `trace_id`。
 
-## 人工决策点
+## 写入门禁
 
-1. `rank_mcns` 后确认供需判断与目标 MCN。
-2. 外发消息定稿后确认消息。
-3. `select_inquiry_form_fields` 返回合法字段选择；这是发送前最后确认。
-4. 手动提前回收必须在当前会话明确表达。
-5. 有风险达人时先展示证据，再决定是否调整或提报。
-
-## 生产边界
-
-- 每次运行先比对 `tools/list` 与 mvp-v2。
-- `create_with_distributions` 是唯一 provider 写入口；不得 shell/curl 直连。
-- `manual_source_creators` 只写人工来源及可验证 offer，不伪造账号。
-- 写调用超时或断线后，使用 sync/详情查询对账，不重复写。
+外发前必须完成人工确认和字段确认。任何写调用结果未知时先使用只读证据对账；没有可证明的对账键就停止，不盲目重试。

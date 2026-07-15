@@ -1,17 +1,15 @@
-# 询价表单字段映射
+# 询价字段 description 绑定
 
-`select_inquiry_form_fields(mcn_recommendation_id)` 是只读工具，也是发送前最后确认点。
+`select_inquiry_form_fields(url?, timeout_seconds?)` 是只读工具。当前 provider 只在描述中承诺 `数据库字段名：字段备注` 文本，不承诺旧 `fields`、`items` 或 `selected_count`。
 
-## 合法结果
+## 合法证据
 
-- 顶层 `success === true`；
-- `fields` 是按 key 索引的定义 map；
-- `items` 是发送列的唯一顺序；
-- `selected_count === items.length` 且大于 0；
-- map 与 items 对同一 key 的 `{key,name,type,required}` 完全一致。
+- 实际结果 `success === true` 且没有非空 error；
+- 实际 `description` 每个非空行都能按全角或半角冒号拆成字段名与备注；
+- 字段名非空、唯一并保留原顺序。
 
-## 发送映射
+## 发送绑定
 
-`create_with_distributions.columns` 必须逐项等于当前会话的 `items`。不能重新排序、删改 required、添加运行时选择之外的列，也不能用旧会话字段选择。
+用户确认 description 后，`create_with_distributions.columns` 必须与字段名数量和顺序一致；每个 column 对象必须在顶层 key 或 string value 中明确包含对应字段名。无法一一证明时返回 `FIELD_SELECTION_INVALID`。
 
-字段快照由首次 `sync_mcn_inquiry_status` 负责创建或复用；Hook 只保存短期选择证明。进程重启导致证明丢失时，发送前必须重新选择。
+Hook 只保存 description 与字段名，不声称 provider 返回结构化字段快照。会话证据丢失时重新调用选择工具，不复用旧会话结果。

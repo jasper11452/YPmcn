@@ -287,14 +287,19 @@ describe("Spec governance", () => {
     ];
 
     assert.equal(manifest.contractBaseline, "mvp-v3-vector-baseline");
+    assert.deepEqual(mcp.vectorCapabilityBoundary.internalConsumers, [
+      "search_creators",
+      "rank_creators",
+    ]);
+    assert.equal(
+      mcp.vectorCapabilityBoundary.search_creators.hardConstraintsAuthoritativeSource,
+      "mysql",
+    );
+    assert.equal(mcp.vectorCapabilityBoundary.rank_creators.provenanceRequired, true);
     for (const toolName of ["search_creators", "rank_creators"]) {
-      const schema = mcp.outputContracts[toolName].successSchema;
-      for (const field of ["retrieval_mode", "degraded_reason", "provenance"]) {
-        assert.ok(field in schema.properties, `${toolName}:${field}`);
-      }
-      assert.deepEqual(schema.properties.retrieval_mode.enum, ["sql-only", "vector-shadow"]);
-      assert.equal(schema.properties.provenance.properties.authoritative_source.const, "mysql");
-      assert.equal(schema.properties.provenance.properties.mysql_revalidated.const, true);
+      const output = mcp.outputContracts[toolName];
+      assert.equal(output.advertisedOutputSchema, false);
+      assert.equal(output.successSchema.additionalProperties, true);
     }
     assert.deepEqual(workflow.vectorDegradationPolicy, {
       mode: "explicit-sql-only",
@@ -374,7 +379,7 @@ describe("Spec governance", () => {
     assert.equal(requirements.dictionary.customerContentAllowed, false);
   });
 
-  it("requires one output contract per tool and only catalogued errors", () => {
+  it("represents the provider's unadvertised outputs without inventing fields", () => {
     const mcp = json("mcp.json");
     const errors = json("errors.json");
     const toolNames = [...mcp.requiredTools, ...mcp.optionalTools];
@@ -384,13 +389,20 @@ describe("Spec governance", () => {
     for (const name of toolNames) {
       const output = mcp.outputContracts[name];
       assert.equal(output.successEnvelope, mcp.tools[name].outputEnvelope, name);
-      assert.equal(output.failureEnvelope, "standard", name);
-      assert.equal(typeof output.successSchema, "object", name);
-      assert.ok(output.errorCodes.length > 0, name);
+      assert.equal(output.failureEnvelope, "observed-runtime", name);
+      assert.equal(output.advertisedOutputSchema, false, name);
+      assert.equal(output.successSchema.additionalProperties, true, name);
+      assert.equal(typeof output.evidenceBasis, "string", name);
+      assert.equal(Array.isArray(output.errorCodes), true, name);
       for (const code of output.errorCodes) {
         assert.equal(knownCodes.has(code), true, `${name}:${code}`);
       }
     }
+    assert.match(mcp.outputContracts.rank_creators.evidenceBasis, /run_id/);
+    assert.match(
+      mcp.outputContracts.select_inquiry_form_fields.evidenceBasis,
+      /数据库字段名：字段备注/,
+    );
   });
 
   it("keeps the approved finding registry one-to-one with authoritative Spec paths", () => {

@@ -2,24 +2,20 @@
 
 ## 何时调用
 
-候选池已写入，需要形成 MCN 建议与询价方案时调用。
+已有当前候选标识，需要形成 MCN 建议时调用。
 
 ## 输入
 
-必填 `candidate_pool_id`，值来自 search_creators.data.id。
+必填 `id`、`platform`；`minimum_mcn_count`、`target_multiplier`、`buffer_rate`、`medium_risk_confirmed`、`medium_risk_confirmation`、`limit`、`write_mcn_recommendation_items` 可选。
 
 ## 输出成功证据
 
-- success === true
-- data.id
-- data.inquiry_advice
-
-data.id 记录为 mcn_recommendation_id。
+- retain actual returned payload as downstream evidence
 
 ## 调用后必须停在哪里
 
-进入 `mcn_planning`。展示供需关系、目标 MCN 与外发建议，等待三项人工确认，再选择询价字段。
+展示 MCN 建议并等待人工确认。
 
 ## 错误与停止条件
 
-禁止 `demand_id`、`demand_version`。不得为凑数量放宽硬筛，不得跳过人工确认直接发送。
+不得把旧 `candidate_pool_id` 字段发给 provider，也不得为凑数量暗自放宽条件。
