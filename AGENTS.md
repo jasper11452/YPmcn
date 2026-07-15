@@ -1,78 +1,67 @@
 # AGENTS.md
 
-## 项目入口
+## 项目边界
 
-- Git 根目录是唯一长期项目；相邻 worktree 仅用于单任务隔离。
-- `YPmcn/` 是可发布插件组件，不是另一个项目根。
-- 人类先读 `docs/README.md`、`docs/PROJECT_MAP.md`、`docs/EVOLUTION.md`；它们只解释和导航，不替代 Spec。
-- 完整执行规范见 `docs/AGENT_SPEC_WORKFLOW.md`；开发流程见 `docs/DEVELOPER_SPEC_WORKFLOW.md`。
+- Git 根目录是唯一长期项目；`YPmcn/`、`vector-mcp/` 和 `reference-mcp/` 是仓库组件。
+- 正式契约以 `spec/manifest.json` 指向的 Spec 为准，核心包括 `spec/mcp.json`、`spec/database.json`、`spec/workflow.json` 与 `spec/errors.json`。
+- `reference-mcp/` 的模拟结果不是生产证据；生产 provider 使用独立只读检查。
+- 安全与数据完整性 > Spec > 测试 > 当前实现 > Agent 推断。
+- Python 使用 `uv`，禁止 pip。
 
-## 权威顺序
+## V2.3 极简开发
 
-```text
-安全与数据完整性
-> spec/manifest.json 指向的已批准 Spec
-> changes/ 中已批准的 Change Proposal
-> 测试与验证规则
-> 当前实现
-> Agent 推断
+执行前只确认：
+
+```yaml
+goal: "单一结果"
+allowed_paths: ["允许修改的路径"]
+forbidden_paths: ["禁止修改的路径"]
+acceptance: ["可验证完成条件"]
+verification: ["最小相关测试"]
 ```
 
-- MCP Tool 唯一权威：`spec/mcp.json`。
-- 阶段和恢复唯一权威：`spec/workflow.json`。
-- 数据库写归属：`spec/database.json`；Hook 或 Skill 不得虚构部署完成。
-- 错误和重试：`spec/errors.json`；写结果未知时先对账，不盲目重写。
-- Skill 与 Hook 边界：`spec/skills.json`、`spec/hooks.json`。
-- Algorithm 仍为 `external-unverified`；不得从当前代码反推正式规则。
+默认一个写者，不创建任务状态、事件日志或验证证据文件。
 
-Spec 缺失、冲突或未批准时输出 `BLOCKED`，不得自行设计公开契约。
+- Fast：Claude Code 直接修改、验证、提交。
+- Standard：Claude Code 可将一个小任务交给 Codex；Claude Code 最终验收和提交。
+- Critical：隔离 worktree、OpenCode 独立只读验证、人工批准外部副作用。
 
-## 变更门禁
+并行不是默认策略。只有 write set 确认不重叠且墙钟收益明确时才使用多个 worktree；即便如此，同一任务仍只有一个写者。
 
-任何生产实现前必须存在：Task ID、Change Proposal、Impact Analysis、关联 Spec/版本、允许与禁止路径、验收标准、验证命令和回滚方式。契约变化先改 Spec，再按 Database → MCP → Hook → Skill → Test → Package 的依赖顺序实施。
+## 修改规则
 
-Spec 或正式 Change Proposal 必须完整暂存；pre-commit hook 会自动同步并暂存三份人类文档。Agent 无需把 `npm run docs:sync` 当固定步骤，但完成前仍须人工复核叙事并运行只读 `npm run verify:docs`。部分暂存时 hook 必须 fail closed。
+- 只修改完成目标必需的文件，不顺手重构或弱化测试。
+- Bug 修复优先先复现，再最小修复并跑相邻测试。
+- 公开 Tool、字段、错误码、权限、迁移或不可逆副作用不明确时 `BLOCKED`，不得自行发明契约。
+- 普通文档、测试和内部实现修复不强制创建 Change Proposal 或 Impact Analysis。
+- 不直接编辑生成的 `dist/`、`packages/.staging/` 或 tgz。
+- 不记录客户 Brief、完整 payload、凭据或未脱敏内部状态。
 
-- 只修改任务拥有的文件，不顺手重构或弱化测试。
-- Bug 修复先添加稳定失败测试，再做最小修复。
-- 不直接在 `main` 实施；并行写任务使用独立分支和 worktree。
-- 合并或归档后确认 worktree clean、提交已保留，再移除临时目录。
-- 不编辑生成的 `dist/`、`packages/.staging/` 或 tgz 作为源码。
-- 不记录 Brief、完整 payload、凭据或未脱敏内部状态。
-- Python 始终使用 `uv`，禁止 pip。
+## 验证
+
+默认：
+
+```text
+相关测试
++ git diff --check
++ 修改范围检查
+```
+
+仅当风险或失败证据需要时运行一次 `npm run verify`。如需预览或修复自动生成的人类文档，运行 `npm run docs:sync`；提交前可用 `npm run verify:docs` 检查，仓库 `pre-commit` 也会同步相关文档。生产 provider 独立只读检查为 `npm run verify:provider`。
+
+测试未运行必须标记 `NOT RUN`；失败不得描述为通过。
+
+## Token 与重试
+
+- 写 Agent ≤ 1；Verifier ≤ 1。
+- 上下文扩展 ≤ 2 次；实现返工 ≤ 2 次；自动重试 ≤ 1 次。
+- 不使用 Workflow 处理普通开发、方案调研或代码审查。
+- 同类工具故障第二次出现时停止，改走最短可行路径或报告唯一阻塞项。
 
 ## 三工具职责
 
-- Claude Code：唯一 Orchestrator，产出目标、文件边界、依赖、验收、验证和回滚；从三档白名单选 Codex Profile，管理 Session/Worktree，最后串行集成。
-- Codex：主 Executor，在独立 worktree 内用 `workspace-write + approval_policy=never` 非交互实施、自测并提交 `diff + test results + known risks`。范围内任务已预批准，不重复向用户确认；越界或外部写必须 `BLOCKED`。
-- OpenCode：不同模型/上下文的只读 Verifier，固定原生 `--pure --agent plan`、`yuepu/*`、禁用外部 Skills，基于冻结 SHA 输出 `PASS / FAIL / BLOCKED + evidence`。Git 或 plan 目录出现写入直接 `FAIL`。
+- Claude Code：边界、调度、最终验收和提交。
+- Codex：小而明确的实现和自测，不负责最终提交。
+- OpenCode：Critical 或明确触发时独立只读验证；禁止写生产文件。
 
-不要让同一推理链自证正确；Verifier 默认不修改生产代码。
-
-项目控制器是 `scripts/agent-flow.mjs`，完整协议见 `workflows/README.md`。每个 Claude Session 先运行 `status/plan` 恢复共享运行态；最多派发五个无依赖、无路径冲突的 Codex Writer。V2.2 新任务固定使用：
-
-- Claude Code Orchestrator：项目 `fable` → `gpt-5.6-sol` / `medium`。
-- Codex Executor：`executor-sol-low` → `gpt-5.6-sol` / `low` / `fast`。
-- OpenCode Verifier：`yuepu/Deepseek-V4-Pro`；非 Critical 仅在进程/格式故障时可降级 `yuepu/gpt-5.6-sol` / `medium`。
-
-新任务按 Fast / Standard-Low / Standard-High / Critical 路由；前两档按触发器启用独立验证，后两档强制独立验证，Critical 还需人工批准且禁止自动降级 Verifier。
-
-高频状态、JSONL、session ID 和锁只写 Git common dir 的 `agent-flow/`，不提交到工作树。Codex 非交互执行期间不依赖面向用户的周期进度消息；Orchestrator 只在状态转换、阻塞或最终验收时汇总。
-
-## 项目安全边界
-
-- 下游只用 `requirement_id`、`candidate_pool_id`、`mcn_recommendation_id`、`run_id` 等明确语义 ID。
-- provider Tool/Schema 与 `mvp-v2` 不一致时返回 `integration_required`，不自动降级 legacy。
-- `reference-mcp/` 的 `simulated=true` 永远不是生产证据。
-- 生产 provider 检查只允许 initialize、initialized notification、tools/list，不调用业务写工具。
-
-## 验证入口
-
-- Spec 门禁：`npm run verify:spec`。
-- 人类文档同步：提交前自动；即时预览/修复：`npm run docs:sync`；只读门禁：`npm run verify:docs`。
-- 仓库离线验收：`npm run verify`。
-- Agent 控制面：`npm run verify:agent-flow`；状态入口：`npm run agent-flow -- status --json`。
-- 发布包：`npm run pack:yp`，产物只能进入 `packages/releases/`。
-- 生产 provider 独立只读门禁：`npm run verify:provider`。
-
-生产门禁失败不得通过降低 Schema 检查、恢复 Mock 成功或跳过测试消除。
+最终报告仅包含结果、改动、验证、风险和 commit。

@@ -16,7 +16,6 @@ project/
 ├── changes/       # 需求、提案、影响分析和决策
 ├── src/           # 根级共享边界，当前无独立运行时
 ├── tests/         # 仓库级契约、集成和发布测试
-├── workflows/     # 任务、角色和验证模板
 ├── packages/      # staging 与 tgz 构建产物
 ├── docs/          # 使用、架构和流程文档
 ├── fix-logs/      # 重要故障根因与预防经验
@@ -31,7 +30,6 @@ project/
 | `changes/` | 可创建和追加决策证据，不回写已发布历史 |
 | `src/`、组件源码 | 仅按已批准 Spec 和任务路径边界修改 |
 | `tests/` | 随变更同步更新，禁止弱化 |
-| `workflows/` | 受协作与发布流程治理 |
 | `packages/` | 自动生成，不手工编辑 |
 | `fix-logs/` | 重要问题闭环后追加 |
 
@@ -73,7 +71,11 @@ npm run docs:sync
 
 ## 5. 任务与并行
 
-从 `workflows/task.template.yaml` 创建任务，至少冻结目标、Spec 版本、允许/禁止路径、验收、验证和回滚。
+日常任务只需明确目标、允许/禁止路径、验收条件和最小验证命令，不创建额外任务状态文件。
+
+- Fast 由 Claude Code 直接完成。
+- Standard 可将一个小而明确的实现任务交给 Codex，最终由 Claude Code 验收和提交。
+- Critical 使用隔离 worktree，并由 OpenCode 独立只读验证一次。
 
 只有以下条件全部满足才并行：
 
@@ -82,20 +84,7 @@ npm run docs:sync
 - 一个任务的输出不是另一个任务的输入。
 - 各自有独立 worktree、分支和验证命令。
 
-Spec → Database → MCP → Hook/Skill → 集成测试 → Package 等真实依赖保持串行。
-
-项目控制面把任务定义与聊天 Session 解耦。Claude 先填写 `workflows/tasks/*.yaml`，再执行：
-
-```bash
-npm run agent-flow -- validate --json
-npm run agent-flow -- status --json
-npm run agent-flow -- plan --json
-npm run agent-flow -- dispatch <task-id> --json
-```
-
-终端或 Claude Session 中断后，不重新猜任务上下文；先读 `status`，确认旧 Codex 子进程已退出，再用 `resume <task-id>` 续跑。Executor 完成后依次 `verify`、`integrate`、`cleanup`。高频状态保存在 Git common dir，不污染任一 worktree；任务和最终验证证据仍在 Git 中审计。
-
-Claude 按任务路由：局部低风险任务可用 `executor-terra-medium-fast`；跨文件、并发、状态或高风险实现用 `executor-terra-max-fast`；架构/诊断占比高或需要另一条 max 模型路径时用 `executor-sol-max-fast`。两档 Terra 都使用小写 `gpt-5.6-terra`，仅 reasoning 不同；三档都固定 `fast`，禁止自动 fallback，模板不预选 Profile，必须逐任务明确填写。完整约束见 `workflows/README.md`。
+Spec → Database → MCP → Hook/Skill → 集成测试 → Package 等真实依赖保持串行。普通开发不使用 Workflow、跨 Session 状态机、JSONL 或验证证据目录。
 
 ## 6. 测试门禁
 
