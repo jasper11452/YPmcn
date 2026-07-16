@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -380,7 +380,11 @@ function trackedPaths() {
   return execFileSync("git", ["ls-files", "-z"], {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
-  }).split("\0").filter((path) => path && existsSync(path));
+  }).split("\0").filter((path) => {
+    if (!path || !existsSync(path)) return false;
+    const stat = lstatSync(path);
+    return stat.isFile() || stat.isSymbolicLink();
+  });
 }
 
 function runCli(args) {
