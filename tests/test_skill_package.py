@@ -173,6 +173,63 @@ class SkillPackageContractTest(unittest.TestCase):
         actual = {path.name for path in REFERENCES.glob("*.md")}
         self.assertEqual(EXPECTED_REFERENCE_FILES, actual)
 
+    def test_requirement_parsing_routes_creator_price_to_official_price_tiers(self):
+        parsing = read(REFERENCES / "requirement-parsing.md")
+        intake = read(REFERENCES / "requirement-intake.md")
+        tool_card = read(TOOLS_DIR / "validate_requirement.md")
+        joined = "\n".join((parsing, intake, tool_card))
+        for field in (
+            "kolOfficialPriceL1",
+            "kolOfficialPriceL2",
+            "kolOfficialPriceL3",
+        ):
+            self.assertIn(field, parsing)
+            self.assertIn(field, tool_card)
+        for required in (
+            "单人预算",
+            "项目总预算",
+            "小红书",
+            "抖音",
+            "1–20 秒",
+            "21–60 秒",
+            "60 秒以上",
+            "元转分",
+            "不得写入 `budget*`",
+        ):
+            self.assertIn(required, joined)
+        for obsolete in (
+            "`quantity_total`",
+            "`submission_deadline_at`",
+            "`content_requirements`",
+            "`category_requirements`",
+        ):
+            self.assertNotIn(obsolete, parsing)
+
+    def test_requirement_intake_requires_scored_preview_before_persistence(self):
+        skill = read(SKILL)
+        parsing = read(REFERENCES / "requirement-parsing.md")
+        intake = read(REFERENCES / "requirement-intake.md")
+        tool_card = read(TOOLS_DIR / "validate_requirement.md")
+        routing = read(REFERENCES / "phase-tool-matrix.md")
+        joined = "\n".join((skill, parsing, intake, tool_card, routing))
+        for required in (
+            "字段预览",
+            "原文保留",
+            "歧义",
+            "解析评分",
+            "score > 80",
+            "score === 80",
+            "各 5 分",
+            "每个杜撰或擅自推断值扣 10 分",
+            "不得先调用再补展示",
+            "原子需求",
+            "quantityTotal=2",
+            "rebateMinRate=0.3",
+            "价格 4w",
+            "不主动提交 `status=ready`",
+        ):
+            self.assertIn(required, joined)
+
     def test_csv_authority_keeps_supplied_line_count_fields_and_hash(self):
         raw = CSV_SCHEMA.read_bytes()
         self.assertEqual(EXPECTED_CSV_SHA256, hashlib.sha256(raw).hexdigest())
