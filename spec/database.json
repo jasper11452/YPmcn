@@ -98,6 +98,31 @@
         "creator_recommendation_items",
         "creator_submissions"
       ]
+    },
+    "searchCreatorsFieldAuthority": {
+      "identityJoin": ["platform", "kwUid"],
+      "creatorProfileSourceByPlatform": {
+        "xiaohongshu": "xhs_creator_accounts",
+        "douyin": "dy_creator_accounts"
+      },
+      "priceSource": {
+        "authority": "platform creator account table",
+        "fields": [
+          "kolOfficialPriceL1",
+          "kolOfficialPriceL2",
+          "kolOfficialPriceL3",
+          "downloadPriceL1",
+          "downloadPriceL2",
+          "downloadPriceL3"
+        ],
+        "rule": "search_creators must read creator price tiers from the platform creator table; a null relationship-level price_cents must not be used to claim that the creator has no database price."
+      },
+      "rebateSource": {
+        "authority": "creator_supply_offers creator-supplier relationship",
+        "join": ["platform", "kwUid", "supplier_id"],
+        "fields": ["rebate_min_rate", "rebate_max_rate"],
+        "rule": "Relationship rebate is an observed creator-supplier value. customer_demands.rebateMinRate/rebateMaxRate are requirement thresholds and must never be reported as an actual supplier rebate."
+      }
     }
   },
   "commonFieldPolicies": {

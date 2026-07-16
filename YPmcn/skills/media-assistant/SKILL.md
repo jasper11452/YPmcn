@@ -32,7 +32,7 @@ description: "Use for the live YPmcn media workflow: requirement validation, cre
 8. **需求解析预览门禁**：调用 `validate_requirement` 前，先向用户输出字段预览、未结构化原文、歧义和 100 分制评分。只有总分严格大于 80 且无硬阻断项时才允许调用。
 9. **需求版本连续性**：同一用户需求补充、修正或重试调用时沿用已返回的 `demandId`，递增 `demandVersion`；不得另建新需求绕过 Draft。若 Draft 暴露缺失、冲突或待确认项，立即向用户提出最小澄清问题，不得无反馈等待或重复空转调用。
 10. **字段格式契约**：解析、预览和调用前必须读取 `references/reference_schema.csv`；该表来自 YP 数据库 `customer_demands` 的只读元数据，`Field` 是真实列名，`Type` 是真实 MySQL 类型，`Null` 是可空约束，`Comment` 是业务语义和平台差异。值不符合类型或长度/精度时先规范化；无法无损规范化则列入歧义并阻断，不得按经验猜测。
-11. **达人供给身份以 MCP 为准**：当前 MCP 使用 `creator_supply_offers.kwUid` 作为平台达人 ID、`creator_supply_offers.supplier_id` 作为供应商 ID。Skill 不得把 Spec 目标模型中的 `creator_id`、`supplier_binding_id` 当作当前 MCP 参数或返回字段，也不得自行推导二者映射。
+11. **达人搜索字段来源**：`kwUid` 与达人资料、`kolOfficialPriceL1/L2/L3`、`downloadPriceL1/L2/L3` 来自对应平台达人表；`supplier_id` 与 `rebate_min_rate/rebate_max_rate` 来自达人—机构关系。需求中的 `rebateMinRate/rebateMaxRate` 只是筛选门槛，禁止表述为机构实际返点。Skill 不得把 Spec 目标模型中的 `creator_id`、`supplier_binding_id` 当作当前 MCP 参数或返回字段，也不得自行推导二者映射。
 
 ## 按需读取
 

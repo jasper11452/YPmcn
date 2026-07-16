@@ -3,7 +3,7 @@
 | 工具 | 作用 | 当前输入 | 副作用/边界 |
 |---|---|---|---|
 | `validate_requirement` | 校验并写入 Brief | `payload` | 业务写；仓库无自然语言/语音解析器 |
-| `search_creators` | 从现有达人数据库硬筛 | `id` | 仅数据库过滤；禁止浏览器/外搜 |
+| `search_creators` | 从现有达人数据库硬筛 | `id` | 达人表取资料/分档价格，达人—机构关系取返点；需求返点仅是门槛；禁止浏览器/外搜 |
 | `rank_mcns` | 基于当前候选生成 MCN 建议 | `id`, `platform`；可带调优字段 | 业务写；排序算法和生产结果未验证 |
 | `select_inquiry_form_fields` | 获取并确认询价表字段 | 可选 `url`, `timeout_seconds` | 发送前确认；只信实际 description |
 | `create_with_distributions` | 创建外部项目并向供应商分发 | `projectName`, `deadline`, `columns`, `supplierIds`, `prefillRows`, `prefillRowsBySupplier`；可选 `description`, `usageScope` | 外部写；三项确认和发送守卫必须齐全 |

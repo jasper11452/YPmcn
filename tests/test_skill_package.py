@@ -249,7 +249,7 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertIn(field, fields)
 
-    def test_creator_supply_identity_follows_current_mcp(self):
+    def test_creator_search_field_authority_matches_current_database(self):
         texts = [
             read(SKILL),
             read(TOOLS_DIR / "search_creators.md"),
@@ -259,8 +259,9 @@ class SkillPackageContractTest(unittest.TestCase):
         ]
         joined = "\n".join(texts)
         for required in (
-            "creator_supply_offers.kwUid",
-            "creator_supply_offers.supplier_id",
+            "kolOfficialPriceL1/L2/L3",
+            "达人—机构关系",
+            "不是机构实际返点",
             "creator_id",
             "supplier_binding_id",
         ):

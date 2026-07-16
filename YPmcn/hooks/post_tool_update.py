@@ -146,6 +146,32 @@ def parse_field_selection(evidence):
     return {"description": description, "fieldNames": field_names} if field_names else None
 
 
+def summarize_search_creators(evidence):
+    data = evidence.get("data")
+    if not isinstance(data, dict):
+        return {"candidateCount": 0, "withCreatorPriceCount": 0, "withRelationshipRebateCount": 0}
+    creators = data.get("creators")
+    if not isinstance(creators, list):
+        creators = data.get("results")
+    if not isinstance(creators, list):
+        creators = []
+    price_fields = (
+        "kolOfficialPriceL1", "kolOfficialPriceL2", "kolOfficialPriceL3",
+        "downloadPriceL1", "downloadPriceL2", "downloadPriceL3",
+    )
+    rebate_fields = ("rebate_min_rate", "rebate_max_rate")
+    candidates = [item for item in creators if isinstance(item, dict)]
+    return {
+        "candidateCount": len(candidates),
+        "withCreatorPriceCount": sum(
+            1 for item in candidates if any(item.get(field) is not None for field in price_fields)
+        ),
+        "withRelationshipRebateCount": sum(
+            1 for item in candidates if any(item.get(field) is not None for field in rebate_fields)
+        ),
+    }
+
+
 def mark_result_issue(session, tool_name, code):
     session["lastResultIssue"] = {
         "toolName": tool_name,
@@ -198,6 +224,7 @@ def apply_result(tool, session, tool_input, evidence, trigger):
             return session
         clear_result_issue(session)
         session["phase"] = "search_completed"
+        session["search_result"] = summarize_search_creators(evidence)
         return session
 
     if tool == "rank_mcns":

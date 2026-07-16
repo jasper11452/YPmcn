@@ -26,7 +26,14 @@
       "vectorUse": "internal-shadow-capability",
       "hardConstraintsAuthoritativeSource": "mysql",
       "returnVerification": "current-mysql-record",
-      "degradation": "sql-only-with-provenance-and-degraded-reason"
+      "degradation": "sql-only-with-provenance-and-degraded-reason",
+      "resultFieldAuthority": {
+        "creatorIdentity": "platform creator table joined by platform + kwUid",
+        "creatorPrices": "xhs_creator_accounts or dy_creator_accounts: kolOfficialPriceL1/L2/L3 and downloadPriceL1/L2/L3",
+        "creatorSupplierRebate": "creator_supply_offers relationship joined by platform + kwUid + supplier_id: rebate_min_rate/rebate_max_rate",
+        "requirementRebateThreshold": "customer_demands.rebateMinRate/rebateMaxRate; filter input only, never actual rebate",
+        "legacyPriceCents": "not authoritative when creator price tiers exist"
+      }
     },
     "rank_creators": {
       "role": "accepted-candidates-only-missing-aware-explainable-ranking",
@@ -325,7 +332,10 @@
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
-        "retain actual returned payload as downstream evidence"
+        "retain actual returned payload as downstream evidence",
+        "candidate price evidence identifies platform creator-table price tiers",
+        "candidate rebate evidence identifies creator-supplier relationship values",
+        "requirement rebate thresholds are not presented as actual supplier rebate"
       ]
     },
     "rank_mcns": {

@@ -278,6 +278,7 @@ describe("Spec governance", () => {
   it("requires MySQL-revalidated provenance and explicit vector degradation semantics", () => {
     const manifest = json("manifest.json");
     const mcp = json("mcp.json");
+    const database = json("database.json");
     const workflow = json("workflow.json");
     const errors = json("errors.json");
     const vectorCodes = [
@@ -297,6 +298,22 @@ describe("Spec governance", () => {
     assert.equal(
       mcp.vectorCapabilityBoundary.search_creators.hardConstraintsAuthoritativeSource,
       "mysql",
+    );
+    assert.match(
+      mcp.vectorCapabilityBoundary.search_creators.resultFieldAuthority.creatorPrices,
+      /xhs_creator_accounts.*dy_creator_accounts/,
+    );
+    assert.match(
+      mcp.vectorCapabilityBoundary.search_creators.resultFieldAuthority.creatorSupplierRebate,
+      /creator_supply_offers/,
+    );
+    assert.match(
+      database.runtimeDatabaseCompatibility.searchCreatorsFieldAuthority.priceSource.rule,
+      /platform creator table/,
+    );
+    assert.match(
+      database.runtimeDatabaseCompatibility.searchCreatorsFieldAuthority.rebateSource.rule,
+      /must never be reported as an actual supplier rebate/,
     );
     assert.equal(mcp.vectorCapabilityBoundary.rank_creators.provenanceRequired, true);
     for (const toolName of ["search_creators", "rank_creators"]) {

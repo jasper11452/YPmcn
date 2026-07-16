@@ -333,8 +333,32 @@ assert_phase("validate_requirement -> requirement_ready", "requirement_ready")
 
 # Step 2: search_creators
 post_tool("search_creators", {"id": "req_001"},
-          {"success": True, "data": {"results": []}})
+          {"success": True, "data": {"creators": [
+              {
+                  "kwUid": "creator-1",
+                  "supplier_id": "supplier-1",
+                  "kolOfficialPriceL1": 10000,
+                  "rebate_min_rate": 0.3,
+              },
+              {
+                  "kwUid": "creator-2",
+                  "supplier_id": "supplier-2",
+                  "kolOfficialPriceL1": None,
+                  "rebate_min_rate": None,
+              },
+          ]}})
 assert_phase("search_creators -> search_completed", "search_completed")
+state = read_state()
+if state.get("search_result") == {
+    "candidateCount": 2,
+    "withCreatorPriceCount": 1,
+    "withRelationshipRebateCount": 1,
+}:
+    PASS += 1
+    print("  PASS: search_creators field-source evidence summarized")
+else:
+    FAIL += 1
+    print(f"  FAIL: unexpected search_result summary: {state.get('search_result')}")
 
 # Step 3: rank_mcns
 post_tool("rank_mcns", {"id": "req_001", "platform": "xiaohongshu"},

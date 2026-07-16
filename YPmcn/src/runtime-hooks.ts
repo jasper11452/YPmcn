@@ -64,6 +64,18 @@ function explicit(root: Json, ...keys: string[]): string | undefined {
     for (const key of keys) if (text(source[key])) return source[key];
   return undefined;
 }
+function searchSummary(root: Json): Json {
+  const data = root.data && typeof root.data === "object" ? root.data : {};
+  const raw = Array.isArray(data.creators) ? data.creators : Array.isArray(data.results) ? data.results : [];
+  const creators = raw.filter((item: unknown) => item && typeof item === "object") as Json[];
+  const prices = ["kolOfficialPriceL1", "kolOfficialPriceL2", "kolOfficialPriceL3", "downloadPriceL1", "downloadPriceL2", "downloadPriceL3"];
+  const rebates = ["rebate_min_rate", "rebate_max_rate"];
+  return {
+    candidateCount: creators.length,
+    withCreatorPriceCount: creators.filter((item) => prices.some((field) => item[field] != null)).length,
+    withRelationshipRebateCount: creators.filter((item) => rebates.some((field) => item[field] != null)).length,
+  };
+}
 function fresh(): Json { return {
   phase: "requirement_draft", ids: {},
   confirmations: { supplyConfirmed: false, mcnConfirmed: false, messageConfirmed: false },
@@ -132,7 +144,10 @@ export function afterTool(event: Json, ctx: Json, rootDir: string): void {
   if (!result) { if (session) { issue(session, tool); session._updated_at_ms = Date.now(); save(path, data); } return; }
   session ??= fresh(); const input = event.params ?? {}; delete session.lastResultIssue;
   if (tool === "validate_requirement") { const id = explicit(result, "requirement_id", "id"); if (!id) issue(session, tool); else { session.phase = "requirement_ready"; session.ids.requirement_id = id; } }
-  else if (tool === "search_creators" && session.phase === "requirement_ready" && input.id === session.ids.requirement_id) session.phase = "search_completed";
+  else if (tool === "search_creators" && session.phase === "requirement_ready" && input.id === session.ids.requirement_id) {
+    session.phase = "search_completed";
+    session.search_result = searchSummary(result);
+  }
   else if (tool === "rank_mcns" && session.phase === "search_completed" && input.id === session.ids.requirement_id) { const id = explicit(result, "mcn_recommendation_id", "id"); if (!id) issue(session, tool); else { session.phase = "mcn_planning"; session.ids.mcn_recommendation_id = id; } }
   else if (tool === "select_inquiry_form_fields" && session.phase === "mcn_planning") { const description = explicit(result, "description"); const names = description?.split("\n").map((line) => line.split(/[：:]/)[0]?.trim()).filter(Boolean); if (!names?.length) issue(session, tool, "INTEGRATION_REQUIRED"); else { session.phase = "field_selection_ready"; session.field_selection = { selected: true, fieldNames: names }; } }
   else if (tool === "create_with_distributions" && session.phase === "field_selection_ready") { const project = explicit(result, "project_id"), mcn = explicit(result, "mcn_id"); if (!project || !mcn) issue(session, tool); else { session.phase = "distribution_sync_pending"; Object.assign(session.ids, { project_id: project, mcn_id: mcn }); } }
