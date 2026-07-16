@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 export type NamedVectorName = "content" | "commercial";
 
 export interface DerivedVectorPayload {
-  platform: "dy" | "xhs";
+  platform: "douyin" | "xiaohongshu";
   kw_uid: string;
   source_table: string;
   source_row_id: string;
@@ -65,6 +65,11 @@ function positiveInteger(value: number, label: string): number {
   return value;
 }
 
+function qdrantPort(url: string): number {
+  const parsed = new URL(url);
+  return parsed.port ? Number(parsed.port) : parsed.protocol === "https:" ? 443 : 6333;
+}
+
 function vectorSchema(vectorSize: number) {
   return {
     content: { size: vectorSize, distance: "Cosine" as const },
@@ -102,7 +107,7 @@ function validateHit(hit: unknown): NamedVectorHit {
     (typeof candidate?.id !== "string" && typeof candidate?.id !== "number") ||
     !Number.isFinite(candidate?.score) ||
     !payload ||
-    (payload.platform !== "dy" && payload.platform !== "xhs") ||
+    (payload.platform !== "douyin" && payload.platform !== "xiaohongshu") ||
     typeof payload.kw_uid !== "string"
   ) {
     throw new QdrantRequestError("Qdrant query response is invalid");
@@ -135,6 +140,7 @@ export class RealQdrantClient implements QdrantClientLike<NamedVectorPoint> {
       };
       this.client = new QdrantClient({
         url: config.url,
+        port: qdrantPort(config.url),
         apiKey: config.apiKey,
         timeout,
         checkCompatibility: false,
@@ -190,7 +196,7 @@ export class RealQdrantClient implements QdrantClientLike<NamedVectorPoint> {
     }
   }
 
-  async search(name: NamedVectorName, vector: number[], limit: number, platform?: "dy" | "xhs"): Promise<NamedVectorHit[]> {
+  async search(name: NamedVectorName, vector: number[], limit: number, platform?: "douyin" | "xiaohongshu"): Promise<NamedVectorHit[]> {
     validateVector(vector, this.vectorSize, name);
     positiveInteger(limit, "limit");
     const result = await this.sdkCall(

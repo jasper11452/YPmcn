@@ -41,37 +41,37 @@ const briefs = [
     brief_id: "H01", expected: "HIGH",
     scenario: "美食探店 — 广州（最大品类53条）",
     content_requirements: ["美食探店", "咖啡测评", "广州"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "H02", expected: "HIGH",
     scenario: "科技数码 — 深圳（48条）",
     content_requirements: ["科技数码", "手机测评", "效率工具"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "H03", expected: "HIGH",
     scenario: "母婴亲子 — 上海（45条）",
     content_requirements: ["母婴亲子", "育儿经验", "早教启蒙"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "H04", expected: "HIGH",
     scenario: "时尚穿搭 — 北京（45条）",
     content_requirements: ["时尚穿搭", "通勤穿搭", "OOTD"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "H05", expected: "HIGH",
     scenario: "美妆护肤 — 成分党（37条）",
     content_requirements: ["美妆护肤", "成分党", "护肤测评"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "H06", expected: "HIGH",
     scenario: "健身运动 — dy（41条）",
     content_requirements: ["健身运动", "塑形计划", "健康饮食"],
-    negative_requirements: [], platform: "dy", geo: null,
+    negative_requirements: [], platform: "douyin", geo: null,
   },
 
   // ═══════════════ MEDIUM (non-dominant, or with negative) ═══════
@@ -79,25 +79,25 @@ const briefs = [
     brief_id: "M01", expected: "MEDIUM",
     scenario: "汽车出行 — 试驾体验（xhs 30条，品类收窄）",
     content_requirements: ["汽车出行", "试驾体验", "新能源车"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "M02", expected: "MEDIUM",
     scenario: "家居生活 — 收纳改造（dy 38条）",
     content_requirements: ["家居生活", "收纳改造", "清洁技巧"],
-    negative_requirements: [], platform: "dy", geo: null,
+    negative_requirements: [], platform: "douyin", geo: null,
   },
   {
     brief_id: "M03", expected: "MEDIUM",
     scenario: "萌宠 — 养猫（dy 41条，子品类收窄）",
     content_requirements: ["萌宠", "养猫日记", "宠物用品"],
-    negative_requirements: [], platform: "dy", geo: null,
+    negative_requirements: [], platform: "douyin", geo: null,
   },
   {
     brief_id: "M04", expected: "MEDIUM",
     scenario: "教育职场 — 英语提升（xhs 42条，话题收窄）",
     content_requirements: ["教育职场", "英语提升", "考证经验"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
 
   // ═══════════════ CROSS-CATEGORY (intersection narrow) ═══════════
@@ -105,25 +105,25 @@ const briefs = [
     brief_id: "C01", expected: "LOW",
     scenario: "母婴+科技跨界 — 早教机器人（双品类交叉极窄）",
     content_requirements: ["母婴亲子", "科技数码", "AI早教"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "C02", expected: "LOW",
     scenario: "宠物+家居 — 猫家具好物（dy双品类交义）",
     content_requirements: ["萌宠", "家居生活", "猫爬架"],
-    negative_requirements: [], platform: "dy", geo: null,
+    negative_requirements: [], platform: "douyin", geo: null,
   },
   {
     brief_id: "C03", expected: "LOW",
     scenario: "旅行+科技 — 数码旅行装备（xhs交叉）",
     content_requirements: ["旅行户外", "科技数码", "摄影器材"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "C04", expected: "LOW",
     scenario: "健身+美食 — 减脂餐（dy双品类）",
     content_requirements: ["健身运动", "美食探店", "健康饮食"],
-    negative_requirements: [], platform: "dy", geo: null,
+    negative_requirements: [], platform: "douyin", geo: null,
   },
 
   // ═══════════════ WITH NEGATIVE FILTER ══════════════════════════
@@ -132,7 +132,7 @@ const briefs = [
     scenario: "时尚穿搭但排除通勤风（xhs负向过滤）",
     content_requirements: ["时尚穿搭", "高级感", "小个子"],
     negative_requirements: ["通勤穿搭", "胶囊衣橱"],
-    platform: "xhs", geo: null,
+    platform: "xiaohongshu", geo: null,
   },
 
   // ═══════════════ ZERO / ABSENT CATEGORY ════════════════════════
@@ -140,19 +140,19 @@ const briefs = [
     brief_id: "Z01", expected: "ZERO",
     scenario: "剧情搞笑（db中无此品类，应返回0）",
     content_requirements: ["剧情", "搞笑", "段子"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "Z02", expected: "ZERO",
     scenario: "颜值/P图（db中无此品类，应返回0）",
     content_requirements: ["颜值", "P图教程", "修图"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
   {
     brief_id: "Z03", expected: "ZERO",
     scenario: "财经投资（db中无此标签，应返回0）",
     content_requirements: ["财经", "基金", "理财"],
-    negative_requirements: [], platform: "xhs", geo: null,
+    negative_requirements: [], platform: "xiaohongshu", geo: null,
   },
 ];
 

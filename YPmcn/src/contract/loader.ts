@@ -829,7 +829,7 @@ export function loadRequirementsContract(): RequirementsContract {
     "requirements platformSplit policy",
   );
   if (
-    JSON.stringify(platformSplit.supportedPlatforms) !== JSON.stringify(["xhs", "dy"]) ||
+    JSON.stringify(platformSplit.supportedPlatforms) !== JSON.stringify(["xiaohongshu", "douyin"]) ||
     platformSplit.headEntity !== "requirement_headers" ||
     platformSplit.executionEntity !== "customer_demands" ||
     platformSplit.executionUnitPlatformCardinality !== 1 ||

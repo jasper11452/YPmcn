@@ -8,7 +8,8 @@
 
 | 用户表达 | 参数 |
 |---|---|
-| 小红书 / 抖音 | `platform=xhs` / `platform=dy` |
+| 小红书 / XHS / 红书 | `platform=xiaohongshu` |
+| 抖音 / DY / Douyin | `platform=douyin` |
 | 人数 | `quantity_total` 正整数 |
 | 3 万元 | `3000000` 分 |
 | 20% 返点 | `0.2` |
@@ -18,3 +19,5 @@
 ## 冲突处理
 
 同一字段存在冲突时保留原始消息并请求一次最小确认。Agent 修正解析不代表客户需求变更；是否产生新版本由业务 MCP 决定。没有 schema 字段承载的信息放入已声明的 JSON 扩展，不塞入无关列。
+
+平台写入只允许 `xiaohongshu`、`douyin`；`xhs`、`dy` 仅作为用户输入别名解析，禁止写入数据库或传给业务 Tool。

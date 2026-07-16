@@ -337,7 +337,7 @@ post_tool("search_creators", {"id": "req_001"},
 assert_phase("search_creators -> search_completed", "search_completed")
 
 # Step 3: rank_mcns
-post_tool("rank_mcns", {"id": "req_001", "platform": "xhs"},
+post_tool("rank_mcns", {"id": "req_001", "platform": "xiaohongshu"},
           {"success": True, "data": {"mcn_recommendation_id": "mcn_001"}})
 assert_phase("rank_mcns -> mcn_planning", "mcn_planning")
 

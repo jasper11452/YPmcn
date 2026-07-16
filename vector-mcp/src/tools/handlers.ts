@@ -24,7 +24,7 @@ const FAKE_DIM = 128;
 const FAKE_ROWS = [
     // ── xhs: 母婴亲子类 (3) ──────────────────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_mom_001",
         source_table: "xhs_creator",
         content_tags: ["母婴", "亲子", "育儿", "宝宝穿搭"],
@@ -33,7 +33,7 @@ const FAKE_ROWS = [
         display_name: "小妈咪穿搭日记",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_mom_002",
         source_table: "xhs_creator",
         content_tags: ["辅食", "宝宝食谱", "母婴", "儿童教育"],
@@ -42,7 +42,7 @@ const FAKE_ROWS = [
         display_name: "辅食妈妈小厨房",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_mom_003",
         source_table: "xhs_creator",
         content_tags: ["亲子", "育儿", "早教", "绘本推荐"],
@@ -52,7 +52,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 美妆护肤类 (3) ──────────────────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_beauty_001",
         source_table: "xhs_creator",
         content_tags: ["美妆", "护肤", "好物分享", "平价彩妆"],
@@ -61,7 +61,7 @@ const FAKE_ROWS = [
         display_name: "成分党小美",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_beauty_002",
         source_table: "xhs_creator",
         content_tags: ["护肤", "成分党", "敏感肌", "好物分享"],
@@ -70,7 +70,7 @@ const FAKE_ROWS = [
         display_name: "敏感肌急救站",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_beauty_003",
         source_table: "xhs_creator",
         content_tags: ["美妆", "化妆教程", "平价彩妆", "学生党"],
@@ -80,7 +80,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: AI/科技类 (2) ───────────────────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_ai_creator_001",
         source_table: "xhs_creator",
         content_tags: ["AI深度使用", "AI教程", "创作者成长"],
@@ -89,7 +89,7 @@ const FAKE_ROWS = [
         display_name: "AI创作者小明",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_tech_002",
         source_table: "xhs_creator",
         content_tags: ["科技测评", "效率工具", "AI教程", "数码"],
@@ -99,7 +99,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 时尚穿搭类 (2) ──────────────────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_fashion_001",
         source_table: "xhs_creator",
         content_tags: ["穿搭", "OOTD", "时尚", "日常穿搭"],
@@ -108,7 +108,7 @@ const FAKE_ROWS = [
         display_name: "每日穿搭日志",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_fashion_002",
         source_table: "xhs_creator",
         content_tags: ["职场穿搭", "通勤穿搭", "OL风", "穿搭"],
@@ -118,7 +118,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 探店/本地生活 (2) ───────────────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_local_001",
         source_table: "xhs_creator",
         content_tags: ["探店", "美食", "本地生活", "打卡"],
@@ -127,7 +127,7 @@ const FAKE_ROWS = [
         display_name: "魔都探店王",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_local_002",
         source_table: "xhs_creator",
         content_tags: ["探店", "咖啡", "本地生活", "网红打卡"],
@@ -137,7 +137,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 剧情搞笑类 (2) ──────────────────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_fun_creator_002",
         source_table: "xhs_creator",
         content_tags: ["剧情", "搞笑", "段子"],
@@ -146,7 +146,7 @@ const FAKE_ROWS = [
         display_name: "搞笑达人小红",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_fun_002",
         source_table: "xhs_creator",
         content_tags: ["搞笑", "段子", "日常", "情景剧"],
@@ -156,7 +156,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 颜值/P图类 (1) ─────────────────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_001",
         source_table: "xhs_creator",
         content_tags: ["颜值", "P图教程", "修图", "沈阳"],
@@ -166,7 +166,7 @@ const FAKE_ROWS = [
     },
     // ── dy: 剧情搞笑 (3) ─────────────────────────────────────────────
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_fun_001",
         source_table: "dy_creator",
         content_tags: ["剧情", "搞笑", "段子", "反转"],
@@ -175,7 +175,7 @@ const FAKE_ROWS = [
         display_name: "搞笑兄妹档",
     },
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_fun_002",
         source_table: "dy_creator",
         content_tags: ["剧情", "搞笑", "情侣日常"],
@@ -184,7 +184,7 @@ const FAKE_ROWS = [
         display_name: "情侣搞笑日记",
     },
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_fun_003",
         source_table: "dy_creator",
         content_tags: ["搞笑", "段子", "街头采访"],
@@ -194,7 +194,7 @@ const FAKE_ROWS = [
     },
     // ── dy: 美食探店 (2) ─────────────────────────────────────────────
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_food_creator_003",
         source_table: "dy_creator",
         content_tags: ["美食", "探店", "吃播", "沈阳"],
@@ -203,7 +203,7 @@ const FAKE_ROWS = [
         display_name: "美食达人小刚",
     },
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_food_002",
         source_table: "dy_creator",
         content_tags: ["美食", "探店", "本地生活", "做饭"],
@@ -213,7 +213,7 @@ const FAKE_ROWS = [
     },
     // ── dy: 时尚穿搭 (2) ─────────────────────────────────────────────
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_fashion_001",
         source_table: "dy_creator",
         content_tags: ["穿搭", "OOTD", "时尚", "街拍", "沈阳"],
@@ -222,7 +222,7 @@ const FAKE_ROWS = [
         display_name: "街拍潮人小李",
     },
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_fashion_002",
         source_table: "dy_creator",
         content_tags: ["穿搭", "日常穿搭", "平价穿搭"],
@@ -232,7 +232,7 @@ const FAKE_ROWS = [
     },
     // ── dy: 知识/测评 (2) ────────────────────────────────────────────
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_knowledge_001",
         source_table: "dy_creator",
         content_tags: ["知识分享", "测评", "科普", "效率工具"],
@@ -241,7 +241,7 @@ const FAKE_ROWS = [
         display_name: "测评老王",
     },
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_knowledge_002",
         source_table: "dy_creator",
         content_tags: ["AI教程", "科技测评", "数码"],
@@ -251,7 +251,7 @@ const FAKE_ROWS = [
     },
     // ── dy: 颜值/舞蹈 (1) ───────────────────────────────────────────
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_dance_001",
         source_table: "dy_creator",
         content_tags: ["颜值", "舞蹈", "翻跳"],
@@ -261,7 +261,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 探店/本地生活 — 沈阳 (2) ──────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_explore_001",
         source_table: "xhs_creator",
         content_tags: ["沈阳探店", "沈阳本地生活", "沈阳打卡"],
@@ -270,7 +270,7 @@ const FAKE_ROWS = [
         display_name: "沈阳探店小达人",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_explore_002",
         source_table: "xhs_creator",
         content_tags: ["沈阳探店", "沈阳本地生活", "沈阳打卡", "美食探店"],
@@ -280,7 +280,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 母婴亲子 — AI crossover (1) ───────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_mom_ai_001",
         source_table: "xhs_creator",
         content_tags: ["AI亲子", "母婴", "AI深度使用", "儿童礼物", "亲子互动"],
@@ -290,7 +290,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 母婴亲子 — 额外 (1) ──────────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_mom_004",
         source_table: "xhs_creator",
         content_tags: ["母婴", "亲子", " toddler穿搭", "宝宝日常"],
@@ -300,7 +300,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 探店/时尚穿搭 — 沈阳 (1) ─────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_explore_sy_001",
         source_table: "xhs_creator",
         content_tags: ["沈阳探店", "沈阳打卡", "时尚穿搭", "本地生活"],
@@ -310,7 +310,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 时尚穿搭 — 额外 (1) ──────────────────────────────────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_fashion_003",
         source_table: "xhs_creator",
         content_tags: ["穿搭", "沈阳穿搭", "日常穿搭", "显瘦穿搭"],
@@ -320,7 +320,7 @@ const FAKE_ROWS = [
     },
     // ── dy: 食品测评/厨房 (2) ──────────────────────────────────────
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_guangdong_001",
         source_table: "dy_creator",
         content_tags: ["广东本土", "粤语", "测评", "食品测评", "厨房好物"],
@@ -329,7 +329,7 @@ const FAKE_ROWS = [
         display_name: "广东测评阿哥",
     },
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_food_review_001",
         source_table: "dy_creator",
         content_tags: ["食品测评", "厨房好物", "美食测评", "测评", "广东", "粤语"],
@@ -339,7 +339,7 @@ const FAKE_ROWS = [
     },
     // ── dy: 运动户外 (2) ───────────────────────────────────────────
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_sport_001",
         source_table: "dy_creator",
         content_tags: ["运动户外", "运动装备", "健身"],
@@ -348,7 +348,7 @@ const FAKE_ROWS = [
         display_name: "健身达人阿力",
     },
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_sport_002",
         source_table: "dy_creator",
         content_tags: ["运动", "跑步", "户外运动", "沈阳"],
@@ -358,7 +358,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 颜值/P图/修图/自拍 (10) — enrich sparse vertical ────
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_002",
         source_table: "xhs_creator",
         content_tags: ["颜值", "P图教程", "修图", "自拍", "人像精修"],
@@ -367,7 +367,7 @@ const FAKE_ROWS = [
         display_name: "修图达人小美",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_003",
         source_table: "xhs_creator",
         content_tags: ["P图", "修图教程", "滤镜", "调色", "人像修图"],
@@ -376,7 +376,7 @@ const FAKE_ROWS = [
         display_name: "人像精修工作室",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_004",
         source_table: "xhs_creator",
         content_tags: ["颜值", "自拍教程", "拍照技巧", "出片", "氛围感"],
@@ -385,7 +385,7 @@ const FAKE_ROWS = [
         display_name: "自拍达人小美",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_005",
         source_table: "xhs_creator",
         content_tags: ["修图", "P图", "后期", "调色", "滤镜", "颜值"],
@@ -394,7 +394,7 @@ const FAKE_ROWS = [
         display_name: "后期修图师",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_006",
         source_table: "xhs_creator",
         content_tags: ["P图教程", "修图", "美颜", "自拍", "人像美化"],
@@ -403,7 +403,7 @@ const FAKE_ROWS = [
         display_name: "美颜P图小课堂",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_007",
         source_table: "xhs_creator",
         content_tags: ["颜值", "P图", "修图", "写真", "拍照姿势"],
@@ -412,7 +412,7 @@ const FAKE_ROWS = [
         display_name: "写真修图达人",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_008",
         source_table: "xhs_creator",
         content_tags: ["颜值", "P图教程", "拍照技巧", "修图", "美照"],
@@ -421,7 +421,7 @@ const FAKE_ROWS = [
         display_name: "美照制造机",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_009",
         source_table: "xhs_creator",
         content_tags: ["P图", "修图", "颜值", "摄影后期", "人像精修"],
@@ -430,7 +430,7 @@ const FAKE_ROWS = [
         display_name: "人像精修小馆",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_010",
         source_table: "xhs_creator",
         content_tags: ["颜值", "P图", "修图", "自拍", "美颜", "滤镜"],
@@ -439,7 +439,7 @@ const FAKE_ROWS = [
         display_name: "颜值修图工作室",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_face_011",
         source_table: "xhs_creator",
         content_tags: ["修图教程", "P图", "拍照", "颜值", "美颜相机"],
@@ -449,7 +449,7 @@ const FAKE_ROWS = [
     },
     // ── xhs: 沈阳时尚穿搭 extra (3) — enrich geo+fashion vertical ──
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_explore_sy_002",
         source_table: "xhs_creator",
         content_tags: ["沈阳探店", "沈阳时尚", "时尚穿搭", "本地生活", "沈阳打卡"],
@@ -458,7 +458,7 @@ const FAKE_ROWS = [
         display_name: "沈阳时尚探店",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_explore_sy_003",
         source_table: "xhs_creator",
         content_tags: ["沈阳穿搭", "OOTD", "时尚", "本地探店", "沈阳"],
@@ -467,7 +467,7 @@ const FAKE_ROWS = [
         display_name: "沈阳潮人穿搭",
     },
     {
-        platform: "xhs",
+        platform: "xiaohongshu",
         platform_account_id: "xhs_explore_sy_004",
         source_table: "xhs_creator",
         content_tags: ["时尚穿搭", "探店", "OOTD", "沈阳本地生活", "东北"],
@@ -477,7 +477,7 @@ const FAKE_ROWS = [
     },
     // ── dy: 广东食品测评 extra (3) — enrich geo+food vertical ─────
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_food_review_002",
         source_table: "dy_creator",
         content_tags: ["食品测评", "美食测评", "广东", "粤语", "厨房好物"],
@@ -486,7 +486,7 @@ const FAKE_ROWS = [
         display_name: "广东美食测评官",
     },
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_food_review_003",
         source_table: "dy_creator",
         content_tags: ["食品测评", "零食测评", "广东本土", "广式美食", "测评"],
@@ -495,7 +495,7 @@ const FAKE_ROWS = [
         display_name: "广东零食测评达人",
     },
     {
-        platform: "dy",
+        platform: "douyin",
         platform_account_id: "dy_food_review_004",
         source_table: "dy_creator",
         content_tags: ["厨房好物", "食品测评", "广东", "深圳", "美食"],
@@ -699,11 +699,11 @@ async function handleSearch(params, traceId) {
             const result = await runtime.pipeline.search({
                 queryText: direct,
                 projectId: typeof args.projectId === "string" || typeof args.projectId === "number" ? args.projectId : undefined,
-                platform: args.platform === "xhs" ? "xhs" : "dy",
+                platform: args.platform === "xiaohongshu" ? "xiaohongshu" : "douyin",
                 limit: typeof args.limit === "number" ? args.limit : undefined,
                 candidateLimit: typeof args.candidateLimit === "number" ? args.candidateLimit : undefined,
                 filters: {
-                    platform: args.platform === "xhs" ? "xhs" : "dy",
+                    platform: args.platform === "xiaohongshu" ? "xiaohongshu" : "douyin",
                     region: typeof args.region === "string" ? args.region : undefined,
                     followerMin: typeof args.followerMin === "number" ? args.followerMin : undefined,
                     followerMax: typeof args.followerMax === "number" ? args.followerMax : undefined,
@@ -881,7 +881,7 @@ export async function handleToolCall(name, params) {
                 try {
                     runtime = await createRealRuntime();
                     const args = params ?? {};
-                    const result = await runtime.pipeline.sync(args.platform === "xhs" ? "xhs" : "dy", {
+                    const result = await runtime.pipeline.sync(args.platform === "xiaohongshu" ? "xiaohongshu" : "douyin", {
                         cursor: typeof args.cursor === "string" ? args.cursor : undefined,
                         limit: typeof args.limit === "number" ? args.limit : undefined,
                         dryRun: args.dryRun === true,

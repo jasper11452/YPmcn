@@ -3,7 +3,7 @@ import type { EmbeddingProvider } from "../config/providers.js";
 import type { QdrantClientLike, QdrantCollectionSchema, VectorPoint } from "./qdrant.js";
 
 export interface CreatorSourceRow {
-  platform: "xhs" | "dy";
+  platform: "xiaohongshu" | "douyin";
   platform_account_id: string;
   source_table: string;
   content_tags: unknown;

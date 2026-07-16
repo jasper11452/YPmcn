@@ -1,4 +1,4 @@
-export type CreatorPlatform = "dy" | "xhs";
+export type CreatorPlatform = "douyin" | "xiaohongshu";
 
 export interface MysqlSourceConfig {
   host: string;
@@ -54,7 +54,7 @@ const COMMON_CREATOR_COLUMNS = [
   "followercount AS follower_count",
 ] as const;
 const CREATOR_COLUMNS: Record<CreatorPlatform, readonly string[]> = {
-  dy: [
+  douyin: [
     ...COMMON_CREATOR_COLUMNS,
     "douyinId",
     "verifiedreason",
@@ -65,7 +65,7 @@ const CREATOR_COLUMNS: Record<CreatorPlatform, readonly string[]> = {
     "growTalentTypeLabel",
     "talentTypeLabel",
   ],
-  xhs: [
+  xiaohongshu: [
     ...COMMON_CREATOR_COLUMNS,
     "xiaohongshuId",
     "verifiedreason",
@@ -80,7 +80,7 @@ const CREATOR_COLUMNS: Record<CreatorPlatform, readonly string[]> = {
   ],
 };
 const SEMANTIC_FIELDS: Record<CreatorPlatform, readonly string[]> = {
-  dy: [
+  douyin: [
     "description",
     "verifiedreason",
     "tagBrand",
@@ -90,7 +90,7 @@ const SEMANTIC_FIELDS: Record<CreatorPlatform, readonly string[]> = {
     "growTalentTypeLabel",
     "talentTypeLabel",
   ],
-  xhs: [
+  xiaohongshu: [
     "description",
     "verifiedreason",
     "tagBrand",
@@ -184,7 +184,7 @@ export class MysqlReadonlySource {
   constructor(private readonly config: MysqlSourceConfig, private readonly sql: SqlExecutor) {}
 
   private tableFor(platform: CreatorPlatform): string | undefined {
-    return platform === "dy" ? this.config.dyTable : this.config.xhsTable;
+    return platform === "douyin" ? this.config.dyTable : this.config.xhsTable;
   }
 
   async readCreators(platform: CreatorPlatform, options: { cursor?: string; limit?: number } = {}): Promise<SourceReadResult> {

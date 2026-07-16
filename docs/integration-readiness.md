@@ -6,6 +6,17 @@
 
 发布版本：`3.0.0`
 
+## 当前开发数据库契约（2026-07-16）
+
+- 平台落库与业务 Tool 使用 `xiaohongshu`、`douyin`；`xhs`、`dy` 仅作为输入别名。
+- MySQL 达人身份物理列使用 `kwUid`；MCP 参数与 Python 属性可使用 `kw_uid`，但 ORM 必须显式映射。
+- 需求主键是 `customer_demands.id`，业务版本键是 `demandId + demandVersion`；`search_creators.id` 与 `rank_creators.requirement_id` 均传需求主键。
+- `creator_candidate_pool` 通过 `id + platform + kwUid` 绑定当前需求并保留历史记录。
+- 跨表关联键使用 `utf8mb4_unicode_ci`；需求主键为 `char(32)`，达人 ID 为 `varchar(64)`。
+- 行业和品牌语义由向量检索处理，不把 `businessIndustry` 或 `tagBrand` 空值作为 SQL 硬性不匹配。
+- 无报价候选可排序，但必须标记 `NO_ACTIVE_OFFER` / `need_confirm`；排序不设置最低候选数量。
+- 回收按 `inquiry_id + platform + kwUid` 幂等更新。
+
 ## 1. 结论
 
 | 评估面 | 结果 | 结论 |

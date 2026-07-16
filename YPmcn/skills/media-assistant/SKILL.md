@@ -27,6 +27,7 @@ description: "Use for the live YPmcn media workflow: requirement validation, cre
 3. **终态锁**：`recovered`/`closed` 后禁止重复写入，返回 `RECOVERY_ALREADY_TERMINAL`。
 4. **能力状态不夸大**：当前是目标契约 + 本地安全编排；生产 Provider、外部数据库和完整业务闭环未验证。不得把 Spec、Hook 或测试通过表述成生产业务已完成。
 5. **数据库搜索边界**：`search_creators` 只过滤现有达人数据库，禁止浏览器、网页搜索或站外抓取。
+6. **平台全拼**：业务 Tool 和数据库只使用 `xiaohongshu`、`douyin`；输入缩写必须先按需求解析规则标准化。
 
 ## 按需读取
 

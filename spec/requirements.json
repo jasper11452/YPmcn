@@ -5,7 +5,7 @@
   "dictionary": {
     "path": "requirement-dictionary.json",
     "version": "2026-07-12.1",
-    "hash": "35bcf309b7497eec57acb63e417f8070adb2c9e88ce409e1ea9b9fc967cf8342",
+    "hash": "1887f06832309451852ee08e830f5bde6bc69c21a36d27cc0f24997a9b958b85",
     "hashAlgorithm": "sha256",
     "hashCanonicalization": "recursive-key-sort-json-v1",
     "hashScope": "definitions",
@@ -26,7 +26,7 @@
     },
     "requirementRecord": {
       "path": "schemas/requirement-record.schema.json",
-      "hash": "abfe58eda6ecff6db24f0da0ef26d387cd0c105061289bd02cec26940d02162b"
+      "hash": "7050a7bbb97c8b884dd37584d0ebf5ecf63e2323446edc99f023fba0e76d9633"
     },
     "requirementSnapshot": {
       "path": "schemas/requirement-snapshot.schema.json",
@@ -34,7 +34,7 @@
     },
     "domainRecords": {
       "path": "schemas/domain-records.schema.json",
-      "hash": "e923479768a9032efa7c3dbc16c48a0df339419f0c846f30622b2e041e452875"
+      "hash": "5dcaccadb8c01b9b2deb6afea243f5f8686d54352b484ebcc1325f8b2c62b4be"
     },
     "workflowState": {
       "path": "schemas/workflow-state.schema.json",
@@ -125,8 +125,8 @@
     },
     "platformSplit": {
       "supportedPlatforms": [
-        "xhs",
-        "dy"
+        "xiaohongshu",
+        "douyin"
       ],
       "headEntity": "requirement_headers",
       "executionEntity": "customer_demands",

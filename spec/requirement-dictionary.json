@@ -5,7 +5,7 @@
   "dictionaryHashAlgorithm": "sha256",
   "dictionaryHashCanonicalization": "recursive-key-sort-json-v1",
   "dictionaryHashScope": "definitions",
-  "dictionaryHash": "35bcf309b7497eec57acb63e417f8070adb2c9e88ce409e1ea9b9fc967cf8342",
+  "dictionaryHash": "1887f06832309451852ee08e830f5bde6bc69c21a36d27cc0f24997a9b958b85",
   "contentPolicy": {
     "containsCustomerContent": false,
     "allowedContent": [
@@ -27,8 +27,8 @@
       "type": "string",
       "classification": "execution-scope",
       "enum": [
-        "xhs",
-        "dy"
+        "xiaohongshu",
+        "douyin"
       ],
       "description": "Exactly one platform per executable requirement."
     },

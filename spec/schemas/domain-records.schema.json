@@ -54,8 +54,8 @@
           "uniqueItems": true,
           "items": {
             "enum": [
-              "xhs",
-              "dy"
+              "xiaohongshu",
+              "douyin"
             ]
           }
         },
@@ -162,8 +162,8 @@
         },
         "platform": {
           "enum": [
-            "xhs",
-            "dy"
+            "xiaohongshu",
+            "douyin"
           ]
         },
         "offer_type": {

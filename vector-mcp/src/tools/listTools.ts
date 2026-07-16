@@ -7,7 +7,7 @@ export const TOOL_DEFINITIONS = [
       type: "object",
       properties: {
         sourceMappingPath: { type: "string", description: "Path to the source-field mapping JSON file." },
-        platform: { type: "string", enum: ["xhs", "dy"], description: "Platform to sync." },
+        platform: { type: "string", enum: ["xiaohongshu", "douyin"], description: "Platform to sync." },
         cursor: { type: "string", description: "Manual incremental cursor; selects update_time > cursor." },
         limit: { type: "number", description: "Bounded source rows for this manual run." },
         dryRun: { type: "boolean", description: "If true, validate without writing." },
@@ -21,7 +21,7 @@ export const TOOL_DEFINITIONS = [
     inputSchema: {
       type: "object",
       properties: {
-        platform: { type: "string", enum: ["xhs", "dy"], description: "Platform to search." },
+        platform: { type: "string", enum: ["xiaohongshu", "douyin"], description: "Platform to search." },
         queryText: { type: "string", description: "Direct local-test query text." },
         projectId: { type: ["string", "number"], description: "Optional core_project id used to load description." },
         positiveRequirements: { type: "array", items: { type: "string" }, description: "Tags to match." },

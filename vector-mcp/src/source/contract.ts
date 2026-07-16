@@ -1,5 +1,5 @@
 // @ts-nocheck
-export type SourcePlatform = "xhs" | "dy";
+export type SourcePlatform = "xiaohongshu" | "douyin";
 export type SourceField = "platform" | "platform_account_id" | "display_name" | "content_tags" | "grow_tags" | "source_updated_at" | "source_table" | "profile_url";
 export const REQUIRED_FIELDS: readonly SourceField[] = ["platform", "platform_account_id", "content_tags", "grow_tags", "source_updated_at", "source_table"];
 export type SourceMapping = Record<SourceField, string>;
@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 
 export function validateSourceMapping(mappings: SourceMappings): { ok: true } | { ok: false; missing: Array<{ platform: SourcePlatform; field: SourceField }> } {
   const missing: Array<{ platform: SourcePlatform; field: SourceField }> = [];
-  for (const platform of ["xhs", "dy"] as SourcePlatform[]) {
+  for (const platform of ["xiaohongshu", "douyin"] as SourcePlatform[]) {
     const mapping = mappings[platform];
     if (!mapping) { missing.push({ platform, field: "platform" }); continue; }
     for (const field of REQUIRED_FIELDS) {

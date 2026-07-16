@@ -11,7 +11,7 @@ const VERSION = "v1";
 function rows() {
   return [
     {
-      platform: "xhs",
+      platform: "xiaohongshu",
       platform_account_id: "xhs-1",
       source_table: "xhs_creator_accounts",
       content_tags: ["美妆", "护肤"],
@@ -19,7 +19,7 @@ function rows() {
       source_updated_at: "2026-07-11T00:00:00Z",
     },
     {
-      platform: "dy",
+      platform: "douyin",
       platform_account_id: "dy-1",
       source_table: "dy_creator_accounts",
       content_tags: ["数码", "测评"],

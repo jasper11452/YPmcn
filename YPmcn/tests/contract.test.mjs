@@ -90,7 +90,7 @@ describe("current Endpoint input validation", () => {
     const cases = [
       ["validate_requirement", { payload: { raw: "brief" } }],
       ["search_creators", { id: "req-1" }],
-      ["rank_mcns", { id: "req-1", platform: "xhs", medium_risk_confirmation: null }],
+      ["rank_mcns", { id: "req-1", platform: "xiaohongshu", medium_risk_confirmation: null }],
       ["select_inquiry_form_fields", { url: null, timeout_seconds: 30 }],
       ["create_with_distributions", validDistribution({ prefillRowsBySupplier: {
         "supplier-1": [{ kw_uid: "creator-1" }],
@@ -105,7 +105,7 @@ describe("current Endpoint input validation", () => {
       ["create_submission_batch", { run_id: "1", risk_confirmation: null }],
       ["record_client_feedback", { run_id: "1", feedback_items: [{ status: "accepted" }] }],
       ["get_recommendation_run_detail", { run_id: "1" }],
-      ["get_creator_detail", { platform: "xhs", kw_uid: "creator-1" }],
+      ["get_creator_detail", { platform: "xiaohongshu", kw_uid: "creator-1" }],
       ["audit_manual_adjustment", { run_id: "1", adjustments: [{}], operator_id: "operator-1" }],
       ["get_workflow_state", { trace_id: "trace-1" }],
       ["get_workflow_state", { demand_id: "demand-1", demand_version: 1 }],

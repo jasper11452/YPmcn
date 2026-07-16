@@ -36,7 +36,7 @@ function rawRow(overrides = {}) {
 
 function creator(overrides = {}) {
   return {
-    platform: "dy",
+    platform: "douyin",
     kwUid: "kw-7",
     sourceTable: "dy_mz",
     sourceRowId: "kw-7",
@@ -56,7 +56,7 @@ function namedVectorPoint(id, overrides = {}) {
     id: String(id),
     vector: { content: [1, 0], commercial: [0, 1] },
     payload: {
-      platform: "dy", kw_uid: `kw-${id}`, source_table: "dy_mz", source_row_id: String(id),
+      platform: "douyin", kw_uid: `kw-${id}`, source_table: "dy_mz", source_row_id: String(id),
       source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
       embedding_model_id: "text-embedding-v4", vector_version: "local-v1",
       commercial_vector_available: true,
@@ -152,6 +152,20 @@ describe("DashScope providers", () => {
 });
 
 describe("official Qdrant SDK adapter", () => {
+  it("selects the Qdrant SDK port from the URL protocol and explicit port", () => {
+    const cases = [
+      ["https://example.com", 443],
+      ["https://example.com:7443", 7443],
+      ["http://localhost", 6333],
+      ["http://localhost:6333", 6333],
+    ];
+
+    for (const [url, expectedPort] of cases) {
+      const qdrant = new RealQdrantClient({ url, collectionName: "c", vectorSize: 2 });
+      assert.equal(qdrant.client._port, expectedPort);
+    }
+  });
+
   it("creates named-vector collection, persists a content-only point, queries content and checks health", async () => {
     const calls = [];
     const client = {
@@ -161,7 +175,7 @@ describe("official Qdrant SDK adapter", () => {
       upsert: async (collectionName, options) => { calls.push(["upsert", collectionName, options]); },
       query: async (collectionName, options) => {
         calls.push(["query", collectionName, options]);
-        return { points: [{ id: "p", score: 0.8, payload: { platform: "dy", kw_uid: "kw-7" } }] };
+        return { points: [{ id: "p", score: 0.8, payload: { platform: "douyin", kw_uid: "kw-7" } }] };
       },
       getCollections: async () => { calls.push(["getCollections"]); return { collections: [] }; },
       deleteCollection: async (collectionName) => { calls.push(["deleteCollection", collectionName]); },
@@ -169,11 +183,11 @@ describe("official Qdrant SDK adapter", () => {
     const qdrant = new RealQdrantClient({ url: "http://q", collectionName: "c", vectorSize: 2, client });
     await qdrant.ensureCollection();
     await qdrant.upsert([{ id: "p", vector: { content: [1, 0] }, payload: {
-      platform: "dy", kw_uid: "kw-7", source_table: "dy_mz", source_row_id: "kw-7",
+      platform: "douyin", kw_uid: "kw-7", source_table: "dy_mz", source_row_id: "kw-7",
       source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
       embedding_model_id: "text-embedding-v4", vector_version: "local-v1", commercial_vector_available: false,
     } }]);
-    await qdrant.search("content", [1, 0], 5, "dy");
+    await qdrant.search("content", [1, 0], 5, "douyin");
     await qdrant.health();
     assert.deepEqual(calls[1][2].vectors, {
       content: { size: 2, distance: "Cosine" }, commercial: { size: 2, distance: "Cosine" },
@@ -181,7 +195,7 @@ describe("official Qdrant SDK adapter", () => {
     assert.equal(calls[2][2].points[0].payload.normalized_text, undefined);
     assert.deepEqual(calls[2][2].points[0].vector, { content: [1, 0] });
     assert.equal(calls[3][2].using, "content");
-    assert.deepEqual(calls[3][2].filter, { must: [{ key: "platform", match: { value: "dy" } }] });
+    assert.deepEqual(calls[3][2].filter, { must: [{ key: "platform", match: { value: "douyin" } }] });
   });
 
   it("validates existing named-vector schema and all vector dimensions", async () => {
@@ -196,7 +210,7 @@ describe("official Qdrant SDK adapter", () => {
     const qdrant = new RealQdrantClient({ url: "http://q", collectionName: "c", vectorSize: 2, client });
     await assert.rejects(qdrant.ensureCollection(), /schema mismatch/);
     await assert.rejects(qdrant.upsert([{ id: "p", vector: { content: [1], commercial: [0, 1] }, payload: {
-      platform: "dy", kw_uid: "kw-7", source_table: "dy_mz", source_row_id: "kw-7",
+      platform: "douyin", kw_uid: "kw-7", source_table: "dy_mz", source_row_id: "kw-7",
       source_snapshot_date: "2026-07-14", source_updated_at: "2026-07-14T12:00:00Z",
       embedding_model_id: "text-embedding-v4", vector_version: "local-v1", commercial_vector_available: true,
     } }]), /exactly 2/);
@@ -274,11 +288,11 @@ it("real Qdrant SDK smoke", { skip: process.env.RUN_QDRANT_SMOKE !== "1" }, asyn
     await qdrant.health();
     await qdrant.ensureCollection();
     await qdrant.upsert([{ id: randomUUID(), vector: { content: [1, 0], commercial: [0, 1] }, payload: {
-      platform: "dy", kw_uid: "smoke", source_table: "smoke", source_row_id: "1",
+      platform: "douyin", kw_uid: "smoke", source_table: "smoke", source_row_id: "1",
       source_snapshot_date: "2026-07-15", source_updated_at: "2026-07-15T00:00:00Z",
       embedding_model_id: "smoke", vector_version: "smoke", commercial_vector_available: true,
     } }]);
-    const hits = await qdrant.search("content", [1, 0], 1, "dy");
+    const hits = await qdrant.search("content", [1, 0], 1, "douyin");
     assert.equal(hits[0]?.payload.kw_uid, "smoke");
   } finally {
     await qdrant.deleteCollection().catch(() => {});
@@ -294,8 +308,8 @@ describe("read-only MySQL source", () => {
     assert.equal(envConfig.host, "yp-host");
     const calls = [];
     const source = new MysqlReadonlySource(config(), { query: async (sql, values) => { calls.push({ sql, values }); return [[rawRow()]]; } });
-    const full = await source.readCreators("dy");
-    const incremental = await source.readCreators("dy", { cursor: "2026-07-14", limit: 10 });
+    const full = await source.readCreators("douyin");
+    const incremental = await source.readCreators("douyin", { cursor: "2026-07-14", limit: 10 });
     assert.equal(full.rows[0].kwUid, "kw-7");
     assert.match(calls[0].sql, /^SELECT /);
     assert.doesNotMatch(calls[0].sql, /^\s*(?:INSERT|UPDATE|DELETE|CREATE|ALTER)\b/i);
@@ -310,8 +324,8 @@ describe("read-only MySQL source", () => {
     assert.throws(() => validateTableIdentifier("evil; DROP TABLE x", ["evil"]), /allowlist/);
     const calls = [];
     const source = new MysqlReadonlySource(config({ xhsTable: undefined }), { query: async (sql, values) => { calls.push({ sql, values }); return [[{ description: "露营项目 13800138000" }]]; } });
-    assert.deepEqual(await source.readCreators("xhs"), {
-      status: "unavailable", platform: "xhs", rows: [], reason: "source_not_configured",
+    assert.deepEqual(await source.readCreators("xiaohongshu"), {
+      status: "unavailable", platform: "xiaohongshu", rows: [], reason: "source_not_configured",
     });
     assert.equal(await source.loadProjectDescription(9), "露营项目 13800138000");
     assert.match(calls[0].sql, /^SELECT description FROM `core_project` WHERE id = \? LIMIT 1$/);
@@ -322,8 +336,8 @@ describe("read-only MySQL source", () => {
     const source = new MysqlReadonlySource(config(), {
       query: async () => { throw missing; },
     });
-    assert.deepEqual(await source.readCreators("xhs"), {
-      status: "unavailable", platform: "xhs", rows: [], reason: "source_table_missing",
+    assert.deepEqual(await source.readCreators("xiaohongshu"), {
+      status: "unavailable", platform: "xiaohongshu", rows: [], reason: "source_table_missing",
     });
   });
 });
@@ -369,7 +383,7 @@ describe("sync identity and search pipeline", () => {
       readCreators: async (_platform, options) => {
         reads.push(options);
         const row = options.cursor ? creator({ sourceUpdatedAt: "2026-07-15T12:00:00.000Z" }) : creator();
-        return { status: "available", platform: "dy", rows: [row], cursor: row.sourceUpdatedAt };
+        return { status: "available", platform: "douyin", rows: [row], cursor: row.sourceUpdatedAt };
       },
       rehydrate: async () => [], loadProjectDescription: async () => null,
     };
@@ -379,9 +393,9 @@ describe("sync identity and search pipeline", () => {
       qdrant: { ensureCollection: async () => {}, upsert: async (points) => upserts.push(points), search: async () => [], health: async () => ({ ok: true }) },
       reranker: { modelId: () => "r", rerank: async () => [] }, vectorVersion: "v",
     });
-    const first = await pipeline.sync("dy");
-    await pipeline.sync("dy");
-    const incremental = await pipeline.sync("dy", { cursor: first.cursor });
+    const first = await pipeline.sync("douyin");
+    await pipeline.sync("douyin");
+    const incremental = await pipeline.sync("douyin", { cursor: first.cursor });
     assert.deepEqual(reads, [{ cursor: undefined, limit: undefined }, { cursor: undefined, limit: undefined }, { cursor: first.cursor, limit: undefined }]);
     assert.equal(upserts[0][0].id, upserts[1][0].id);
     assert.equal(upserts[1][0].id, upserts[2][0].id);
@@ -393,21 +407,21 @@ describe("sync identity and search pipeline", () => {
     const source = {
       loadProjectDescription: async () => "露营 联系13800138000",
       rehydrate: async () => [creator()],
-      readCreators: async () => ({ status: "available", platform: "dy", rows: [creator()] }),
+      readCreators: async () => ({ status: "available", platform: "douyin", rows: [creator()] }),
     };
     const pipeline = new LocalVectorPipeline({
       source,
       embedding: { modelId: () => "e", embed: async (texts) => { embedded.push(...texts); return texts.map(() => new Float32Array([1, 0])); } },
       qdrant: {
         search: async (name) => [{ id: name, score: 0.5, payload: {
-          platform: "dy", kw_uid: "kw-7", commercial_vector_available: true,
+          platform: "douyin", kw_uid: "kw-7", commercial_vector_available: true,
         } }],
         ensureCollection: async () => {}, upsert: async () => {}, health: async () => ({ ok: true }),
       },
       reranker: { modelId: () => "r", rerank: async (_q, docs) => docs.map((_, index) => ({ index, score: 0.7 })) },
       vectorVersion: "v",
     });
-    const result = await pipeline.search({ projectId: 3, platform: "dy", filters: { region: "沈阳", followerMin: 1000 } });
+    const result = await pipeline.search({ projectId: 3, platform: "douyin", filters: { region: "沈阳", followerMin: 1000 } });
     assert.equal(result.success, true);
     assert.equal(result.retrieval_mode, "local-vector");
     assert.match(embedded[0], /\[PHONE\]/);
@@ -423,16 +437,16 @@ describe("sync identity and search pipeline", () => {
     const pipeline = new LocalVectorPipeline({
       source: {
         loadProjectDescription: async () => null,
-        readCreators: async () => ({ status: "available", platform: "dy", rows: [] }),
+        readCreators: async () => ({ status: "available", platform: "douyin", rows: [] }),
         rehydrate: async () => [contentOnly, both],
       },
       embedding: { modelId: () => "e", embed: async (texts) => texts.map(() => new Float32Array([1, 0])) },
       qdrant: {
         search: async (name) => name === "content" ? [
-          { id: "content", score: 0.9, payload: { platform: "dy", kw_uid: "kw-content", commercial_vector_available: false } },
-          { id: "both", score: 0.8, payload: { platform: "dy", kw_uid: "kw-both", commercial_vector_available: true } },
+          { id: "content", score: 0.9, payload: { platform: "douyin", kw_uid: "kw-content", commercial_vector_available: false } },
+          { id: "both", score: 0.8, payload: { platform: "douyin", kw_uid: "kw-both", commercial_vector_available: true } },
         ] : [
-          { id: "both", score: 0.95, payload: { platform: "dy", kw_uid: "kw-both", commercial_vector_available: true } },
+          { id: "both", score: 0.95, payload: { platform: "douyin", kw_uid: "kw-both", commercial_vector_available: true } },
         ],
         ensureCollection: async () => {}, upsert: async () => {}, health: async () => ({ ok: true }),
       },
@@ -446,7 +460,7 @@ describe("sync identity and search pipeline", () => {
       vectorVersion: "v",
     });
 
-    const result = await pipeline.search({ queryText: "露营", platform: "dy" });
+    const result = await pipeline.search({ queryText: "露营", platform: "douyin" });
 
     assert.deepEqual(rerankDocuments, ["纯内容", "徒步露营 | 户外达人 户外用品"]);
     assert.deepEqual(result.matches.map((match) => match.kw_uid), ["kw-content", "kw-both"]);
@@ -461,16 +475,16 @@ describe("sync identity and search pipeline", () => {
     };
     const degraded = await new LocalVectorPipeline({
       ...base,
-      source: { loadProjectDescription: async () => null, rehydrate: async () => [], readCreators: async () => ({ status: "available", platform: "dy", rows: [creator()] }) },
-    }).search({ queryText: "露营", platform: "dy" });
+      source: { loadProjectDescription: async () => null, rehydrate: async () => [], readCreators: async () => ({ status: "available", platform: "douyin", rows: [creator()] }) },
+    }).search({ queryText: "露营", platform: "douyin" });
     assert.equal(degraded.retrieval_mode, "sql-only");
     assert.equal(degraded.degraded_reason, "embedding_unavailable");
     assert.equal(degraded.matches[0].provenance.commercial_vector_available, false);
 
     const failed = await new LocalVectorPipeline({
       ...base,
-      source: { loadProjectDescription: async () => null, rehydrate: async () => [], readCreators: async () => ({ status: "unavailable", platform: "xhs", rows: [], reason: "source_not_configured" }) },
-    }).search({ queryText: "露营", platform: "xhs" });
+      source: { loadProjectDescription: async () => null, rehydrate: async () => [], readCreators: async () => ({ status: "unavailable", platform: "xiaohongshu", rows: [], reason: "source_not_configured" }) },
+    }).search({ queryText: "露营", platform: "xiaohongshu" });
     assert.deepEqual(failed.error, { code: "VECTOR_DEPENDENCY_ERROR", dependency: "embedding_unavailable", source_status: "source_not_configured" });
   });
 });

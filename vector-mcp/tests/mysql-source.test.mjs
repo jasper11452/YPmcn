@@ -62,12 +62,12 @@ describe("read-only MySQL creator source", () => {
       },
     });
 
-    const result = await source.readCreators("dy");
+    const result = await source.readCreators("douyin");
 
     assert.equal(calls[0].sql, `${DY_SELECT} ORDER BY update_time ASC, kwUid ASC`);
     assert.deepEqual(calls[0].values, []);
     assert.deepEqual(result.rows[0], {
-      platform: "dy",
+      platform: "douyin",
       kwUid: "dy-kw-1",
       sourceTable: "dy_mz",
       sourceRowId: "dy-kw-1",
@@ -129,7 +129,7 @@ describe("read-only MySQL creator source", () => {
       },
     });
 
-    const result = await source.readCreators("xhs", { cursor: "2026-07-14", limit: 20 });
+    const result = await source.readCreators("xiaohongshu", { cursor: "2026-07-14", limit: 20 });
 
     assert.equal(calls[0].sql, `${XHS_SELECT} WHERE update_time > ? ORDER BY update_time ASC, kwUid ASC LIMIT ?`);
     assert.deepEqual(calls[0].values, ["2026-07-14", 20]);
@@ -171,25 +171,25 @@ describe("read-only MySQL creator source", () => {
       },
     });
 
-    const rows = await source.rehydrate("xhs", ["xhs-kw-2", "xhs-kw-1", "xhs-kw-2"]);
+    const rows = await source.rehydrate("xiaohongshu", ["xhs-kw-2", "xhs-kw-1", "xhs-kw-2"]);
     assert.equal(calls[0].sql, `${XHS_SELECT} WHERE kwUid IN (?, ?) ORDER BY kwUid ASC, update_time DESC`);
     assert.deepEqual(calls[0].values, ["xhs-kw-1", "xhs-kw-2"]);
     assert.deepEqual(rows.map(({ kwUid }) => kwUid), ["xhs-kw-2"]);
 
     const missing = Object.assign(new Error("missing"), { code: "ER_NO_SUCH_TABLE", errno: 1146 });
     const unavailable = new MysqlReadonlySource(config(), { query: async () => { throw missing; } });
-    assert.deepEqual(await unavailable.readCreators("dy"), {
+    assert.deepEqual(await unavailable.readCreators("douyin"), {
       status: "unavailable",
-      platform: "dy",
+      platform: "douyin",
       rows: [],
       reason: "source_table_missing",
     });
-    assert.deepEqual(await unavailable.rehydrate("xhs", ["xhs-kw-1"]), []);
+    assert.deepEqual(await unavailable.rehydrate("xiaohongshu", ["xhs-kw-1"]), []);
 
     const unconfigured = new MysqlReadonlySource(config({ xhsTable: undefined }), { query: async () => assert.fail("must not query") });
-    assert.deepEqual(await unconfigured.readCreators("xhs"), {
+    assert.deepEqual(await unconfigured.readCreators("xiaohongshu"), {
       status: "unavailable",
-      platform: "xhs",
+      platform: "xiaohongshu",
       rows: [],
       reason: "source_not_configured",
     });

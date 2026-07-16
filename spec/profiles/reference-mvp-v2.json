@@ -1259,8 +1259,8 @@
         "platform": {
           "type": "string",
           "enum": [
-            "xhs",
-            "dy"
+            "xiaohongshu",
+            "douyin"
           ]
         },
         "nickname": {
@@ -3141,8 +3141,8 @@
               "platform": {
                 "type": "string",
                 "enum": [
-                  "xhs",
-                  "dy"
+                  "xiaohongshu",
+                  "douyin"
                 ]
               },
               "platform_account_id": {
@@ -3414,8 +3414,8 @@
         "platform": {
           "type": "string",
           "enum": [
-            "xhs",
-            "dy"
+            "xiaohongshu",
+            "douyin"
           ]
         },
         "platform_account_id": {

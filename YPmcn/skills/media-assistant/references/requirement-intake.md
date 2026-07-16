@@ -12,7 +12,7 @@
 ## 解析原则
 
 - 保留原文，不把推测写成客户事实。
-- 平台仅用 `xhs`、`dy`。
+- 平台仅写全拼 `xiaohongshu`、`douyin`；把“小红书/XHS/红书”和“抖音/DY/Douyin”分别标准化，缩写不得进入业务 Tool。
 - 金额写分，返点写 0–1 小数，时间写带时区 ISO 8601。
 - 单值预算可按已确认口径映射为闭区间；不确定就停在 `requirement_draft`。
 - 扩展筛选字段必须来自 `creator_candidate_pool_schema.csv`。

@@ -25,7 +25,7 @@ function point(id, tags) {
     id,
     vector: [1, 0],
     payload: {
-      platform: "xhs",
+      platform: "xiaohongshu",
       platform_account_id: id,
       source_table: "xhs_creator_accounts",
       tag_type: "content",

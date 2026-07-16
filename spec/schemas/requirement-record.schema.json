@@ -39,8 +39,8 @@
     },
     "platform": {
       "enum": [
-        "xhs",
-        "dy"
+        "xiaohongshu",
+        "douyin"
       ]
     },
     "dictionary_version": {
