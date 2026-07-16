@@ -55,6 +55,8 @@ project/
 
 ```bash
 npm ci
+npm run test:fast
+npm run test:openclaw
 npm run verify
 npm run pack:yp
 ```
@@ -62,6 +64,8 @@ npm run pack:yp
 根 `package.json` 统一管理 `YPmcn` 与 `vector-mcp` 两个 npm workspace；一次根 `npm ci` 会安装全部构建和测试依赖，并自动启用仓库 hook，无需分别进入组件安装。`npm run docs:sync` 只在需要提交前即时预览或修复时使用。
 
 `npm run verify` 执行 Spec 漂移门禁、根安装图检查、密钥扫描、插件契约、Python Hook、provider comparator、文档、向量 MCP 和发布包验证。`npm run pack:yp` 在 `packages/.staging/` 组装，并把扫描后的包输出到 `packages/releases/`。
+
+日常联调不先打包：`npm run test:fast` 运行 Python Hook 并启动真实 vector MCP 子进程验证 JSON-RPC initialize、tools/list 与工具 schema；`npm run test:openclaw` 使用 YP Action 内置 OpenClaw、临时隔离配置和源码目录验证 Plugin/Skill 装载。`npm run test:headless` 串联两者。只有发布候选才打 tgz 并在 YP Action UI 验证安装器、配置同步、桌面交互和重启持久化。
 
 本项目采用 V2.3 极简 Agent 流程：默认一个写者；Fast 由 Claude Code 直接完成，Standard 才按需交给 Codex，Critical 才启用 OpenCode 独立只读验证。普通开发不使用 Workflow、跨 Session 状态机或任务证据目录。该规则由仓库根 `CLAUDE.md` 和项目级 `.claude/settings.json` 限定，只影响从本仓库启动的 Claude Code。
 

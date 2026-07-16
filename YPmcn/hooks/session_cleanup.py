@@ -5,11 +5,12 @@ Runs on session end / stop events. Cleans up expired session entries from
 .claude/state/session_guard.json based on 24h TTL.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-STATE_FILE = PROJECT_ROOT / "state" / "session_guard.json"
+STATE_FILE = Path(os.environ.get("YPMCN_STATE_FILE", PROJECT_ROOT / "state" / "session_guard.json"))
 TTL_MS = 24 * 60 * 60 * 1000
 
 

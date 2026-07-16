@@ -38,6 +38,8 @@ OpenCode 固定使用原生 CLI、`--pure --agent plan`、`yuepu/*` 模型，并
 
 默认只运行任务相关测试、`git diff --check` 和修改范围检查；风险或失败证据需要时才运行一次全量 `npm run verify`。
 
+联调从低成本层开始：日常跑 `npm run test:fast`；涉及 Plugin、Skill、manifest 或 OpenClaw 适配时再跑 `npm run test:openclaw`，合并前可跑 `npm run test:headless`。只有发布候选才执行 `npm run pack:yp` 并进入 YP Action UI 冒烟。Headless 命令必须使用隔离配置，禁止修改正式 YP Action 状态或触发生产写操作。
+
 最终只报告：
 
 ```text

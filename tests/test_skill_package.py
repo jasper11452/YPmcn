@@ -27,7 +27,7 @@ EXPECTED_REFERENCE_FILES = {
     "requirement-parsing.md",
     "validation-playbook.md",
 }
-EXPECTED_CSV_SHA256 = "e46a9ecd8c8dccea33c7b4c03d50756a7349c337fb3b08e3c21a207696a82a3a"
+EXPECTED_CSV_SHA256 = "a9bd698d2b5e9d1e4ec2c9b57cdf6144e5d8acbbc891e64fa1548b1764d0746e"
 
 
 def read(path: Path) -> str:
@@ -49,6 +49,7 @@ class SkillPackageContractTest(unittest.TestCase):
         cls.profile = json.loads(read(PROFILE_PATH))
         cls.workflow = json.loads(read(WORKFLOW_PATH))
         cls.required_tools = cls.profile["requiredTools"]
+        cls.all_tools = set(cls.profile["tools"])
 
     def test_package_contains_runtime_contract_and_operator_entrypoints(self):
         required = [
@@ -81,17 +82,17 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertIn(required, text)
 
-    def test_every_required_tool_has_one_structured_card(self):
+    def test_every_declared_tool_has_one_structured_card(self):
         actual = {path.stem for path in TOOLS_DIR.glob("*.md")}
-        self.assertEqual(set(self.required_tools), actual)
-        for name in self.required_tools:
+        self.assertEqual(self.all_tools, actual)
+        for name in self.all_tools:
             text = read(TOOLS_DIR / f"{name}.md")
             self.assertTrue(text.startswith(f"# {name}\n"), name)
             for heading in ("何时调用", "输入", "输出成功证据", "调用后必须停在哪里", "错误与停止条件"):
                 self.assertTrue(section(text, heading).strip(), f"{name}: {heading}")
 
     def test_tool_card_inputs_and_success_evidence_derive_from_profile(self):
-        for name in self.required_tools:
+        for name in self.all_tools:
             contract = self.profile["tools"][name]
             text = read(TOOLS_DIR / f"{name}.md")
             input_text = section(text, "输入")

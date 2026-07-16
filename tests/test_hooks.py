@@ -10,7 +10,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 HOOKS_DIR = PROJECT_ROOT / "YPmcn" / "hooks"
 STATE_DIR = PROJECT_ROOT / "YPmcn" / "state"
-STATE_FILE = STATE_DIR / "session_guard.json"
+TEST_STATE_DIR = tempfile.TemporaryDirectory(prefix="ypmcn-hook-test-")
+STATE_FILE = Path(TEST_STATE_DIR.name) / "session_guard.json"
 PRE_TOOL = HOOKS_DIR / "pre_tool_guard.py"
 POST_TOOL = HOOKS_DIR / "post_tool_update.py"
 CLEANUP = HOOKS_DIR / "session_cleanup.py"
@@ -23,12 +24,14 @@ PAST_DEADLINE = "2025-01-01T10:00:00+08:00"
 
 
 def run_hook(script, payload):
+    env = {**os.environ, "YPMCN_STATE_FILE": str(STATE_FILE)}
     result = subprocess.run(
         [sys.executable, str(script)],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
         cwd=str(PROJECT_ROOT),
+        env=env,
     )
     try:
         return json.loads(result.stdout.strip())

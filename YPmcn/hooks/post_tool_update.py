@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-STATE_FILE = PROJECT_ROOT / "state" / "session_guard.json"
+STATE_FILE = Path(os.environ.get("YPMCN_STATE_FILE", PROJECT_ROOT / "state" / "session_guard.json"))
 TTL_SECONDS = 24 * 60 * 60
 
 TOOL_NAME_PREFIXES = [

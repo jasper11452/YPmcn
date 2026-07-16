@@ -1,6 +1,6 @@
 {
   "name": "ypmcn-contract-first-automation",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -15,6 +15,10 @@
     "verify:docs": "node scripts/sync-human-docs.mjs --check",
     "verify:spec": "node --test tests/spec_governance.test.mjs",
     "verify:provider": "node scripts/check-provider-contract.mjs --url https://mcp.eshypdata.com/sse",
+    "test:fast": "npm --workspace YPmcn test && npm --workspace vector-mcp run build && uv run --no-project python -B tests/test_hooks.py && node scripts/smoke-vector-mcp.mjs",
+    "test:mcp": "npm --workspace vector-mcp run build && node scripts/smoke-vector-mcp.mjs",
+    "test:openclaw": "npm --workspace YPmcn run build && node scripts/check-openclaw-source.mjs",
+    "test:headless": "npm run test:fast && npm run test:openclaw",
     "pack:yp": "node scripts/prepare-package.mjs"
   },
   "dependencies": {

@@ -22,7 +22,7 @@ const pluginAssets = [
   ".npmignore",
   "README.md",
   "dist",
-  "hooks",
+  ".mcp.json",
   "mcp.json",
   "openclaw.plugin.json",
   "package.json",
@@ -55,6 +55,11 @@ export function stagePackageAssets() {
   for (const asset of pluginAssets) {
     cpSync(join(pluginRoot, asset), join(stagingRoot, asset), { recursive: true });
   }
+  cpSync(
+    join(pluginRoot, "hooks", "ypmcn-media-assistant"),
+    join(stagingRoot, "hooks", "ypmcn-media-assistant"),
+    { recursive: true },
+  );
   cpSync(specRoot, join(stagingRoot, "spec"), { recursive: true });
   cpSync(vectorDist, join(stagingRoot, "vector-mcp", "dist"), { recursive: true });
   return stagingRoot;

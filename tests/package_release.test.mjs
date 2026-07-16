@@ -10,7 +10,7 @@ const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.u
 const stagedPluginRoot = fileURLToPath(
   new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
 );
-const VERSION = "3.0.3";
+const VERSION = "3.0.4";
 
 function json(relativePath) {
   return JSON.parse(readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8"));
@@ -38,7 +38,7 @@ function dryRunFiles() {
 before(stageIfImplemented);
 after(() => rmSync(stagingBase, { recursive: true, force: true }));
 
-describe("3.0.3 release metadata", () => {
+describe("3.0.4 release metadata", () => {
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
     const rootPackage = json("package.json");
     const rootLock = json("package-lock.json");
@@ -63,16 +63,26 @@ describe("3.0.3 release metadata", () => {
     const manifest = json("YPmcn/openclaw.plugin.json");
     assert.deepEqual(pluginPackage.openclaw, {
       extensions: ["./dist/index.js"],
+      hooks: ["./hooks/ypmcn-media-assistant"],
     });
-    assert.deepEqual(manifest.hooks, {
-      pre_tool_guard: "./hooks/pre_tool_guard.py",
-      post_tool_update: "./hooks/post_tool_update.py",
-      session_cleanup: "./hooks/session_cleanup.py",
-    });
-    assert.equal(pluginPackage["openclaw.hooks"], undefined);
+    assert.equal(manifest.hooks, undefined);
     assert.equal(pluginPackage["openclaw.extensions"], undefined);
     assert.equal(manifest.contracts.profile, "mvp-v2");
     assert.equal(manifest.contracts.spec, "./spec/mcp.json");
+  });
+
+  it("uses the production YPmcn SSE provider as the bundle MCP server", () => {
+    const expected = {
+      mcpServers: {
+        "ypmcn-mcp": {
+          url: "https://mcp.eshypdata.com/sse",
+          transport: "sse",
+          connectionTimeoutMs: 30000,
+        },
+      },
+    };
+    assert.deepEqual(json("YPmcn/.mcp.json"), expected);
+    assert.deepEqual(json("YPmcn/mcp.json"), expected);
   });
 
   it("keeps dependencies owned and exactly pinned", () => {
@@ -93,6 +103,8 @@ describe("reproducible plugin package", () => {
     const files = dryRunFiles();
     for (const required of (
       [
+        ".mcp.json",
+        "mcp.json",
         "dist/index.js",
         "spec/mcp.json",
         "spec/workflow.json",
@@ -102,6 +114,18 @@ describe("reproducible plugin package", () => {
     )) {
       assert.ok(files.includes(required), required);
     }
+  });
+
+  it("keeps the installable runtime free of blocked process execution patterns", () => {
+    const runtime = readFileSync(new URL("../packages/.staging/ypmcn-media-assistant/dist/index.js", import.meta.url), "utf8");
+    assert.doesNotMatch(runtime, /node:child_process|\b(?:exec|spawn|execFile)(?:Sync)?\s*\(/);
+  });
+
+  it("excludes legacy Python hooks and bytecode from the cross-platform archive", () => {
+    const files = dryRunFiles();
+    assert.equal(files.some((path) => /(?:\.py|\.pyc)$|__pycache__/.test(path)), false);
+    assert.ok(files.includes("hooks/ypmcn-media-assistant/HOOK.md"));
+    assert.ok(files.includes("hooks/ypmcn-media-assistant/handler.js"));
   });
 
   it("excludes source, tests, mocks, scripts, and secret files", () => {

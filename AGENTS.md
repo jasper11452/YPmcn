@@ -47,6 +47,15 @@ verification: ["最小相关测试"]
 + 修改范围检查
 ```
 
+联调按成本分层，不得默认从打包和 YP Action UI 开始：
+
+- `npm run test:fast`：本地 Hook + 真实 stdio MCP 协议，日常实现默认门禁。
+- `npm run test:openclaw`：使用 YP Action 内置 OpenClaw 和隔离临时配置，从源码检查 Plugin/Skill 装载；修改 Plugin、Skill、manifest 或 OpenClaw 适配时必跑。
+- `npm run test:headless`：合并前的无 UI 联调。
+- `npm run pack:yp` + YP Action UI：仅用于发布候选的安装器、配置同步、桌面交互和持久化冒烟，不作为日常首轮调试方法。
+
+Headless 测试不得读取或修改 YP Action 正式用户配置，不得调用生产写 Tool；失败时保留首个协议或装载错误，不用 UI 重试掩盖。
+
 仅当风险或失败证据需要时运行一次 `npm run verify`。如需预览或修复自动生成的人类文档，运行 `npm run docs:sync`；提交前可用 `npm run verify:docs` 检查，仓库 `pre-commit` 也会同步相关文档。生产 provider 独立只读检查为 `npm run verify:provider`。
 
 测试未运行必须标记 `NOT RUN`；失败不得描述为通过。

@@ -15,13 +15,14 @@ Reads YPmcn/state/session_guard.json (read-only).
 Outputs JSON with permissionDecision = "allow" or "deny".
 """
 import json
+import os
 import sys
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-STATE_FILE = PROJECT_ROOT / "state" / "session_guard.json"
+STATE_FILE = Path(os.environ.get("YPMCN_STATE_FILE", PROJECT_ROOT / "state" / "session_guard.json"))
 
 TERMINAL_PHASES = {"recovered", "closed"}
 

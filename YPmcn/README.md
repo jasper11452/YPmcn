@@ -25,6 +25,7 @@ validate_requirement
 插件注册：`before_tool_call`、`after_tool_call`、`tool_result_persist`、`message_received`、`agent_turn_prepare`、`session_end`。
 
 - 会话投影受 TTL 约束，可随进程退出丢失，不代替数据库事实。
+- Native Plugin 将 OpenClaw `before_tool_call`、`after_tool_call`、`session_end` 事件桥接到包内 Python Hook；`.claude/settings.json` 仅供 Claude Code 仓库开发会话使用。
 - OpenClaw 2026.6.11 的业务工具名按 `ypmcn__<tool>` 进入 Hook；裸工具名不视为业务工具。
 - provider 发送前由具备 `operator.write` scope 的客户端调用 `confirm_distribution_send` session action；缺 `sessionKey`、`toolCallId`、已绑定角色、三项确认或当前字段选择时一律阻断。
 - 字段选择是发送前最后确认点，v2 只允许 `preview_only=false`。
