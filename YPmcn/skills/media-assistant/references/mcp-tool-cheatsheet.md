@@ -17,7 +17,6 @@
 | `get_creator_detail` | 查询单个达人事实 | `platform`, `kwUid` 与 include flags | 只读；不得从昵称猜 UID |
 | `audit_manual_adjustment` | 记录人工调整审计 | `run_id`, `adjustments`, `operator_id` | 业务写；缺操作者/原因则停止 |
 | `get_workflow_state` | 按需求版本或 trace 查询流程事实 | `demand_id` + `demand_version`，或 `trace_id` | 只读；用于对账，不替代步骤成功证据 |
-| `search_creator_tag_vectors` | 按需求语义召回并回源校验达人 | `positiveRequirements`, `negativeRequirements`；可选平台、项目、硬过滤和数量字段 | 只读；迁移中能力，仅在远程 Provider 实际广告时调用；结果必须带 MySQL 回源证明或明确降级原因 |
 
 Provider 没有广告 outputSchema。保留实际返回作为证据；不得把旧输出字段当正式契约，也不得用 `business_health` 代替业务证据。
 

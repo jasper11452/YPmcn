@@ -1141,6 +1141,20 @@ function validateDatabaseEntities(value: unknown): Record<string, DatabaseEntity
 export function loadDatabaseContract(): DatabaseContract {
   if (databaseCache) return databaseCache;
   const value = requireRecord(readSpec("database.json"), "database contract");
+  if (value.schemaVersion === 2 && value.profile === "mvp-v2") {
+    if (
+      value.readinessStatus !== "development-observed" ||
+      !isRecord(value.database) ||
+      value.database.engine !== "mysql" ||
+      value.database.name !== "ypmcn" ||
+      !isRecord(value.observedTables) ||
+      !isRecord(value.toolDatabaseEffects)
+    ) {
+      throw new Error("observed database contract is invalid");
+    }
+    databaseCache = deepFreeze(value as unknown as DatabaseContract);
+    return databaseCache;
+  }
   if (value.schemaVersion !== 1 || value.profile !== "mvp-v2") {
     throw new Error("database contract identity is invalid");
   }

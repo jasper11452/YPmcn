@@ -13,7 +13,7 @@ const REQUIRED = [
   "record_client_feedback", "get_recommendation_run_detail",
   "get_creator_detail", "audit_manual_adjustment",
 ];
-const OPTIONAL = ["get_workflow_state", "search_creator_tag_vectors"];
+const OPTIONAL = ["get_workflow_state"];
 
 const EXPECTED_INPUTS = {
   validate_requirement: { required: ["payload"], properties: { payload: "object" } },
@@ -99,16 +99,6 @@ const EXPECTED_INPUTS = {
     required: [],
     properties: {
       demand_id: "string|null", demand_version: "integer|null", trace_id: "string|null",
-    },
-  },
-  search_creator_tag_vectors: {
-    required: ["positiveRequirements", "negativeRequirements"],
-    properties: {
-      platform: "string", queryText: "string", projectId: "string|number",
-      positiveRequirements: "array", negativeRequirements: "array",
-      limit: "number", candidateLimit: "number", region: "string",
-      followerMin: "number", followerMax: "number", priceMin: "number",
-      priceMax: "number", compliance: "string",
     },
   },
 };

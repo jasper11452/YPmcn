@@ -162,4 +162,19 @@ describe("OpenClaw native hook bridge", () => {
     const cleaned = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(cleaned.sessions["native-session"], undefined);
   });
+
+  it("uses the actual mcn_run_id returned by rank_mcns", async () => {
+    writeSession("search_completed");
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params: { id: "req-native-1", platform: "xiaohongshu" },
+      toolCallId: "call-rank-mcns",
+      result: { success: true, data: { mcn_run_id: "mcn-run-native-1", mcns: [] } },
+    }, { sessionKey: "native-session" });
+
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.sessions["native-session"].phase, "mcn_planning");
+    assert.equal(state.sessions["native-session"].ids.mcn_run_id, "mcn-run-native-1");
+    assert.equal(state.sessions["native-session"].lastResultIssue, undefined);
+  });
 });

@@ -23,7 +23,6 @@ const CURRENT_TOOLS = [
   "manual_source_creators", "rank_creators", "create_submission_batch",
   "record_client_feedback", "get_recommendation_run_detail",
   "get_creator_detail", "audit_manual_adjustment", "get_workflow_state",
-  "search_creator_tag_vectors",
 ];
 
 function validDistribution(overrides = {}) {

@@ -12,9 +12,7 @@
   },
   "mode": "writable",
   "vectorCapabilityBoundary": {
-    "publicBusinessVectorTools": [
-      "search_creator_tag_vectors"
-    ],
+    "publicBusinessVectorTools": [],
     "excludedNamespace": "vector-mcp",
     "operationsTools": [
       "sync_creator_tag_vectors",
@@ -30,7 +28,7 @@
       "resultFieldAuthority": {
         "creatorIdentity": "platform creator table joined by platform + kwUid",
         "creatorPrices": "xhs_creator_accounts or dy_creator_accounts: kolOfficialPriceL1/L2/L3 and downloadPriceL1/L2/L3",
-        "creatorSupplierRebate": "creator_supply_offers relationship joined by platform + kwUid + supplier_id: rebate_min_rate/rebate_max_rate",
+        "creatorSupplierRebate": "core_supplier.default_rebate_rate joined through creator_supply_offers.supplier_id",
         "requirementRebateThreshold": "customer_demands.rebateMinRate/rebateMaxRate; filter input only, never actual rebate",
         "legacyPriceCents": "not authoritative when creator price tiers exist"
       }
@@ -46,7 +44,7 @@
     "canonicalNamespace": "ypmcn",
     "hostQualifiedToolName": {
       "format": "mcp__ypmcn__<contract-tool>",
-      "pattern": "^mcp__ypmcn__(?:validate_requirement|search_creators|rank_mcns|select_inquiry_form_fields|create_with_distributions|sync_mcn_inquiry_status|ingest_mcn_submissions|manual_source_creators|rank_creators|create_submission_batch|record_client_feedback|get_recommendation_run_detail|get_creator_detail|audit_manual_adjustment|get_workflow_state|search_creator_tag_vectors)$",
+      "pattern": "^mcp__ypmcn__(?:validate_requirement|search_creators|rank_mcns|select_inquiry_form_fields|create_with_distributions|sync_mcn_inquiry_status|ingest_mcn_submissions|manual_source_creators|rank_creators|create_submission_batch|record_client_feedback|get_recommendation_run_detail|get_creator_detail|audit_manual_adjustment|get_workflow_state)$",
       "businessToolIdentity": "exact-qualified-name-and-contract-tool",
       "bareHookEvent": "not-a-business-tool"
     },
@@ -76,8 +74,7 @@
     "audit_manual_adjustment"
   ],
   "optionalTools": [
-    "get_workflow_state",
-    "search_creator_tag_vectors"
+    "get_workflow_state"
   ],
   "outputEnvelopes": {
     "observed-runtime": {
@@ -266,17 +263,6 @@
         "additionalProperties": true
       },
       "errorCodes": []
-    },
-    "search_creator_tag_vectors": {
-      "advertisedOutputSchema": false,
-      "evidenceBasis": "The remote development provider has not completed vector-tool integration; retain the actual response and MySQL revalidation provenance before using results.",
-      "successEnvelope": "observed-runtime",
-      "failureEnvelope": "observed-runtime",
-      "successSchema": {
-        "type": "object",
-        "additionalProperties": true
-      },
-      "errorCodes": []
     }
   },
   "tools": {
@@ -334,7 +320,7 @@
       "successEvidence": [
         "retain actual returned payload as downstream evidence",
         "candidate price evidence identifies platform creator-table price tiers",
-        "candidate rebate evidence identifies creator-supplier relationship values",
+        "candidate rebate evidence identifies the supplier default rebate",
         "requirement rebate thresholds are not presented as actual supplier rebate"
       ]
     },
@@ -984,89 +970,6 @@
         "retain actual returned payload as downstream evidence"
       ],
       "semanticRequirement": "Provide demand_id with demand_version, or provide trace_id."
-    },
-    "search_creator_tag_vectors": {
-      "name": "search_creator_tag_vectors",
-      "required": [
-        "positiveRequirements",
-        "negativeRequirements"
-      ],
-      "properties": {
-        "platform": {
-          "type": "string",
-          "enum": [
-            "xiaohongshu",
-            "douyin"
-          ]
-        },
-        "queryText": {
-          "type": "string"
-        },
-        "projectId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
-          ]
-        },
-        "positiveRequirements": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "negativeRequirements": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "limit": {
-          "type": "number"
-        },
-        "candidateLimit": {
-          "type": "number"
-        },
-        "region": {
-          "type": "string"
-        },
-        "followerMin": {
-          "type": "number"
-        },
-        "followerMax": {
-          "type": "number"
-        },
-        "priceMin": {
-          "type": "number"
-        },
-        "priceMax": {
-          "type": "number"
-        },
-        "compliance": {
-          "type": "string"
-        }
-      },
-      "forbidden": [],
-      "sideEffects": "read-only",
-      "writers": {
-        "always": [],
-        "conditional": []
-      },
-      "retry": {
-        "policy": "query-safe",
-        "blindRetry": true,
-        "unknownOutcome": "not-applicable",
-        "reconcileWith": null
-      },
-      "outputEnvelope": "observed-runtime",
-      "successEvidence": [
-        "success === true",
-        "actual results include MySQL revalidation provenance",
-        "degraded responses include an explicit degraded reason"
-      ]
     }
   }
 }

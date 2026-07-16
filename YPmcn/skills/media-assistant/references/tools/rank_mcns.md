@@ -10,6 +10,9 @@
 
 ## 输出成功证据
 
+- `success === true`
+- 实际返回 `data.mcn_run_id`
+- 实际 MCN 列表和缺口信息原样保留
 - retain actual returned payload as downstream evidence
 
 ## 调用后必须停在哪里
@@ -18,7 +21,7 @@
 
 ## 能力边界
 
-这是目标 Provider 契约；当前排序权重、阈值和真实供应商数据未获生产验收。返回建议必须展示供给缺口和风险，不能表述成确定可交付量。
+当前实现读取需求、候选池、供给关系和 `core_supplier`，写入 `mcn_recommendation_items`。开发库 `mcn_agencies` 为空，机构身份实际来自 `core_supplier`。返回建议必须展示供给缺口和风险。
 
 ## 错误与停止条件
 

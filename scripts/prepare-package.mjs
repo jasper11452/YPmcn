@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +31,17 @@ const pluginAssets = [
   "state",
 ];
 
+function assertOfflineInstallablePackage(packageRoot) {
+  const manifestPath = join(packageRoot, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const runtimeDependencies = Object.keys(manifest.dependencies ?? {});
+  if (runtimeDependencies.length > 0) {
+    throw new Error(
+      `release package must not require npm install; bundle or remove dependencies: ${runtimeDependencies.join(", ")}`,
+    );
+  }
+}
+
 function run(command, args, cwd, options = {}) {
   const result = spawnSync(command, args, {
     cwd,
@@ -56,9 +67,9 @@ export function stagePackageAssets() {
   for (const asset of pluginAssets) {
     cpSync(join(pluginRoot, asset), join(stagingRoot, asset), { recursive: true });
   }
-  const productionMcpConfig = `${JSON.stringify(mcpConfig("production"), null, 2)}\n`;
-  writeFileSync(join(stagingRoot, ".mcp.json"), productionMcpConfig);
-  writeFileSync(join(stagingRoot, "mcp.json"), productionMcpConfig);
+  const packagedMcpConfig = `${JSON.stringify(mcpConfig("development"), null, 2)}\n`;
+  writeFileSync(join(stagingRoot, ".mcp.json"), packagedMcpConfig);
+  writeFileSync(join(stagingRoot, "mcp.json"), packagedMcpConfig);
   cpSync(
     join(pluginRoot, "hooks", "ypmcn-media-assistant"),
     join(stagingRoot, "hooks", "ypmcn-media-assistant"),
@@ -66,6 +77,7 @@ export function stagePackageAssets() {
   );
   cpSync(specRoot, join(stagingRoot, "spec"), { recursive: true });
   cpSync(vectorDist, join(stagingRoot, "vector-mcp", "dist"), { recursive: true });
+  assertOfflineInstallablePackage(stagingRoot);
   return stagingRoot;
 }
 

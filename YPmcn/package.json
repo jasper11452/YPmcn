@@ -23,9 +23,6 @@
     "pack:yp": "node ../scripts/prepare-package.mjs",
     "dev": "tsc --watch"
   },
-  "dependencies": {
-    "mysql2": "3.22.6"
-  },
   "peerDependencies": {
     "openclaw": "*"
   },

@@ -6,7 +6,7 @@
 
 ## 输入
 
-必填 `platform`、`kwUid`；可选 `include_offers`、`include_mcn`、`include_vector_text`、`include_recent_metrics`。
+必填 `platform`、`kwUid`；只建议发送实际生效的 `include_offers`、`include_mcn`。`include_vector_text`、`include_recent_metrics` 当前实现未使用，不要发送。
 
 ## 输出成功证据
 

@@ -9,4 +9,4 @@
 5. 本地 Hook 与测试结果不是生产成功证据。
 6. 写结果未知时先查权威状态，不盲目重写。
 
-开发 Provider 当前广告既有 15 个业务工具；生产 SSE 暂未路由到业务 Provider。公开向量查询 `search_creator_tag_vectors` 仍在接入，只有运行时实际广告且输入兼容时才可用。`tools/list` 未广告任何 `outputSchema`：除工具描述明确说明的 `rank_creators` 的 `run_id` 和字段选择的 description 文本外，不得把旧输出字段当作契约。
+开发 Provider 当前广告 15 个工具；当前演示包直接指向开发 SSE。没有公开向量工具。`tools/list` 未广告任何 `outputSchema`：除已实测的 `rank_mcns.data.mcn_run_id`、`rank_creators.run_id` 和字段选择 description 外，不得把旧输出字段当作契约。

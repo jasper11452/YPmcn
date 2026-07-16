@@ -71,7 +71,7 @@ describe("3.0.5 release metadata", () => {
     assert.equal(manifest.contracts.spec, "./spec/mcp.json");
   });
 
-  it("uses the active source MCP profile and production SSE in staged packages", () => {
+  it("packages the current development MCP profile for end-to-end testing", () => {
     const active = {
       mcpServers: {
         "ypmcn-mcp": {
@@ -81,19 +81,10 @@ describe("3.0.5 release metadata", () => {
         },
       },
     };
-    const production = {
-      mcpServers: {
-        "ypmcn-mcp": {
-          url: "https://mcp.eshypdata.com/sse",
-          transport: "sse",
-          connectionTimeoutMs: 30000,
-        },
-      },
-    };
     assert.deepEqual(json("YPmcn/.mcp.json"), active);
     assert.deepEqual(json("YPmcn/mcp.json"), active);
-    assert.deepEqual(json("packages/.staging/ypmcn-media-assistant/.mcp.json"), production);
-    assert.deepEqual(json("packages/.staging/ypmcn-media-assistant/mcp.json"), production);
+    assert.deepEqual(json("packages/.staging/ypmcn-media-assistant/.mcp.json"), active);
+    assert.deepEqual(json("packages/.staging/ypmcn-media-assistant/mcp.json"), active);
   });
 
   it("keeps dependencies owned and exactly pinned", () => {
@@ -101,7 +92,7 @@ describe("3.0.5 release metadata", () => {
     const pluginPackage = json("YPmcn/package.json");
     const vectorPackage = json("vector-mcp/package.json");
     assert.deepEqual(rootPackage.dependencies, { mysql2: "3.22.6" });
-    assert.equal(pluginPackage.dependencies.mysql2, "3.22.6");
+    assert.equal(pluginPackage.dependencies, undefined);
     assert.equal(pluginPackage.devDependencies.typescript, "5.9.3");
     assert.equal(pluginPackage.devDependencies.openclaw, "2026.4.14");
     assert.equal(vectorPackage.dependencies.mysql2, "3.22.6");
@@ -125,6 +116,11 @@ describe("reproducible plugin package", () => {
     )) {
       assert.ok(files.includes(required), required);
     }
+  });
+
+  it("does not trigger npm install in OpenClaw plugin or hook-pack installers", () => {
+    const stagedPackage = json("packages/.staging/ypmcn-media-assistant/package.json");
+    assert.equal(stagedPackage.dependencies, undefined);
   });
 
   it("keeps the installable runtime free of blocked process execution patterns", () => {

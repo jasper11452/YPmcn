@@ -123,85 +123,46 @@ describe("Spec governance", () => {
     assert.deepEqual(registeredEvents.sort(), Object.keys(hooks.events).sort());
   });
 
-  it("pins the approved vector data authority, identities, ownership, and recommendation path", () => {
+  it("pins the observed database authority, identities, ownership, and recommendation path", () => {
     const database = json("database.json");
 
     assert.equal(database.businessDataAuthority.systemOfRecord, "mysql");
-    assert.deepEqual(database.businessDataAuthority.vectorIndex, {
-      engine: "qdrant",
-      role: "rebuildable-derived-index",
-      businessWriteAuthority: false,
-      returnPolicy: "rehydrate-and-revalidate-current-mysql-record",
-    });
-    assert.deepEqual(database.mvpEntityBaseline.entities, [
-      "customer_demands",
-      "xhs_creator_accounts",
-      "dy_creator_accounts",
-      "creator_supply_offers",
-      "creator_candidate_pool",
-      "mcn_recommendation_items",
-      "mcn_inquiry_batches",
-      "mcn_inquiries",
-      "mcn_submission_items",
-      "recommendation_runs",
-      "creator_recommendation_items",
+    assert.equal(database.businessDataAuthority.vectorIndex.publicToolAvailable, false);
+    assert.deepEqual(database.businessDataAuthority.vectorIndex.internalConsumers, [
+      "search_creators",
+      "rank_creators",
     ]);
+    assert.equal(database.observedTables.core_supplier.rowCountObserved, 280);
+    assert.equal(database.mvpEntityBaseline.supplierAuthority.legacyEmptyTable, "mcn_agencies");
     assert.deepEqual(database.mvpEntityBaseline.creatorBusinessIdentity, [
       "platform",
       "kwUid",
     ]);
-    assert.deepEqual(database.mvpEntityBaseline.sourceRecordIdentity, [
-      "platform",
-      "kwUid",
-      "source_snapshot_date",
-    ]);
     assert.equal(
       database.mvpEntityBaseline.ownershipPolicy,
-      "business-mcp-write-surface-only",
+      "observed-development-runtime",
     );
-    assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership, {
-      customer_demands: ["validate_requirement"],
-      xhs_creator_accounts: [],
-      dy_creator_accounts: [],
-      creator_supply_offers: ["ingest_mcn_submissions", "manual_source_creators"],
-      creator_candidate_pool: ["search_creators"],
-      mcn_recommendation_items: ["rank_mcns"],
-      mcn_inquiry_batches: ["sync_mcn_inquiry_status"],
-      mcn_inquiries: ["sync_mcn_inquiry_status"],
-      mcn_submission_items: ["ingest_mcn_submissions"],
-      recommendation_runs: ["rank_creators"],
-      creator_recommendation_items: ["rank_creators", "audit_manual_adjustment"],
-    });
-    assert.deepEqual(database.mvpEntityBaseline.recommendationPath, [
-      ["xhs_creator_accounts", "creator_candidate_pool"],
-      ["dy_creator_accounts", "creator_candidate_pool"],
-      ["customer_demands", "creator_candidate_pool"],
-      ["creator_candidate_pool", "mcn_recommendation_items"],
-      ["mcn_recommendation_items", "mcn_inquiry_batches"],
-      ["mcn_inquiry_batches", "mcn_inquiries"],
-      ["mcn_inquiries", "mcn_submission_items"],
-      ["mcn_submission_items", "creator_supply_offers"],
-      ["creator_supply_offers", "recommendation_runs"],
-      ["recommendation_runs", "creator_recommendation_items"],
-    ]);
+    assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.customer_demands, ["validate_requirement", "record_client_feedback"]);
+    assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.mcn_inquiry_status_syncs, ["sync_mcn_inquiry_status"]);
+    assert.equal("mcn_inquiries" in database.mvpEntityBaseline.businessMcpWriterOwnership, false);
+    assert.match(database.toolDatabaseEffects.sync_mcn_inquiry_status.currentLimitation, /Does not query/);
+    assert.equal(database.toolDatabaseEffects.audit_manual_adjustment.writes.includes("audit_events"), false);
   });
 
-  it("exposes vector query while keeping vector operations out of the business surface", () => {
+  it("keeps vector query and operations out of the public business surface", () => {
     const mcp = json("mcp.json");
     const businessTools = [...mcp.requiredTools, ...mcp.optionalTools];
 
-    assert.deepEqual(mcp.vectorCapabilityBoundary.publicBusinessVectorTools, [
-      "search_creator_tag_vectors",
-    ]);
+    assert.deepEqual(mcp.vectorCapabilityBoundary.publicBusinessVectorTools, []);
     assert.equal(mcp.vectorCapabilityBoundary.excludedNamespace, "vector-mcp");
     assert.deepEqual(mcp.serverIdentity.excludedNamespaces, ["vector-mcp"]);
     assert.deepEqual(mcp.vectorCapabilityBoundary.operationsTools, [
       "sync_creator_tag_vectors",
       "health_check_vector_store",
     ]);
-    assert.equal(new Set(businessTools).size, 16);
-    assert.equal(businessTools.includes("search_creator_tag_vectors"), true);
-    assert.equal("search_creator_tag_vectors" in mcp.tools, true);
+    assert.equal(new Set(businessTools).size, 15);
+    assert.equal(businessTools.includes("search_creator_tag_vectors"), false);
+    assert.equal("search_creator_tag_vectors" in mcp.tools, false);
     for (const name of mcp.vectorCapabilityBoundary.operationsTools) {
       assert.equal(businessTools.includes(name), false, name);
       assert.equal(name in mcp.tools, false, name);

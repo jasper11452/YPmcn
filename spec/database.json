@@ -1,20 +1,29 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "profile": "mvp-v2",
-  "readinessStatus": "external-unverified",
-  "proofBoundary": {
-    "isMigrationProof": false,
-    "isDeploymentProof": false,
-    "statement": "This specification declares external readiness requirements; it is not migration or deployment proof."
+  "readinessStatus": "development-observed",
+  "verifiedAt": "2026-07-16",
+  "database": {
+    "engine": "mysql",
+    "name": "ypmcn",
+    "environment": "development",
+    "evidence": [
+      "D:\\data_creator_profiles_api SQLAlchemy models",
+      "read-only SQLAlchemy inspection against development MySQL",
+      "development Provider tools/list"
+    ]
   },
-  "modelVersion": "2026-07-12.1",
-  "modelStatus": "target-contract-external-unverified",
   "businessDataAuthority": {
     "systemOfRecord": "mysql",
     "vectorIndex": {
       "engine": "qdrant",
-      "role": "rebuildable-derived-index",
+      "role": "optional-derived-recall-index",
       "businessWriteAuthority": false,
+      "publicToolAvailable": false,
+      "internalConsumers": [
+        "search_creators",
+        "rank_creators"
+      ],
       "returnPolicy": "rehydrate-and-revalidate-current-mysql-record"
     }
   },
@@ -25,46 +34,125 @@
       "dy_creator_accounts",
       "creator_supply_offers",
       "creator_candidate_pool",
+      "core_supplier",
       "mcn_recommendation_items",
-      "mcn_inquiry_batches",
       "mcn_inquiries",
+      "mcn_inquiry_status_syncs",
       "mcn_submission_items",
       "recommendation_runs",
-      "creator_recommendation_items"
+      "creator_recommendation_items",
+      "submission_batches",
+      "creator_submissions",
+      "mcp_tool_call_ledger"
     ],
-    "creatorBusinessIdentity": ["platform", "kwUid"],
-    "sourceRecordIdentity": ["platform", "kwUid", "source_snapshot_date"],
-    "ownershipPolicy": "business-mcp-write-surface-only",
+    "creatorBusinessIdentity": [
+      "platform",
+      "kwUid"
+    ],
+    "requirementIdentity": {
+      "primaryKey": "customer_demands.id",
+      "businessKey": [
+        "customer_demands.demandId",
+        "customer_demands.demandVersion"
+      ]
+    },
+    "supplierAuthority": {
+      "table": "core_supplier",
+      "primaryKey": "id",
+      "legacyEmptyTable": "mcn_agencies"
+    },
+    "ownershipPolicy": "observed-development-runtime",
     "businessMcpWriterOwnership": {
-      "customer_demands": ["validate_requirement"],
-      "xhs_creator_accounts": [],
-      "dy_creator_accounts": [],
-      "creator_supply_offers": ["ingest_mcn_submissions", "manual_source_creators"],
-      "creator_candidate_pool": ["search_creators"],
-      "mcn_recommendation_items": ["rank_mcns"],
-      "mcn_inquiry_batches": ["sync_mcn_inquiry_status"],
-      "mcn_inquiries": ["sync_mcn_inquiry_status"],
-      "mcn_submission_items": ["ingest_mcn_submissions"],
-      "recommendation_runs": ["rank_creators"],
-      "creator_recommendation_items": ["rank_creators", "audit_manual_adjustment"]
+      "customer_demands": [
+        "validate_requirement",
+        "record_client_feedback"
+      ],
+      "xhs_creator_accounts": [
+        "ingest_mcn_submissions",
+        "manual_source_creators"
+      ],
+      "dy_creator_accounts": [
+        "ingest_mcn_submissions",
+        "manual_source_creators"
+      ],
+      "creator_supply_offers": [
+        "ingest_mcn_submissions",
+        "manual_source_creators"
+      ],
+      "creator_candidate_pool": [
+        "search_creators",
+        "ingest_mcn_submissions",
+        "manual_source_creators"
+      ],
+      "mcn_recommendation_items": [
+        "rank_mcns"
+      ],
+      "mcn_inquiry_status_syncs": [
+        "sync_mcn_inquiry_status"
+      ],
+      "mcn_submission_items": [
+        "ingest_mcn_submissions"
+      ],
+      "recommendation_runs": [
+        "rank_creators"
+      ],
+      "creator_recommendation_items": [
+        "rank_creators",
+        "audit_manual_adjustment"
+      ],
+      "submission_batches": [
+        "create_submission_batch",
+        "record_client_feedback"
+      ],
+      "creator_submissions": [
+        "create_submission_batch",
+        "record_client_feedback"
+      ]
     },
     "recommendationPath": [
-      ["xhs_creator_accounts", "creator_candidate_pool"],
-      ["dy_creator_accounts", "creator_candidate_pool"],
-      ["customer_demands", "creator_candidate_pool"],
-      ["creator_candidate_pool", "mcn_recommendation_items"],
-      ["mcn_recommendation_items", "mcn_inquiry_batches"],
-      ["mcn_inquiry_batches", "mcn_inquiries"],
-      ["mcn_inquiries", "mcn_submission_items"],
-      ["mcn_submission_items", "creator_supply_offers"],
-      ["creator_supply_offers", "recommendation_runs"],
-      ["recommendation_runs", "creator_recommendation_items"]
+      [
+        "customer_demands",
+        "creator_candidate_pool"
+      ],
+      [
+        "xhs_creator_accounts",
+        "creator_candidate_pool"
+      ],
+      [
+        "dy_creator_accounts",
+        "creator_candidate_pool"
+      ],
+      [
+        "creator_supply_offers",
+        "creator_candidate_pool"
+      ],
+      [
+        "creator_candidate_pool",
+        "mcn_recommendation_items"
+      ],
+      [
+        "creator_candidate_pool",
+        "recommendation_runs"
+      ],
+      [
+        "recommendation_runs",
+        "creator_recommendation_items"
+      ],
+      [
+        "creator_recommendation_items",
+        "submission_batches"
+      ],
+      [
+        "submission_batches",
+        "creator_submissions"
+      ]
     ]
   },
   "runtimeDatabaseCompatibility": {
-    "verifiedAt": "2026-07-16",
-    "database": "ypmcn",
-    "platformStorageValues": ["xiaohongshu", "douyin"],
+    "platformStorageValues": [
+      "xiaohongshu",
+      "douyin"
+    ],
     "platformInputAliases": {
       "xhs": "xiaohongshu",
       "dy": "douyin"
@@ -72,35 +160,13 @@
     "creatorIdentity": {
       "physicalColumn": "kwUid",
       "toolParameter": "kwUid",
-      "ormAttribute": "kwUid",
-      "rule": "Tool and Python names may remain snake_case, but every ORM mapping must explicitly bind to physical MySQL column kwUid."
-    },
-    "requirementIdentity": {
-      "primaryKey": "customer_demands.id",
-      "businessKey": ["customer_demands.demandId", "customer_demands.demandVersion"],
-      "searchCreatorsInput": "id",
-      "rankCreatorsInput": "requirement_id"
-    },
-    "joinPolicy": {
-      "characterSet": "utf8mb4",
-      "collation": "utf8mb4_unicode_ci",
-      "requirementIdType": "char(32)",
-      "creatorIdType": "varchar(64)"
-    },
-    "runtimeEntityStatus": {
-      "authoritativeCreatorTables": ["xhs_creator_accounts", "dy_creator_accounts"],
-      "candidateTable": "creator_candidate_pool",
-      "currentEmptyTablesMayBeRebuiltFromOrm": [
-        "mcn_recommendation_items",
-        "mcn_inquiries",
-        "mcn_submission_items",
-        "recommendation_runs",
-        "creator_recommendation_items",
-        "creator_submissions"
+      "backendParameter": "kw_uid",
+      "join": [
+        "platform",
+        "kwUid"
       ]
     },
     "searchCreatorsFieldAuthority": {
-      "identityJoin": ["platform", "kwUid"],
       "creatorProfileSourceByPlatform": {
         "xiaohongshu": "xhs_creator_accounts",
         "douyin": "dy_creator_accounts"
@@ -113,783 +179,374 @@
           "kolOfficialPriceL3",
           "downloadPriceL1",
           "downloadPriceL2",
-          "downloadPriceL3"
+          "downloadPriceL3",
+          "predictPicturePrice",
+          "predictVideoPrice"
         ],
-        "rule": "search_creators must read creator price tiers from the platform creator table; a null relationship-level price_cents must not be used to claim that the creator has no database price."
+        "rule": "Single-creator prices come from the platform creator table and are returned as price_yuan or price_cents with a price_source."
       },
       "rebateSource": {
-        "authority": "creator_supply_offers creator-supplier relationship",
-        "join": ["platform", "kwUid", "supplier_id"],
-        "fields": ["rebate_min_rate", "rebate_max_rate"],
-        "rule": "Relationship rebate is an observed creator-supplier value. customer_demands.rebateMinRate/rebateMaxRate are requirement thresholds and must never be reported as an actual supplier rebate."
+        "authority": "core_supplier.default_rebate_rate",
+        "relationship": "creator_supply_offers.supplier_id -> core_supplier.id",
+        "rule": "The current creator_supply_offers table has no persisted rebate_min_rate or rebate_max_rate columns. Demand rebate fields are thresholds and must never be reported as an actual supplier rebate."
       }
+    },
+    "budgetSemantics": {
+      "budgetMinCents": "project total budget lower bound only",
+      "budgetMaxCents": "project total budget upper bound only",
+      "budgetRaw": "original project total budget wording only",
+      "creatorUnitPriceFields": [
+        "kolOfficialPriceL1",
+        "kolOfficialPriceL2",
+        "kolOfficialPriceL3"
+      ],
+      "rule": "A creator unit-price request must not be copied into budgetMinCents, budgetMaxCents or budgetRaw. If the L1/L2/L3 tier is ambiguous, ask the user to choose the tier before calling validate_requirement."
     }
   },
-  "commonFieldPolicies": {
-    "scopeFields": [
-      "scope_type",
-      "scope_id"
-    ],
-    "lateDataFields": [
-      "observed_at",
-      "effective_at",
-      "received_at",
-      "as_of_at",
-      "late_data_cutoff_at",
-      "is_late",
-      "late_reason"
-    ],
-    "dictionaryReferenceFields": [
-      "dictionary_version",
-      "dictionary_hash"
-    ],
-    "physicalConstraintStatus": "external-unverified"
-  },
-  "entities": {
-    "requirement_headers": {
-      "role": "aggregate-head",
-      "owner": "requirement-service",
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/requirement_header",
-      "primaryKey": [
-        "requirement_head_id"
-      ],
-      "requiredFields": [
-        "requirement_head_id",
-        "raw_messages_json",
-        "dictionary_version",
-        "dictionary_hash",
-        "requested_platforms",
-        "scope_type",
-        "scope_id",
-        "created_at",
-        "updated_at"
-      ],
-      "uniqueKeys": [
-        {
-          "id": "pk-requirement-headers",
-          "columns": [
-            "requirement_head_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
-      ]
-    },
+  "observedTables": {
     "customer_demands": {
-      "role": "single-platform-execution-requirement",
-      "owner": "requirement-service",
       "recordSchema": "schemas/requirement-record.schema.json",
+      "rowCountObserved": 14,
       "primaryKey": [
-        "requirement_id"
+        "id"
       ],
-      "requiredFields": [
-        "requirement_id",
-        "requirement_head_id",
-        "requirement_version",
-        "platform",
-        "dictionary_version",
-        "dictionary_hash",
-        "raw_messages_json",
-        "budget_min_cents",
-        "budget_max_cents",
-        "rebate_min_rate",
-        "rebate_max_rate",
-        "supplier_response_deadline_at",
-        "client_submission_deadline_at",
-        "content_publish_deadline_at",
-        "constraints",
-        "scope_type",
-        "scope_id",
-        "created_at",
-        "updated_at"
-      ],
-      "uniqueKeys": [
-        {
-          "id": "pk-customer-demands",
-          "columns": [
-            "requirement_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-customer-demands-head-platform-version",
-          "columns": [
-            "requirement_head_id",
-            "platform",
-            "requirement_version"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
+      "businessKey": [
+        "demandId",
+        "demandVersion"
       ]
     },
-    "requirement_snapshots": {
-      "role": "immutable-as-of-snapshot",
-      "owner": "requirement-and-ranking-services",
-      "recordSchema": "schemas/requirement-snapshot.schema.json",
+    "xhs_creator_accounts": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_profile",
+      "rowCountObserved": 617,
       "primaryKey": [
-        "snapshot_id"
+        "id"
       ],
-      "requiredFields": [
-        "snapshot_id",
-        "requirement_id",
-        "requirement_version",
-        "dictionary_version",
-        "dictionary_hash",
-        "snapshot_kind",
-        "as_of_at",
-        "late_data_cutoff_at",
-        "scope_type",
-        "scope_id",
-        "raw_messages_hash",
-        "payload_hash",
-        "created_at"
+      "uniqueIdentity": [
+        "kwUid"
+      ]
+    },
+    "dy_creator_accounts": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_profile",
+      "rowCountObserved": 2373,
+      "primaryKey": [
+        "id"
       ],
-      "uniqueKeys": [
-        {
-          "id": "pk-requirement-snapshots",
-          "columns": [
-            "snapshot_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-requirement-snapshots-version-kind-as-of",
-          "columns": [
-            "requirement_id",
-            "requirement_version",
-            "snapshot_kind",
-            "as_of_at"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
+      "uniqueIdentity": [
+        "kwUid"
       ]
     },
     "creator_supply_offers": {
-      "role": "versioned-multi-offer",
-      "owner": "supply-service",
       "recordSchema": "schemas/domain-records.schema.json#/$defs/supply_offer",
+      "rowCountObserved": 2652,
       "primaryKey": [
         "offer_id"
       ],
-      "requiredFields": [
-        "offer_id",
-        "creator_id",
-        "supplier_binding_id",
-        "platform",
-        "offer_type",
+      "physicalCommercialFields": [
+        "cooperation_type",
+        "content_format",
+        "availability_status",
+        "manual_sourced",
+        "notes"
+      ],
+      "notPhysicalFields": [
         "price_cents",
-        "currency",
-        "rebate_rate",
-        "revision",
-        "status",
-        "source_type",
-        "source_record_id",
-        "effective_at",
-        "observed_at",
-        "received_at",
-        "as_of_at",
-        "late_data_cutoff_at",
-        "is_late",
-        "late_reason",
-        "scope_type",
-        "scope_id",
-        "created_at"
-      ],
-      "cardinality": "zero-or-many-per-creator",
-      "uniqueKeys": [
-        {
-          "id": "pk-creator-supply-offers",
-          "columns": [
-            "offer_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-creator-supply-offer-revision",
-          "columns": [
-            "creator_id",
-            "supplier_binding_id",
-            "platform",
-            "offer_type",
-            "scope_type",
-            "scope_id",
-            "revision"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-creator-supply-offer-source",
-          "columns": [
-            "source_type",
-            "source_record_id",
-            "scope_type",
-            "scope_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
+        "rebate_min_rate",
+        "rebate_max_rate"
       ]
     },
-    "supplier_bindings": {
-      "role": "provider-supplier-to-mcn-binding",
-      "owner": "supplier-integration-service",
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/supplier_binding",
+    "creator_candidate_pool": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/candidate_record",
+      "rowCountObserved": 9653,
       "primaryKey": [
-        "supplier_binding_id"
-      ],
-      "requiredFields": [
-        "supplier_binding_id",
-        "provider",
-        "supplier_id",
-        "mcn_id",
-        "valid_from",
-        "scope_type",
-        "scope_id",
-        "created_at"
-      ],
-      "uniqueKeys": [
-        {
-          "id": "pk-supplier-bindings",
-          "columns": [
-            "supplier_binding_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-supplier-bindings-provider-supplier",
-          "columns": [
-            "provider",
-            "supplier_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-supplier-bindings-window-start",
-          "columns": [
-            "mcn_id",
-            "provider",
-            "scope_type",
-            "scope_id",
-            "valid_from"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
+        "candidate_id"
       ]
     },
-    "selection_results": {
-      "role": "persisted-ordered-field-selection",
-      "owner": "field-selection-service",
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/selection_result",
+    "core_supplier": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/supplier",
+      "rowCountObserved": 280,
       "primaryKey": [
-        "selection_result_id"
+        "id"
       ],
-      "requiredFields": [
-        "selection_result_id",
-        "mcn_recommendation_id",
-        "requirement_snapshot_id",
-        "dictionary_version",
-        "dictionary_hash",
-        "ordered_columns_json",
-        "selection_hash",
-        "state_version",
-        "scope_type",
-        "scope_id",
-        "created_at"
-      ],
-      "uniqueKeys": [
-        {
-          "id": "pk-selection-results",
-          "columns": [
-            "selection_result_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-selection-results-plan-snapshot-state-version",
-          "columns": [
-            "mcn_recommendation_id",
-            "requirement_snapshot_id",
-            "state_version"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
+      "commercialAuthorityFields": [
+        "default_rebate_rate",
+        "policy_rating",
+        "response_rate",
+        "valid_submission_rate",
+        "selected_rate"
       ]
     },
-    "send_operations": {
-      "role": "idempotent-provider-send-operation",
-      "owner": "distribution-provider-backend",
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/send_operation",
+    "mcn_recommendation_items": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/mcn_recommendation_item",
+      "rowCountObserved": 53,
       "primaryKey": [
-        "send_operation_id"
-      ],
-      "requiredFields": [
-        "send_operation_id",
-        "mcn_recommendation_id",
-        "requirement_id",
-        "selection_result_id",
-        "idempotency_key",
-        "provider",
-        "provider_correlation_key",
-        "status",
-        "state_version",
-        "scope_type",
-        "scope_id",
-        "requested_at"
-      ],
-      "uniqueKeys": [
-        {
-          "id": "pk-send-operations",
-          "columns": [
-            "send_operation_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-send-operations-idempotency-key",
-          "columns": [
-            "idempotency_key"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-send-operations-provider-correlation",
-          "columns": [
-            "provider",
-            "provider_correlation_key"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
+        "item_id"
       ]
     },
-    "risk_audit_events": {
-      "role": "append-only-risk-decision-audit",
-      "owner": "recommendation-service",
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/risk_audit_event",
-      "primaryKey": [
-        "risk_audit_id"
-      ],
-      "requiredFields": [
-        "risk_audit_id",
-        "run_id",
-        "subject_type",
-        "subject_id",
-        "decision",
-        "reason_codes",
-        "actor_id",
-        "state_version",
-        "scope_type",
-        "scope_id",
-        "created_at"
-      ],
-      "appendOnly": true,
-      "uniqueKeys": [
-        {
-          "id": "pk-risk-audit-events",
-          "columns": [
-            "risk_audit_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
-      ]
+    "mcn_inquiries": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/mcn_inquiry",
+      "rowCountObserved": 0,
+      "status": "schema-present-no-development-evidence"
     },
-    "feedback_audit_events": {
-      "role": "append-only-client-feedback-audit",
-      "owner": "feedback-service",
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/feedback_audit_event",
-      "primaryKey": [
-        "feedback_audit_id"
-      ],
-      "requiredFields": [
-        "feedback_audit_id",
-        "run_id",
-        "submission_id",
-        "before_status",
-        "after_status",
-        "reason",
-        "actor_id",
-        "state_version",
-        "scope_type",
-        "scope_id",
-        "created_at"
-      ],
-      "appendOnly": true,
-      "uniqueKeys": [
-        {
-          "id": "pk-feedback-audit-events",
-          "columns": [
-            "feedback_audit_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
-      ]
+    "mcn_inquiry_status_syncs": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/mcn_inquiry",
+      "rowCountObserved": 0,
+      "status": "metadata-only-current-sync-tool"
     },
-    "offer_promotion_events": {
-      "role": "append-only-offer-promotion-audit",
-      "owner": "supply-service",
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/offer_promotion_event",
-      "primaryKey": [
-        "promotion_event_id"
-      ],
-      "requiredFields": [
-        "promotion_event_id",
-        "source_type",
-        "source_record_id",
-        "target_offer_id",
-        "from_state",
-        "to_state",
-        "idempotency_key",
-        "scope_type",
-        "scope_id",
-        "created_at"
-      ],
-      "appendOnly": true,
-      "uniqueKeys": [
-        {
-          "id": "pk-offer-promotion-events",
-          "columns": [
-            "promotion_event_id"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        },
-        {
-          "id": "uq-offer-promotion-events-idempotency",
-          "columns": [
-            "idempotency_key"
-          ],
-          "nullsAllowed": false,
-          "status": "external-unverified"
-        }
-      ]
+    "mcn_submission_items": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/mcn_submission_item",
+      "rowCountObserved": 0,
+      "status": "schema-present-no-development-evidence"
+    },
+    "recommendation_runs": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/recommendation_run",
+      "rowCountObserved": 2
+    },
+    "creator_recommendation_items": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_recommendation_item",
+      "rowCountObserved": 30
+    },
+    "submission_batches": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/submission_batch",
+      "rowCountObserved": 1
+    },
+    "creator_submissions": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_submission",
+      "rowCountObserved": 3
+    },
+    "mcp_tool_call_ledger": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/tool_call_ledger",
+      "rowCountObserved": 0,
+      "status": "schema-present-not-used-by-current-tools"
     }
   },
-  "relationships": [
-    {
-      "id": "requirement-head-children",
-      "from": "customer_demands.requirement_head_id",
-      "to": "requirement_headers.requirement_head_id",
-      "cardinality": "many-to-one",
-      "onDelete": "restrict"
+  "entities": {
+    "customer_demands": {
+      "recordSchema": "schemas/requirement-record.schema.json"
     },
-    {
-      "id": "requirement-snapshot-owner",
-      "from": "requirement_snapshots.requirement_id",
-      "to": "customer_demands.requirement_id",
-      "cardinality": "many-to-one",
-      "onDelete": "restrict"
+    "creator_profiles": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_profile"
     },
-    {
-      "id": "offer-supplier-binding",
-      "from": "creator_supply_offers.supplier_binding_id",
-      "to": "supplier_bindings.supplier_binding_id",
-      "cardinality": "many-to-one-active-at-as-of",
-      "onDelete": "restrict"
+    "supply_offers": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/supply_offer"
     },
-    {
-      "id": "selection-requirement-snapshot",
-      "from": "selection_results.requirement_snapshot_id",
-      "to": "requirement_snapshots.snapshot_id",
-      "cardinality": "many-to-one",
-      "onDelete": "restrict"
+    "candidate_records": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/candidate_record"
     },
-    {
-      "id": "send-selection-result",
-      "from": "send_operations.selection_result_id",
-      "to": "selection_results.selection_result_id",
-      "cardinality": "many-to-one",
-      "onDelete": "restrict"
-    },
-    {
-      "id": "promotion-target-offer",
-      "from": "offer_promotion_events.target_offer_id",
-      "to": "creator_supply_offers.offer_id",
-      "cardinality": "many-to-one",
-      "onDelete": "restrict"
+    "recommendation_records": {
+      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_recommendation_item"
     }
-  ],
-  "writerOwnership": [
-    {
-      "tool": "validate_requirement",
-      "always": [
-        "requirement_headers",
+  },
+  "toolDatabaseEffects": {
+    "validate_requirement": {
+      "reads": [
         "customer_demands"
       ],
-      "conditional": [
-        "requirement_snapshots"
+      "writes": [
+        "customer_demands"
       ]
     },
-    {
-      "tool": "search_creators",
-      "always": [
+    "search_creators": {
+      "reads": [
+        "customer_demands",
+        "xhs_creator_accounts",
+        "dy_creator_accounts",
+        "creator_supply_offers",
+        "core_supplier"
+      ],
+      "writes": [
         "creator_candidate_pool"
       ],
-      "conditional": [
-        "requirement_snapshots"
+      "externalDependencies": [
+        "optional internal vector recall"
       ]
     },
-    {
-      "tool": "rank_mcns",
-      "always": [
+    "rank_mcns": {
+      "reads": [
+        "customer_demands",
+        "creator_candidate_pool",
+        "creator_supply_offers",
+        "core_supplier"
+      ],
+      "writes": [
+        "mcn_recommendation_items"
+      ]
+    },
+    "select_inquiry_form_fields": {
+      "reads": [],
+      "writes": [],
+      "externalDependencies": [
+        "field-selector web page",
+        "local callback HTTP server"
+      ]
+    },
+    "create_with_distributions": {
+      "reads": [],
+      "writes": [],
+      "externalDependencies": [
+        "https://ypmcn.eshypdata.com/api/suppliers/",
+        "https://ypmcn.eshypdata.com/api/projects/create-with-distributions/"
+      ],
+      "localDatabaseProof": "not-applicable"
+    },
+    "sync_mcn_inquiry_status": {
+      "reads": [
+        "mcn_inquiry_status_syncs"
+      ],
+      "writes": [
+        "mcn_inquiry_status_syncs"
+      ],
+      "currentLimitation": "Does not query provider project status and does not create or update mcn_inquiries."
+    },
+    "ingest_mcn_submissions": {
+      "reads": [
+        "mcn_inquiries",
+        "customer_demands",
+        "core_supplier"
+      ],
+      "writes": [
+        "mcn_submission_items",
+        "creator_supply_offers",
+        "creator_candidate_pool",
+        "xhs_creator_accounts",
+        "dy_creator_accounts"
+      ]
+    },
+    "manual_source_creators": {
+      "reads": [
+        "customer_demands",
+        "creator_supply_offers"
+      ],
+      "writes": [
+        "creator_candidate_pool",
+        "creator_supply_offers",
+        "xhs_creator_accounts",
+        "dy_creator_accounts"
+      ]
+    },
+    "rank_creators": {
+      "reads": [
+        "customer_demands",
+        "creator_candidate_pool",
+        "creator_supply_offers",
+        "xhs_creator_accounts",
+        "dy_creator_accounts",
         "mcn_recommendation_items"
       ],
-      "conditional": []
-    },
-    {
-      "tool": "select_inquiry_form_fields",
-      "always": [
-        "selection_results"
-      ],
-      "conditional": []
-    },
-    {
-      "tool": "create_with_distributions",
-      "always": [
-        "send_operations"
-      ],
-      "conditional": []
-    },
-    {
-      "tool": "sync_mcn_inquiry_status",
-      "always": [
-        "mcn_inquiries"
-      ],
-      "conditional": [
-        "mcn_inquiry_field_snapshots"
-      ]
-    },
-    {
-      "tool": "ingest_mcn_submissions",
-      "always": [
-        "mcn_submission_items"
-      ],
-      "conditional": [
-        "creator_supply_offers",
-        "offer_promotion_events"
-      ]
-    },
-    {
-      "tool": "manual_source_creators",
-      "always": [
-        "manual_sourced_creators"
-      ],
-      "conditional": [
-        "creator_supply_offers",
-        "offer_promotion_events"
-      ]
-    },
-    {
-      "tool": "rank_creators",
-      "always": [
+      "writes": [
         "recommendation_runs",
         "creator_recommendation_items"
-      ],
-      "conditional": []
+      ]
     },
-    {
-      "tool": "create_submission_batch",
-      "always": [
+    "create_submission_batch": {
+      "reads": [
+        "recommendation_runs",
+        "creator_recommendation_items",
+        "creator_submissions"
+      ],
+      "writes": [
         "submission_batches",
         "creator_submissions"
-      ],
-      "conditional": []
-    },
-    {
-      "tool": "record_client_feedback",
-      "always": [
-        "creator_submissions"
-      ],
-      "conditional": [
-        "customer_demands",
-        "feedback_audit_events"
       ]
     },
-    {
-      "tool": "get_recommendation_run_detail",
-      "always": [],
-      "conditional": []
+    "record_client_feedback": {
+      "reads": [
+        "recommendation_runs",
+        "creator_submissions",
+        "submission_batches",
+        "customer_demands"
+      ],
+      "writes": [
+        "creator_submissions",
+        "submission_batches",
+        "customer_demands"
+      ]
     },
-    {
-      "tool": "get_creator_detail",
-      "always": [],
-      "conditional": []
+    "get_creator_detail": {
+      "reads": [
+        "xhs_creator_accounts",
+        "dy_creator_accounts",
+        "creator_supply_offers",
+        "core_supplier"
+      ],
+      "writes": []
     },
-    {
-      "tool": "audit_manual_adjustment",
-      "always": [
+    "get_recommendation_run_detail": {
+      "reads": [
+        "recommendation_runs",
         "creator_recommendation_items",
-        "risk_audit_events"
-      ],
-      "conditional": [
         "creator_submissions"
+      ],
+      "writes": []
+    },
+    "audit_manual_adjustment": {
+      "reads": [
+        "creator_recommendation_items"
+      ],
+      "writes": [
+        "creator_recommendation_items.adjustment_log_json",
+        "creator_recommendation_items.human_adjustment_reason",
+        "creator_recommendation_items.review_status"
       ]
     },
+    "get_workflow_state": {
+      "reads": [
+        "customer_demands",
+        "creator_candidate_pool",
+        "mcn_recommendation_items",
+        "mcn_inquiries",
+        "recommendation_runs",
+        "creator_submissions"
+      ],
+      "writes": []
+    }
+  },
+  "knownGaps": [
     {
-      "tool": "get_workflow_state",
-      "always": [],
-      "conditional": []
+      "id": "sync-is-metadata-only",
+      "severity": "critical",
+      "effect": "The recovery chain cannot obtain authoritative provider status or create inquiry records."
     },
     {
-      "tool": "search_creator_tag_vectors",
-      "always": [],
-      "conditional": []
+      "id": "ledger-unused",
+      "severity": "high",
+      "effect": "Write calls do not have a shared persistent idempotency and reconciliation record."
+    },
+    {
+      "id": "audit-json-only",
+      "severity": "medium",
+      "effect": "Manual adjustment history is mutable with the recommendation row and is not an append-only audit stream."
+    },
+    {
+      "id": "query-flags-ignored",
+      "severity": "medium",
+      "effect": "Some advertised include flags do not change the current response."
     }
   ],
   "invariants": [
     {
-      "id": "unique-supplier-mapping",
-      "requirement": "one active supplier binding resolves each targeted (mcn_id, provider, scope) at an as-of time, and (provider, supplier_id) is physically unique",
-      "owner": "production-database",
-      "evidence": [
-        "physical unique constraints uq-supplier-bindings-provider-supplier and uq-supplier-bindings-window-start exist",
-        "transactional overlap guard plus as-of readiness query returns exactly one active supplier_binding_id for every targeted MCN and scope"
-      ],
-      "status": "external-unverified"
+      "id": "creator-identity",
+      "requirement": "Creator joins use platform plus kwUid.",
+      "status": "development-observed"
     },
     {
-      "id": "single-send-context",
-      "requirement": "one logical provider send exists per idempotency_key and every send references one persisted selection_result; an unknown outcome is reconciled before a new operation key is allowed",
-      "owner": "distribution-provider-backend",
-      "evidence": [
-        "physical unique constraints cover send_operations.idempotency_key and (provider, provider_correlation_key)",
-        "timeout scenario reuses the same send operation during reconciliation and an explicit resend creates a new operation key"
-      ],
-      "status": "external-unverified"
+      "id": "supplier-authority",
+      "requirement": "Supplier identity and default rebate come from core_supplier.",
+      "status": "development-observed"
     },
     {
-      "id": "stable-provider-correlation",
-      "requirement": "provider send uses a stable business correlation key and an unknown outcome is queried with that key before any retry",
-      "owner": "distribution-provider-backend",
-      "evidence": [
-        "provider contract documents the stable correlation key",
-        "timeout scenario queries provider state and does not issue a second send"
-      ],
-      "status": "external-unverified"
+      "id": "project-budget-separation",
+      "requirement": "Project total budget fields are not populated from creator unit-price requirements.",
+      "status": "required-not-enforced-by-current-mcp-proxy"
     },
     {
-      "id": "atomic-first-sync",
-      "requirement": "first sync transactionally creates or reuses one snapshot, one inquiry batch, one inquiry per supplier, and one cron",
-      "owner": "sync-mcn-inquiry-status-backend",
-      "evidence": [
-        "transaction and uniqueness constraints cover snapshot, inquiry batch, supplier inquiry, and cron writes",
-        "concurrent first-sync test returns the same snapshot, inquiry batch, inquiries, and cron"
-      ],
-      "status": "external-unverified"
+      "id": "write-idempotency",
+      "requirement": "Every business write has a persistent idempotency and reconciliation record.",
+      "status": "not-implemented"
     },
     {
-      "id": "unique-provider-references",
-      "requirement": "provider_distribution_id is unique and every token and fill_link is nonempty and unique",
-      "owner": "production-database-and-provider",
-      "evidence": [
-        "unique constraints cover provider_distribution_id, token, and fill_link",
-        "provider integration test rejects empty or duplicate references"
-      ],
-      "status": "external-unverified"
-    },
-    {
-      "id": "idempotent-submission-ingest",
-      "requirement": "submission ingest is idempotent on (provider_distribution_id, provider_row_id)",
-      "owner": "ingest-mcn-submissions-backend",
-      "evidence": [
-        "unique constraint on (provider_distribution_id, provider_row_id)",
-        "duplicate-row integration test preserves one logical submission item"
-      ],
-      "status": "external-unverified"
-    },
-    {
-      "id": "single-recovery-owner",
-      "requirement": "recovery uses compare-and-swap or a row lock so concurrent manual and scheduled recovery permit one ingest owner",
-      "owner": "production-database-recovery-coordinator",
-      "evidence": [
-        "CAS predicate or row-lock transaction is documented",
-        "manual-versus-scheduled concurrency test observes one ingest owner"
-      ],
-      "status": "external-unverified"
-    },
-    {
-      "id": "accepted-source-merge-priority",
-      "requirement": "creator merge priority is mcn_submission > manual_source > candidate_pool and automatic rank accepts only accepted records",
-      "owner": "rank-creators-backend",
-      "evidence": [
-        "three-source collision fixture selects the documented priority winner",
-        "ranking fixture excludes need_review and every status other than accepted"
-      ],
-      "status": "external-unverified"
-    },
-    {
-      "id": "submission-batch-retry",
-      "requirement": "retry for a run returns its current unfinished submission batch; a new batch is created only after continue_submission",
-      "owner": "create-submission-batch-backend",
-      "evidence": [
-        "same-run retry test returns the existing unfinished batch identifier",
-        "new-batch test succeeds only after feedback next_action is continue_submission"
-      ],
-      "status": "external-unverified"
-    },
-    {
-      "id": "requirement-dictionary-snapshot-binding",
-      "requirement": "every executable requirement, immutable snapshot, and selection result stores the exact approved dictionary_version and dictionary_hash",
-      "owner": "requirement-and-field-selection-services",
-      "evidence": [
-        "non-null fields and foreign-reference checks cover dictionary_version plus dictionary_hash",
-        "mismatched version/hash fixtures fail closed without creating a snapshot or selection"
-      ],
-      "status": "external-unverified"
-    },
-    {
-      "id": "single-platform-execution-unit",
-      "requirement": "each customer_demands row has exactly one platform and is physically unique by (requirement_head_id, platform, requirement_version)",
-      "owner": "requirement-service",
-      "evidence": [
-        "physical unique constraint uq-customer-demands-head-platform-version exists",
-        "multi-platform intake creates sibling child requirements under one requirement head"
-      ],
-      "status": "external-unverified"
-    },
-    {
-      "id": "immutable-snapshot-and-audit-lineage",
-      "requirement": "requirement snapshots, risk audits, feedback audits, and offer promotion events are append-only and cannot be rewritten in place",
-      "owner": "production-database-and-owning-services",
-      "evidence": [
-        "database permissions or triggers reject update/delete for immutable records",
-        "correction scenarios append a new version or audit event and preserve prior hashes"
-      ],
-      "status": "external-unverified"
-    },
-    {
-      "id": "late-data-does-not-mutate-frozen-results",
-      "requirement": "records received after late_data_cutoff_at retain lineage and are routed to a later snapshot or manual review without mutating frozen selection, ranking, or submission artifacts",
-      "owner": "supply-and-ranking-services",
-      "evidence": [
-        "late-data fixture sets is_late and preserves observed/effective/received/as-of timestamps",
-        "frozen artifact hashes remain unchanged after late data arrives"
-      ],
-      "status": "external-unverified"
-    },
-    {
-      "id": "offer-promotion-is-versioned-and-idempotent",
-      "requirement": "offer promotion creates a new offer revision and append-only promotion event exactly once per source and scope; it never overwrites an active offer",
-      "owner": "supply-service",
-      "evidence": [
-        "physical unique constraints cover offer source/scope and promotion idempotency key",
-        "duplicate promotion and overwrite attempts return the existing result or fail closed"
-      ],
-      "status": "external-unverified"
+      "id": "authoritative-inquiry-sync",
+      "requirement": "Sync reads provider state and maintains mcn_inquiries before ingest.",
+      "status": "not-implemented"
     }
   ]
 }

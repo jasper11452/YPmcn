@@ -6,7 +6,7 @@
 
 ## 输入
 
-必填 `run_id`；可选 `include_submissions`、`include_creator_detail`、`include_feedback`。字符串值必须表示正整数。
+必填 `run_id`；仅 `include_submissions` 已确认生效。`include_creator_detail`、`include_feedback` 当前实现未使用，不要发送。字符串值必须表示正整数。
 
 ## 输出成功证据
 

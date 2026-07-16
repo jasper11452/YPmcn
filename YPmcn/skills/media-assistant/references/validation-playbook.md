@@ -17,7 +17,7 @@ npm run verify:provider       # 开发机，当前默认
 npm run verify:provider:prod  # 生产 SSE 路由诊断
 ```
 
-两个命令都只发送 initialize、initialized notification、tools/list。开发机 PASS 要求所有必需工具存在且 required/type/forbidden 与 `mvp-v2` 兼容；`search_creator_tag_vectors` 在向量服务接入期间为可选能力。生产域名恢复前不得将其结果表述为业务 Provider 已就绪。
+两个命令都只发送 initialize、initialized notification、tools/list。开发机 PASS 要求 15 个工具存在且 required/type/forbidden 与 `mvp-v2` 兼容。当前没有公开向量工具；生产域名恢复前不得将开发结果表述为生产 Provider 已就绪。
 
 ## reference MCP
 

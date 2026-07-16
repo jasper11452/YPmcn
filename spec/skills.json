@@ -19,8 +19,7 @@
         "get_recommendation_run_detail",
         "get_creator_detail",
         "audit_manual_adjustment",
-        "get_workflow_state",
-        "search_creator_tag_vectors"
+        "get_workflow_state"
       ],
       "toolPolicy": {
         "contract": "mcp.json",
