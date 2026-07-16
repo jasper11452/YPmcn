@@ -12,7 +12,7 @@ function rows() {
   return [
     {
       platform: "xiaohongshu",
-      platform_account_id: "xhs-1",
+      kwUid: "xhs-1",
       source_table: "xhs_creator_accounts",
       content_tags: ["美妆", "护肤"],
       grow_tags: ["腰部达人"],
@@ -20,7 +20,7 @@ function rows() {
     },
     {
       platform: "douyin",
-      platform_account_id: "dy-1",
+      kwUid: "dy-1",
       source_table: "dy_creator_accounts",
       content_tags: ["数码", "测评"],
       grow_tags: [],
@@ -67,4 +67,3 @@ describe("source-owned vector sync", () => {
     assert.equal(unavailableStore.pointCount, 0);
   });
 });
-

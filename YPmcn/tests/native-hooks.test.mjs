@@ -56,6 +56,38 @@ describe("OpenClaw native hook bridge", () => {
     assert.match(result.blockReason, /INTEGRATION_REQUIRED/);
   });
 
+  it("allows provider-authoritative planning without host session context", async () => {
+    const planningCalls = [
+      {
+        toolName: "mcp__ypmcn__validate_requirement",
+        params: { payload: { projectName: "demo", status: "ready" } },
+        toolCallId: "call-stateless-validate",
+      },
+      {
+        toolName: "mcp__ypmcn__search_creators",
+        params: { id: "req-stateless-1" },
+        toolCallId: "call-stateless-search",
+      },
+      {
+        toolName: "mcp__ypmcn__rank_mcns",
+        params: { id: "req-stateless-1", platform: "xiaohongshu" },
+        toolCallId: "call-stateless-rank",
+      },
+    ];
+
+    for (const event of planningCalls) {
+      const result = await hooks.get("before_tool_call")(event, {});
+      assert.equal(result, undefined);
+    }
+
+    const highRiskResult = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_submission_batch",
+      params: { run_id: "run-stateless-1" },
+      toolCallId: "call-stateless-submit",
+    }, {});
+    assert.match(highRiskResult.blockReason, /INVALID_INPUT/);
+  });
+
   it("guards manual adjustment audits as recommendation-stage writes", async () => {
     const auditEvent = (params = {}, toolCallId = "call-audit") => ({
       toolName: "mcp__ypmcn__audit_manual_adjustment",

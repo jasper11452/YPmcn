@@ -141,10 +141,10 @@ assert_deny("search_creators from requirement_draft", output, "BLOCKED_PHASE_MIS
 output = run_hook(PRE_TOOL, {
     "tool_name": "mcp__ypmcn__validate_requirement",
     "tool_input": {"payload": {}},
-    "sessionKey": SESSION_KEY,
-    "toolCallId": "tc_001",
+    "session_id": SESSION_KEY,
+    "tool_use_id": "tc_001",
 })
-assert_allow("validate_requirement from requirement_draft", output)
+assert_allow("validate_requirement accepts Claude Code session_id", output)
 assert_reference_context(
     "validate_requirement receives soft reference gate",
     output,

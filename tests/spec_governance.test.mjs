@@ -148,11 +148,11 @@ describe("Spec governance", () => {
     ]);
     assert.deepEqual(database.mvpEntityBaseline.creatorBusinessIdentity, [
       "platform",
-      "kw_uid",
+      "kwUid",
     ]);
     assert.deepEqual(database.mvpEntityBaseline.sourceRecordIdentity, [
       "platform",
-      "kw_uid",
+      "kwUid",
       "source_snapshot_date",
     ]);
     assert.equal(
@@ -186,19 +186,22 @@ describe("Spec governance", () => {
     ]);
   });
 
-  it("keeps vector retrieval internal to the closed business tool surface", () => {
+  it("exposes vector query while keeping vector operations out of the business surface", () => {
     const mcp = json("mcp.json");
     const businessTools = [...mcp.requiredTools, ...mcp.optionalTools];
 
-    assert.deepEqual(mcp.vectorCapabilityBoundary.publicBusinessVectorTools, []);
+    assert.deepEqual(mcp.vectorCapabilityBoundary.publicBusinessVectorTools, [
+      "search_creator_tag_vectors",
+    ]);
     assert.equal(mcp.vectorCapabilityBoundary.excludedNamespace, "vector-mcp");
     assert.deepEqual(mcp.serverIdentity.excludedNamespaces, ["vector-mcp"]);
     assert.deepEqual(mcp.vectorCapabilityBoundary.operationsTools, [
       "sync_creator_tag_vectors",
-      "search_creator_tag_vectors",
       "health_check_vector_store",
     ]);
-    assert.equal(new Set(businessTools).size, 15);
+    assert.equal(new Set(businessTools).size, 16);
+    assert.equal(businessTools.includes("search_creator_tag_vectors"), true);
+    assert.equal("search_creator_tag_vectors" in mcp.tools, true);
     for (const name of mcp.vectorCapabilityBoundary.operationsTools) {
       assert.equal(businessTools.includes(name), false, name);
       assert.equal(name in mcp.tools, false, name);
@@ -213,7 +216,7 @@ describe("Spec governance", () => {
     const algorithms = json("algorithms.json");
     const retrieval = algorithms.vectorGovernance.creatorVectorRetrieval;
     const prohibitedEmbeddingFields = [
-      "id", "platform", "kw_uid", "source_snapshot_date", "nickname", "url",
+      "id", "platform", "kwUid", "source_snapshot_date", "nickname", "url",
       "agency", "gender", "age", "region", "follower_metrics",
       "engagement_metrics", "cpe", "cpm", "prices", "rebate",
       "numeric_only_json",

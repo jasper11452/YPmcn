@@ -117,7 +117,7 @@ async function main() {
       const matches = data.matches || [];
       const top10 = matches.slice(0, 10).map((m) => ({
         platform: m.platform,
-        platform_account_id: m.platform_account_id,
+        kwUid: m.kwUid,
         matched_tags: m.matched_tags,
         raw_score: Number(m.raw_score?.toFixed?.(4) ?? m.raw_score),
         rerank_score: m.rerank_score === null ? null : Number(m.rerank_score?.toFixed?.(4) ?? m.rerank_score),
@@ -126,7 +126,7 @@ async function main() {
       }));
       const judge = judgeVerdict(matches, brief.relevance_keywords);
       console.log(`  ✓ ${elapsed}ms | total=${data.total_candidates} | matches=${matches.length} | ${judge.verdict} | ${judge.reason}`);
-      console.log(`  top3: ${top10.slice(0,3).map(m => `${m.platform_account_id}(${m.rerank_score ?? m.raw_score})`).join(", ")}`);
+      console.log(`  top3: ${top10.slice(0,3).map(m => `${m.kwUid}(${m.rerank_score ?? m.raw_score})`).join(", ")}`);
       briefResults.push({ brief_id: brief.brief_id, scenario: brief.scenario, content_requirements: brief.content_requirements, negative_requirements: brief.negative_requirements, platform: brief.platform, geo: brief.geo, top_10: top10, total_candidates: data.total_candidates, positive_query: data.positive_query, negative_terms: data.negative_terms, elapsed_ms: elapsed, self_verdict: judge.verdict, verdict_reason: judge.reason });
     } catch (err) {
       const elapsed = Date.now() - t0;

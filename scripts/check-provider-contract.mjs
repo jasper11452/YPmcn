@@ -398,6 +398,7 @@ export async function checkProviderUrl(url, options = {}) {
 }
 
 function parseArgs(argv) {
+  if (argv.length === 0) return { url: targetProfile.providerContractBasis.endpoint };
   const options = {};
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];

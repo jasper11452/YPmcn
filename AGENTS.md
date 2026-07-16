@@ -1,5 +1,11 @@
 # AGENTS.md
 
+## 远程MCP开发机（windows系统）地址：
+局域网：`ssh 26969@192.168.0.129`；
+Tailscale远程：`ssh 26969@100.82.209.65`
+
+远程MCP开发机MCP server项目地址：`D:\yp_local_mcp`
+
 ## 项目边界
 
 - Git 根目录是唯一长期项目；`YPmcn/`、`vector-mcp/` 和 `reference-mcp/` 是仓库组件。

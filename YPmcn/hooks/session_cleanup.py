@@ -29,7 +29,9 @@ def main():
     session_key = (
         payload.get("sessionKey") or
         payload.get("session_key") or
+        payload.get("session_id") or
         (payload.get("context", {}) or {}).get("sessionKey") or
+        (payload.get("context", {}) or {}).get("session_id") or
         ""
     )
 

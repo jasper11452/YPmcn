@@ -13,11 +13,11 @@
       "namedVectors": {
         "content": {
           "includeFields": ["creator_type", "content_types", "content_tags", "persona", "clean_description"],
-          "excludeFields": ["id", "platform", "kw_uid", "source_snapshot_date", "nickname", "url", "agency", "gender", "age", "region", "follower_metrics", "engagement_metrics", "cpe", "cpm", "prices", "rebate", "numeric_only_json"]
+          "excludeFields": ["id", "platform", "kwUid", "source_snapshot_date", "nickname", "url", "agency", "gender", "age", "region", "follower_metrics", "engagement_metrics", "cpe", "cpm", "prices", "rebate", "numeric_only_json"]
         },
         "commercial": {
           "includeFields": ["parsed_brands", "parsed_categories", "parsed_scenarios", "parsed_benefits", "parsed_ingredients", "parsed_ip"],
-          "excludeFields": ["id", "platform", "kw_uid", "source_snapshot_date", "nickname", "url", "agency", "gender", "age", "region", "follower_metrics", "engagement_metrics", "cpe", "cpm", "prices", "rebate", "numeric_only_json"]
+          "excludeFields": ["id", "platform", "kwUid", "source_snapshot_date", "nickname", "url", "agency", "gender", "age", "region", "follower_metrics", "engagement_metrics", "cpe", "cpm", "prices", "rebate", "numeric_only_json"]
         }
       },
       "hardConstraints": ["platform", "region", "follower_range", "price_range", "compliance"],

@@ -2,7 +2,9 @@
   "schemaVersion": 1,
   "profile": "mvp-v2",
   "providerContractBasis": {
-    "endpoint": "https://mcp.eshypdata.com/sse",
+    "endpoint": "http://192.168.0.129:32008/sse",
+    "productionEndpoint": "https://mcp.eshypdata.com/sse",
+    "activeProfile": "development",
     "inputAuthority": "live-tools/list",
     "schemaSelection": "current-endpoint-over-old-mvp-v2",
     "ignoredToolPrefix": "pgy",
@@ -10,11 +12,12 @@
   },
   "mode": "writable",
   "vectorCapabilityBoundary": {
-    "publicBusinessVectorTools": [],
+    "publicBusinessVectorTools": [
+      "search_creator_tag_vectors"
+    ],
     "excludedNamespace": "vector-mcp",
     "operationsTools": [
       "sync_creator_tag_vectors",
-      "search_creator_tag_vectors",
       "health_check_vector_store"
     ],
     "internalConsumers": ["search_creators", "rank_creators"],
@@ -36,7 +39,7 @@
     "canonicalNamespace": "ypmcn",
     "hostQualifiedToolName": {
       "format": "mcp__ypmcn__<contract-tool>",
-      "pattern": "^mcp__ypmcn__(?:validate_requirement|search_creators|rank_mcns|select_inquiry_form_fields|create_with_distributions|sync_mcn_inquiry_status|ingest_mcn_submissions|manual_source_creators|rank_creators|create_submission_batch|record_client_feedback|get_recommendation_run_detail|get_creator_detail|audit_manual_adjustment|get_workflow_state)$",
+      "pattern": "^mcp__ypmcn__(?:validate_requirement|search_creators|rank_mcns|select_inquiry_form_fields|create_with_distributions|sync_mcn_inquiry_status|ingest_mcn_submissions|manual_source_creators|rank_creators|create_submission_batch|record_client_feedback|get_recommendation_run_detail|get_creator_detail|audit_manual_adjustment|get_workflow_state|search_creator_tag_vectors)$",
       "businessToolIdentity": "exact-qualified-name-and-contract-tool",
       "bareHookEvent": "not-a-business-tool"
     },
@@ -66,7 +69,8 @@
     "audit_manual_adjustment"
   ],
   "optionalTools": [
-    "get_workflow_state"
+    "get_workflow_state",
+    "search_creator_tag_vectors"
   ],
   "outputEnvelopes": {
     "observed-runtime": {
@@ -248,6 +252,17 @@
     "get_workflow_state": {
       "advertisedOutputSchema": false,
       "evidenceBasis": "No provider outputSchema is advertised; retain the actual response as evidence before deriving downstream identifiers.",
+      "successEnvelope": "observed-runtime",
+      "failureEnvelope": "observed-runtime",
+      "successSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "errorCodes": []
+    },
+    "search_creator_tag_vectors": {
+      "advertisedOutputSchema": false,
+      "evidenceBasis": "The remote development provider has not completed vector-tool integration; retain the actual response and MySQL revalidation provenance before using results.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -829,13 +844,13 @@
       "name": "get_creator_detail",
       "required": [
         "platform",
-        "kw_uid"
+        "kwUid"
       ],
       "properties": {
         "platform": {
           "type": "string"
         },
-        "kw_uid": {
+        "kwUid": {
           "type": "string"
         },
         "include_offers": {
@@ -959,6 +974,89 @@
         "retain actual returned payload as downstream evidence"
       ],
       "semanticRequirement": "Provide demand_id with demand_version, or provide trace_id."
+    },
+    "search_creator_tag_vectors": {
+      "name": "search_creator_tag_vectors",
+      "required": [
+        "positiveRequirements",
+        "negativeRequirements"
+      ],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "xiaohongshu",
+            "douyin"
+          ]
+        },
+        "queryText": {
+          "type": "string"
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "positiveRequirements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "negativeRequirements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "limit": {
+          "type": "number"
+        },
+        "candidateLimit": {
+          "type": "number"
+        },
+        "region": {
+          "type": "string"
+        },
+        "followerMin": {
+          "type": "number"
+        },
+        "followerMax": {
+          "type": "number"
+        },
+        "priceMin": {
+          "type": "number"
+        },
+        "priceMax": {
+          "type": "number"
+        },
+        "compliance": {
+          "type": "string"
+        }
+      },
+      "forbidden": [],
+      "sideEffects": "read-only",
+      "writers": {
+        "always": [],
+        "conditional": []
+      },
+      "retry": {
+        "policy": "query-safe",
+        "blindRetry": true,
+        "unknownOutcome": "not-applicable",
+        "reconcileWith": null
+      },
+      "outputEnvelope": "observed-runtime",
+      "successEvidence": [
+        "success === true",
+        "actual results include MySQL revalidation provenance",
+        "degraded responses include an explicit degraded reason"
+      ]
     }
   }
 }

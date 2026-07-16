@@ -71,8 +71,8 @@
     },
     "creatorIdentity": {
       "physicalColumn": "kwUid",
-      "toolParameter": "kw_uid",
-      "ormAttribute": "kw_uid",
+      "toolParameter": "kwUid",
+      "ormAttribute": "kwUid",
       "rule": "Tool and Python names may remain snake_case, but every ORM mapping must explicitly bind to physical MySQL column kwUid."
     },
     "requirementIdentity": {
@@ -716,6 +716,11 @@
     },
     {
       "tool": "get_workflow_state",
+      "always": [],
+      "conditional": []
+    },
+    {
+      "tool": "search_creator_tag_vectors",
       "always": [],
       "conditional": []
     }

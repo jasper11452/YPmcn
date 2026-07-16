@@ -14,7 +14,7 @@ export type QdrantDistance = "Cosine" | "Dot" | "Euclid";
 
 export interface VectorPointPayload {
   platform: string;
-  platform_account_id: string;
+  kwUid: string;
   source_table: string;
   tag_type: string;
   raw_tags: string[];
@@ -44,7 +44,7 @@ export function buildCollectionSchema(config: QdrantConfig): QdrantCollectionSch
     distance: config.distance,
     payloadIndexes: [
       "platform",
-      "platform_account_id",
+      "kwUid",
       "tag_type",
       "source_updated_at",
       "vector_version",

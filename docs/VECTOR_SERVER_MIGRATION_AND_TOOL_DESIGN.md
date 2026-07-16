@@ -63,14 +63,14 @@ creator_commercial
 两个 Collection 使用相同的达人业务 ID：
 
 ```text
-platform + kw_uid + source_snapshot_date
+platform + kwUid + source_snapshot_date
 ```
 
 共同保存的 Metadata 只包含回源所需信息：
 
 ```text
 platform
-kw_uid
+kwUid
 source_table
 source_row_id
 source_snapshot_date
@@ -289,7 +289,7 @@ DashVector 只是内部实现方式。
 {
   "requirement_id": "需求ID",
   "candidates": [
-    {"platform": "dy", "kw_uid": "达人ID"}
+    {"platform": "dy", "kwUid": "达人ID"}
   ]
 }
 ```
@@ -300,7 +300,7 @@ DashVector 只是内部实现方式。
 {
   "requirement_text": "敏感肌修护，擅长成分讲解",
   "candidates": [
-    {"platform": "dy", "kw_uid": "达人ID"}
+    {"platform": "dy", "kwUid": "达人ID"}
   ]
 }
 ```
@@ -314,7 +314,7 @@ DashVector 只是内部实现方式。
   "status": "ok",
   "retrieval_mode": "vector",
   "ranked_candidates": [
-    {"platform": "dy", "kw_uid": "达人ID", "rank": 1}
+    {"platform": "dy", "kwUid": "达人ID", "rank": 1}
   ],
   "degraded_reason": null
 }
@@ -327,7 +327,7 @@ DashVector 只是内部实现方式。
   "status": "degraded",
   "retrieval_mode": "sql-only",
   "ranked_candidates": [
-    {"platform": "dy", "kw_uid": "达人ID", "rank": 1}
+    {"platform": "dy", "kwUid": "达人ID", "rank": 1}
   ],
   "degraded_reason": "vector_store_unavailable"
 }

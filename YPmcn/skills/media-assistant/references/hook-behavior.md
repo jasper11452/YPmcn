@@ -10,6 +10,10 @@ Hook 通过 `.claude/settings.json` 挂载，以 `session_id` 隔离状态；不
 
 软 reference 门禁不会伪造或持久化“已阅读”状态，也不会因未读而阻断调用。Agent 只能在本会话实际打开 reference 后声称已阅读。
 
+YP Action 的独立插件 Tool MCP 路径当前不透传 `sessionKey`。需求校验、候选搜索和 MCN
+排序可在无本地会话投影时依赖 provider 返回的 workflow state 与语义 ID 继续；外发、审计、
+提交批次及其他依赖本地确认状态的写操作仍必须具备当前 `sessionKey`。
+
 ## provider 外发守卫
 
 `create_with_distributions` 缺任一项即阻断：

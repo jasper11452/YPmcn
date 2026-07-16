@@ -26,7 +26,7 @@ validate_requirement
 
 - 会话投影受 TTL 约束，可随进程退出丢失，不代替数据库事实。
 - Native Plugin 将 OpenClaw `before_tool_call`、`after_tool_call`、`session_end` 事件桥接到包内 Python Hook；`.claude/settings.json` 仅供 Claude Code 仓库开发会话使用。
-- OpenClaw 2026.6.11 的业务工具名按 `ypmcn__<tool>` 进入 Hook；裸工具名不视为业务工具。
+- 当前 YP Action `2026.7.1` 内置 OpenClaw `2026.4.14`，Headless smoke 与开发依赖以该实际运行时为基线；业务工具资格名称以根 `spec/mcp.json` 为准，裸工具名不视为 Host 侧业务工具。
 - provider 发送前由具备 `operator.write` scope 的客户端调用 `confirm_distribution_send` session action；缺 `sessionKey`、`toolCallId`、已绑定角色、三项确认或当前字段选择时一律阻断。
 - 字段选择是发送前最后确认点，v2 只允许 `preview_only=false`。
 - shell、PowerShell、curl 直连 provider 写接口会被阻断。
@@ -34,17 +34,16 @@ validate_requirement
 
 ## Provider 状态
 
-目标 profile 是 `mvp-v2`。当前生产 endpoint 的只读预检结果是 `legacy-1.9.4`，缺：
-
-- `select_inquiry_form_fields`
-- `create_with_distributions`
-- `sync_mcn_inquiry_status`
-
-因此完整生产链路当前返回 `integration_required`，不得自动降到旧 `demand_id/demand_version` 调用方式。检查命令：
+开发 profile 默认连接 `http://192.168.0.129:32008/sse`，当前 15 个业务工具输入契约通过只读检查；公开向量查询 `search_creator_tag_vectors` 正在接入，作为可选能力，仅在 `tools/list` 实际广告后调用。生产 `https://mcp.eshypdata.com/sse` 当前未路由到 YPmcn 业务 Provider，因此完整生产链路保持 `integration_required`。
 
 ```bash
-node scripts/check-provider-contract.mjs --url https://mcp.eshypdata.com/sse
+npm run mcp:dev
+npm run verify:provider
+npm run mcp:prod
+npm run verify:provider:prod
 ```
+
+源码可一键切换 profile；发布暂存始终使用生产 SSE，开发机 PASS 不作为生产成功证据。
 
 ## 开发与安装包
 

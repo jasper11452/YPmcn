@@ -9,6 +9,9 @@ const READ_ONLY = new Set([
   "select_inquiry_form_fields", "get_recommendation_run_detail", "get_creator_detail",
   "get_workflow_state",
 ]);
+const STATELESS_SAFE = new Set([
+  "validate_requirement", "search_creators", "rank_mcns",
+]);
 const ALLOWED: Record<string, Set<string>> = Object.fromEntries(Object.entries({
   requirement_draft: ["validate_requirement"], requirement_ready: ["search_creators"],
   search_completed: ["rank_mcns"], mcn_planning: ["select_inquiry_form_fields"],
@@ -84,7 +87,8 @@ export function beforeTool(event: Json, ctx: Json, rootDir: string): Json | unde
   const known = READ_ONLY.has(tool) || Object.values(ALLOWED).some((tools) => tools.has(tool));
   if (!known) return undefined;
   const key = sessionKey(event, ctx);
-  if (!text(key) && !READ_ONLY.has(tool)) return deny("INVALID_INPUT", "A current sessionKey is required for state-safe execution.");
+  if (!text(key) && !READ_ONLY.has(tool) && !STATELESS_SAFE.has(tool))
+    return deny("INVALID_INPUT", "A current sessionKey is required for session-dependent execution.");
   const session = load(statePath(rootDir)).sessions?.[key];
   if (session?.lastResultIssue && !READ_ONLY.has(tool)) return deny(session.lastResultIssue.code ?? "WRITE_RESULT_UNKNOWN", "Previous result lacked explicit evidence; reconcile before retrying this write.");
   if (session) {

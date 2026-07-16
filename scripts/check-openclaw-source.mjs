@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
+import { checkProviderUrl } from "./check-provider-contract.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
@@ -14,6 +16,11 @@ const bundledCli = "/Applications/YP Action.app/Contents/Resources/cfmind/opencl
 const cli = process.env.OPENCLAW_CLI || bundledCli;
 const stateDir = mkdtempSync(join(tmpdir(), "ypmcn-openclaw-smoke-"));
 const configPath = join(stateDir, "openclaw.json");
+const packageJson = JSON.parse(readFileSync(new URL("../YPmcn/package.json", import.meta.url), "utf8"));
+const sourceMcpConfig = JSON.parse(readFileSync(new URL("../YPmcn/mcp.json", import.meta.url), "utf8"));
+const expectedOpenClawVersion = packageJson.devDependencies.openclaw;
+const sourceMcp = sourceMcpConfig.mcpServers["ypmcn-mcp"];
+const mcpUrl = process.env.YPMCN_MCP_URL || sourceMcp.url;
 
 function run(args) {
   const result = spawnSync(process.execPath, [cli, ...args], {
@@ -42,6 +49,17 @@ try {
     skills: { load: { extraDirs: [skillRoot] } },
   }, null, 2)}\n`);
 
+  const runtimeVersion = run(["--version"]);
+  assert.match(runtimeVersion, new RegExp(`OpenClaw ${expectedOpenClawVersion.replaceAll(".", "\\.")}(?:\\s|$)`));
+
+  run(["mcp", "set", "ypmcn-mcp", JSON.stringify({ ...sourceMcp, url: mcpUrl })]);
+  const configuredMcp = JSON.parse(run(["mcp", "list", "--json"]));
+  assert.equal(configuredMcp["ypmcn-mcp"]?.url, mcpUrl);
+  assert.equal(configuredMcp["ypmcn-mcp"]?.transport, "sse");
+
+  const providerReport = await checkProviderUrl(mcpUrl);
+  assert.equal(providerReport.status, "PASS", JSON.stringify(providerReport));
+
   const inspected = JSON.parse(run(["plugins", "inspect", "ypmcn-media-assistant", "--json"]));
   assert.equal(inspected.plugin.id, "ypmcn-media-assistant");
   assert.equal(inspected.plugin.imported, true);
@@ -53,8 +71,8 @@ try {
 
   const skills = JSON.parse(run(["skills", "check", "--json"]));
   const serialized = JSON.stringify(skills);
-  assert.ok(skills.eligible?.includes("媒介助手"), `媒介助手 skill was not eligible: ${serialized}`);
-  process.stdout.write(`[smoke:openclaw] PASS plugin=loaded skill=媒介助手 cli=${cli}\n`);
+  assert.ok(skills.eligible?.includes("media-assistant"), `media-assistant skill was not eligible: ${serialized}`);
+  process.stdout.write(`[smoke:openclaw] PASS plugin=loaded skill=media-assistant mcp=${mcpUrl} openclaw=${expectedOpenClawVersion} cli=${cli}\n`);
 } catch (error) {
   process.stderr.write(`[smoke:openclaw] FAIL ${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;

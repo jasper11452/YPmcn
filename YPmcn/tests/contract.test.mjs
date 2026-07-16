@@ -23,13 +23,14 @@ const CURRENT_TOOLS = [
   "manual_source_creators", "rank_creators", "create_submission_batch",
   "record_client_feedback", "get_recommendation_run_detail",
   "get_creator_detail", "audit_manual_adjustment", "get_workflow_state",
+  "search_creator_tag_vectors",
 ];
 
 function validDistribution(overrides = {}) {
   return {
     projectName: "项目 A",
     deadline: "2026-07-19T18:00:00+08:00",
-    columns: [{ key: "kw_uid" }],
+    columns: [{ key: "kwUid" }],
     supplierIds: ["supplier-1"],
     prefillRows: [],
     prefillRowsBySupplier: {},
@@ -93,19 +94,19 @@ describe("current Endpoint input validation", () => {
       ["rank_mcns", { id: "req-1", platform: "xiaohongshu", medium_risk_confirmation: null }],
       ["select_inquiry_form_fields", { url: null, timeout_seconds: 30 }],
       ["create_with_distributions", validDistribution({ prefillRowsBySupplier: {
-        "supplier-1": [{ kw_uid: "creator-1" }],
+        "supplier-1": [{ kwUid: "creator-1" }],
       } })],
       ["sync_mcn_inquiry_status", {
         requirement_id: "req-1", project_id: "project-1", mcn_id: "mcn-1",
         cron_job_id: null, scheduled_recover_at: null,
       }],
-      ["ingest_mcn_submissions", { inquiry_id: "inquiry-1", items: [{ kw_uid: "creator-1" }] }],
+      ["ingest_mcn_submissions", { inquiry_id: "inquiry-1", items: [{ kwUid: "creator-1" }] }],
       ["manual_source_creators", { demand_id: "demand-1", demand_version: 1 }],
       ["rank_creators", { requirement_id: "req-1", limit: 20 }],
       ["create_submission_batch", { run_id: "1", risk_confirmation: null }],
       ["record_client_feedback", { run_id: "1", feedback_items: [{ status: "accepted" }] }],
       ["get_recommendation_run_detail", { run_id: "1" }],
-      ["get_creator_detail", { platform: "xiaohongshu", kw_uid: "creator-1" }],
+      ["get_creator_detail", { platform: "xiaohongshu", kwUid: "creator-1" }],
       ["audit_manual_adjustment", { run_id: "1", adjustments: [{}], operator_id: "operator-1" }],
       ["get_workflow_state", { trace_id: "trace-1" }],
       ["get_workflow_state", { demand_id: "demand-1", demand_version: 1 }],
@@ -156,12 +157,12 @@ describe("current Endpoint input validation", () => {
 describe("field-selection description", () => {
   it("parses unique ordered 数据库字段名：字段备注 lines", () => {
     assert.deepEqual(
-      parseFieldSelectionDescription("kw_uid：达人 ID\nnickname: 达人昵称"),
-      ["kw_uid", "nickname"],
+      parseFieldSelectionDescription("kwUid：达人 ID\nnickname: 达人昵称"),
+      ["kwUid", "nickname"],
     );
-    assert.equal(parseFieldSelectionDescription("kw_uid"), undefined);
+    assert.equal(parseFieldSelectionDescription("kwUid"), undefined);
     assert.equal(
-      parseFieldSelectionDescription("kw_uid：达人 ID\nkw_uid：重复"),
+      parseFieldSelectionDescription("kwUid：达人 ID\nkwUid：重复"),
       undefined,
     );
   });

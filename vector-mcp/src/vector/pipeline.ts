@@ -60,7 +60,7 @@ export function buildDerivedPayload(
 ): DerivedVectorPayload {
   return {
     platform: row.platform,
-    kw_uid: row.kwUid,
+    kwUid: row.kwUid,
     source_table: row.sourceTable,
     source_row_id: row.sourceRowId,
     source_snapshot_date: row.sourceSnapshotDate,
@@ -134,7 +134,7 @@ function provenance(row: CreatorRow, commercialVectorAvailable: boolean) {
     authoritative_source: "mysql" as const,
     mysql_revalidated: true,
     platform: row.platform,
-    kw_uid: row.kwUid,
+    kwUid: row.kwUid,
     source_table: row.sourceTable,
     source_row_id: row.sourceRowId,
     source_snapshot_date: row.sourceSnapshotDate,
@@ -147,13 +147,13 @@ function mergeHits(content: NamedVectorHit[], commercial: NamedVectorHit[]): Nam
   const ordered = new Map<string, { hit: NamedVectorHit; bestRank: number; firstList: number }>();
   for (const [listIndex, hits] of [content, commercial].entries()) {
     hits.forEach((hit, rank) => {
-      const key = `${hit.payload.platform}:${hit.payload.kw_uid}`;
+      const key = `${hit.payload.platform}:${hit.payload.kwUid}`;
       const existing = ordered.get(key);
       if (!existing || rank < existing.bestRank) ordered.set(key, { hit, bestRank: rank, firstList: listIndex });
     });
   }
   return [...ordered.values()]
-    .sort((a, b) => a.bestRank - b.bestRank || a.firstList - b.firstList || a.hit.payload.kw_uid.localeCompare(b.hit.payload.kw_uid))
+    .sort((a, b) => a.bestRank - b.bestRank || a.firstList - b.firstList || a.hit.payload.kwUid.localeCompare(b.hit.payload.kwUid))
     .map((entry) => entry.hit);
 }
 
@@ -176,7 +176,7 @@ async function sqlOnlyResult(
       matches: rows.map((row, index) => ({
         rank: index + 1,
         platform: row.platform,
-        kw_uid: row.kwUid,
+        kwUid: row.kwUid,
         provenance: provenance(row, false),
       })),
     };
@@ -243,17 +243,17 @@ export class LocalVectorPipeline {
 
     let current: CreatorRow[];
     try {
-      current = await this.deps.source.rehydrate(input.platform, merged.map((hit) => hit.payload.kw_uid));
+      current = await this.deps.source.rehydrate(input.platform, merged.map((hit) => hit.payload.kwUid));
     } catch {
       return { success: false as const, error: { code: "SOURCE_DEPENDENCY_ERROR", dependency: "mysql_creator_source" } };
     }
     const byId = new Map(current.map((row) => [row.kwUid, row]));
     const vectorAvailability = new Map(merged.map((hit) => [
-      `${hit.payload.platform}:${hit.payload.kw_uid}`,
+      `${hit.payload.platform}:${hit.payload.kwUid}`,
       hit.payload.commercial_vector_available === true,
     ]));
     const candidates = merged
-      .flatMap((hit) => byId.get(hit.payload.kw_uid) ? [byId.get(hit.payload.kw_uid)!] : [])
+      .flatMap((hit) => byId.get(hit.payload.kwUid) ? [byId.get(hit.payload.kwUid)!] : [])
       .filter((row) => passesHardFilters(row, input.filters ?? {}));
     const rerankable = candidates.flatMap((row) => {
       const projected = projectCreatorText({ description: row.description, profile: row.profile, data_json: row.dataJson });
@@ -268,7 +268,7 @@ export class LocalVectorPipeline {
         return {
           rank: index + 1,
           platform: row.platform,
-          kw_uid: row.kwUid,
+          kwUid: row.kwUid,
           provenance: provenance(row, vectorAvailability.get(`${row.platform}:${row.kwUid}`) === true),
         };
       });

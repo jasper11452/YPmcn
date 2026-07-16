@@ -46,7 +46,7 @@ function legacyToolDefinitions() {
 }
 
 describe("read-only provider contract checker", () => {
-  it("keeps the provider tool set closed without vector operations tools", () => {
+  it("keeps vector operations closed while admitting the public vector query", () => {
     const names = currentToolDefinitions().map(({ name }) => name);
     assert.deepEqual(names, [
       "validate_requirement", "search_creators", "rank_mcns",
@@ -54,11 +54,11 @@ describe("read-only provider contract checker", () => {
       "sync_mcn_inquiry_status", "ingest_mcn_submissions", "manual_source_creators",
       "rank_creators", "create_submission_batch", "record_client_feedback",
       "get_recommendation_run_detail", "get_creator_detail",
-      "audit_manual_adjustment", "get_workflow_state",
+      "audit_manual_adjustment", "get_workflow_state", "search_creator_tag_vectors",
     ]);
+    assert.equal(names.includes("search_creator_tag_vectors"), true);
     for (const name of [
       "sync_creator_tag_vectors",
-      "search_creator_tag_vectors",
       "health_check_vector_store",
     ]) {
       assert.equal(names.includes(name), false);

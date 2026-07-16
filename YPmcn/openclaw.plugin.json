@@ -1,6 +1,6 @@
 {
   "id": "ypmcn-media-assistant",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "description": "YPmcn 媒介助手：对齐当前生产 MCP 的工具门禁、证据链路与本地会话投影。纯 Node typed hooks。",
   "author": {
     "name": "Jasper"

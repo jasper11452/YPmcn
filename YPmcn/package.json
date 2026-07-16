@@ -1,6 +1,6 @@
 {
   "name": "ypmcn-media-assistant",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "description": "YPmcn 媒介助手：对齐当前生产 MCP 的 OpenClaw 流程门禁与可恢复状态管理",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,7 +30,7 @@
     "openclaw": "*"
   },
   "devDependencies": {
-    "openclaw": "2026.6.11",
+    "openclaw": "2026.4.14",
     "typescript": "5.9.3"
   },
   "keywords": [

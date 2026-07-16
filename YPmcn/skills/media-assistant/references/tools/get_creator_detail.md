@@ -6,7 +6,7 @@
 
 ## 输入
 
-必填 `platform`、`kw_uid`；可选 `include_offers`、`include_mcn`、`include_vector_text`、`include_recent_metrics`。
+必填 `platform`、`kwUid`；可选 `include_offers`、`include_mcn`、`include_vector_text`、`include_recent_metrics`。
 
 ## 输出成功证据
 
@@ -22,4 +22,4 @@
 
 ## 错误与停止条件
 
-不得发送旧 `creator_id` 或 `platform_account_id`，不得从昵称猜 `kw_uid`。
+不得发送旧 `creator_id`，不得从昵称猜 `kwUid`。

@@ -28,7 +28,8 @@ description: "Use for the live YPmcn media workflow: requirement validation, cre
 4. **能力状态不夸大**：当前是目标契约 + 本地安全编排；生产 Provider、外部数据库和完整业务闭环未验证。不得把 Spec、Hook 或测试通过表述成生产业务已完成。
 5. **数据库搜索边界**：`search_creators` 只过滤现有达人数据库，禁止浏览器、网页搜索或站外抓取。
 6. **平台全拼**：业务 Tool 和数据库只使用 `xiaohongshu`、`douyin`；输入缩写必须先按需求解析规则标准化。
-7. **需求解析预览门禁**：调用 `validate_requirement` 前，先向用户输出字段预览、未结构化原文、歧义和 100 分制评分。只有总分严格大于 80 且无硬阻断项时才允许调用。
+7. **向量查询边界**：远程 Provider 实际广告 `search_creator_tag_vectors` 时可用于语义召回；`sync_creator_tag_vectors`、`health_check_vector_store` 属于运维面，普通 Agent 不得调用。查询结果必须回源 MySQL 校验；工具缺失时继续使用业务 `search_creators`，不得调用本地 `vector-mcp` 或模拟向量结果。
+8. **需求解析预览门禁**：调用 `validate_requirement` 前，先向用户输出字段预览、未结构化原文、歧义和 100 分制评分。只有总分严格大于 80 且无硬阻断项时才允许调用。
 
 ## 按需读取
 

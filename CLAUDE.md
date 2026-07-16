@@ -1,5 +1,11 @@
 # YPmcn Claude Code：V2.3 极简流程
 
+## 远程MCP开发机（windows系统）地址：
+局域网：`ssh 26969@192.168.0.129`；
+Tailscale远程：`ssh 26969@100.82.209.65`
+
+远程MCP开发机MCP server项目地址：`D:\yp_local_mcp`
+
 本文件与 `.claude/settings.json` 只在从本仓库启动 Claude Code 时生效，不得推广到其他项目。
 
 正式业务契约以 `spec/manifest.json` 指向的 Spec 为准。只有公开接口、权限、数据迁移、副作用语义不明确时才阻塞；普通内部修复不要求额外流程文档。
@@ -32,7 +38,7 @@
 - Codex：仅接小而明确的实现任务，返回 diff、测试结果和风险；不负责最终提交。
 - OpenCode：仅在 Critical 或明确触发条件下只读验证，不修改生产文件。
 
-OpenCode 固定使用原生 CLI、`--pure --agent plan`、`yuepu/*` 模型，并在调用前后检查 Git 状态与 plan 目录；出现非预期写入即 FAIL。
+OpenCode 固定使用原生 CLI、`--pure`、`yuepu/gpt-5.6-sol` 模型和 `medium` 思考等级；验证 agent 不使用 `plan`，并在调用前后检查 Git 状态与 plan 目录；出现非预期写入即 FAIL。
 
 ## 验证与报告
 

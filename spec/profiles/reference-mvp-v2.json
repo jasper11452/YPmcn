@@ -1072,7 +1072,7 @@
           },
           "structured": {
             "matchAny": [
-              "kw_uid",
+              "kwUid",
               "date",
               "platform",
               "nickname",
@@ -1236,7 +1236,7 @@
         }
       },
       "properties": {
-        "kw_uid": {
+        "kwUid": {
           "type": [
             "array",
             "boolean",
@@ -3134,7 +3134,7 @@
             "type": "object",
             "required": [
               "platform",
-              "platform_account_id",
+              "kwUid",
               "profile_url"
             ],
             "properties": {
@@ -3145,7 +3145,7 @@
                   "douyin"
                 ]
               },
-              "platform_account_id": {
+              "kwUid": {
                 "type": "string",
                 "minLength": 1
               },
@@ -3403,7 +3403,7 @@
         ],
         [
           "platform",
-          "platform_account_id"
+          "kwUid"
         ]
       ],
       "properties": {
@@ -3418,7 +3418,7 @@
             "douyin"
           ]
         },
-        "platform_account_id": {
+        "kwUid": {
           "type": "string",
           "minLength": 1
         },

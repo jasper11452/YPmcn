@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const npm = "npm";
 
 import { verifyRepository } from "./verify.mjs";
+import { mcpConfig } from "./set-mcp-profile.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
@@ -55,6 +56,9 @@ export function stagePackageAssets() {
   for (const asset of pluginAssets) {
     cpSync(join(pluginRoot, asset), join(stagingRoot, asset), { recursive: true });
   }
+  const productionMcpConfig = `${JSON.stringify(mcpConfig("production"), null, 2)}\n`;
+  writeFileSync(join(stagingRoot, ".mcp.json"), productionMcpConfig);
+  writeFileSync(join(stagingRoot, "mcp.json"), productionMcpConfig);
   cpSync(
     join(pluginRoot, "hooks", "ypmcn-media-assistant"),
     join(stagingRoot, "hooks", "ypmcn-media-assistant"),

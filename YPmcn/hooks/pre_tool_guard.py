@@ -412,7 +412,9 @@ def main():
     session_key = (
         payload.get("sessionKey") or
         payload.get("session_key") or
+        payload.get("session_id") or
         (payload.get("context", {}) or {}).get("sessionKey") or
+        (payload.get("context", {}) or {}).get("session_id") or
         ""
     )
     if not nonempty_string(session_key) and tool not in READ_ONLY_TOOLS:
@@ -445,6 +447,7 @@ def main():
         tool_call_id = (
             payload.get("toolCallId") or
             payload.get("tool_call_id") or
+            payload.get("tool_use_id") or
             (payload.get("context", {}) or {}).get("toolCallId")
         )
         if not nonempty_string(tool_call_id):

@@ -220,7 +220,7 @@ async function main() {
       const matches = data.matches || [];
       const top5 = matches.slice(0, 5).map((m) => ({
         platform: m.platform,
-        platform_account_id: m.platform_account_id,
+        kwUid: m.kwUid,
         matched_tags: m.matched_tags,
         raw_score: Number(m.raw_score?.toFixed?.(4) ?? m.raw_score),
         rerank_score: m.rerank_score === null ? null : Number(m.rerank_score?.toFixed?.(4) ?? m.rerank_score),

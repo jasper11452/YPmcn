@@ -10,13 +10,14 @@ PYTHONDONTWRITEBYTECODE=1 uv run --no-project python -B -m unittest -v tests/tes
 
 检查内容：machine specs、参数校验、Hook 阶段、manual/scheduled 恢复、reference MCP 幂等、文档和 153 字段 CSV 权威。
 
-## 生产 provider 预检
+## Provider 预检
 
 ```bash
-node scripts/check-provider-contract.mjs --url https://mcp.eshypdata.com/sse
+npm run verify:provider       # 开发机，当前默认
+npm run verify:provider:prod  # 生产 SSE 路由诊断
 ```
 
-该命令只发送 initialize、initialized notification、tools/list。PASS 要求所有必需工具存在且 required/type/forbidden 与 mvp-v2 兼容。当前预期检测 `legacy-1.9.4` 并非生产就绪。
+两个命令都只发送 initialize、initialized notification、tools/list。开发机 PASS 要求所有必需工具存在且 required/type/forbidden 与 `mvp-v2` 兼容；`search_creator_tag_vectors` 在向量服务接入期间为可选能力。生产域名恢复前不得将其结果表述为业务 Provider 已就绪。
 
 ## reference MCP
 

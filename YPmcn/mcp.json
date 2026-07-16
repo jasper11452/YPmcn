@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "ypmcn-mcp": {
-      "url": "https://mcp.eshypdata.com/sse",
+      "url": "http://192.168.0.129:32008/sse",
       "transport": "sse",
       "connectionTimeoutMs": 30000
     }

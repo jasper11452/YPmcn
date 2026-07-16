@@ -7,7 +7,7 @@ export type NamedVectorName = "content" | "commercial";
 
 export interface DerivedVectorPayload {
   platform: "douyin" | "xiaohongshu";
-  kw_uid: string;
+  kwUid: string;
   source_table: string;
   source_row_id: string;
   source_snapshot_date: string;
@@ -108,7 +108,7 @@ function validateHit(hit: unknown): NamedVectorHit {
     !Number.isFinite(candidate?.score) ||
     !payload ||
     (payload.platform !== "douyin" && payload.platform !== "xiaohongshu") ||
-    typeof payload.kw_uid !== "string"
+    typeof payload.kwUid !== "string"
   ) {
     throw new QdrantRequestError("Qdrant query response is invalid");
   }

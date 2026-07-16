@@ -326,13 +326,13 @@
         "name": "get_creator_detail",
         "required": [
           "platform",
-          "platform_account_id"
+          "kwUid"
         ],
         "properties": {
           "platform": {
             "type": "string"
           },
-          "platform_account_id": {
+          "kwUid": {
             "type": "string"
           },
           "include_offers": {

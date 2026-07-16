@@ -4,7 +4,7 @@ import type { QdrantClientLike, QdrantCollectionSchema, VectorPoint } from "./qd
 
 export interface CreatorSourceRow {
   platform: "xiaohongshu" | "douyin";
-  platform_account_id: string;
+  kwUid: string;
   source_table: string;
   content_tags: unknown;
   grow_tags: unknown;
@@ -37,11 +37,11 @@ function normalizeText(tags: string[]): string {
 
 function buildPointId(
   platform: string,
-  platformAccountId: string,
+  kwUid: string,
   tagType: string,
   vectorVersion: string
 ): string {
-  return `${platform}:${platformAccountId}:${tagType}:${vectorVersion}`;
+  return `${platform}:${kwUid}:${tagType}:${vectorVersion}`;
 }
 
 export async function buildVectorPoints(
@@ -65,10 +65,10 @@ export async function buildVectorPoints(
   const vectors = await embeddingProvider.embed(texts);
   const modelId = embeddingProvider.modelId();
   return items.map((item, idx) => {
-    const id = buildPointId(item.row.platform, item.row.platform_account_id, item.tagType, vectorVersion);
+    const id = buildPointId(item.row.platform, item.row.kwUid, item.tagType, vectorVersion);
     const payload = {
       platform: item.row.platform,
-      platform_account_id: item.row.platform_account_id,
+      kwUid: item.row.kwUid,
       source_table: item.row.source_table,
       tag_type: item.tagType,
       raw_tags: item.tags,

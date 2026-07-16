@@ -1,7 +1,7 @@
 // @ts-nocheck
 export type SourcePlatform = "xiaohongshu" | "douyin";
-export type SourceField = "platform" | "platform_account_id" | "display_name" | "content_tags" | "grow_tags" | "source_updated_at" | "source_table" | "profile_url";
-export const REQUIRED_FIELDS: readonly SourceField[] = ["platform", "platform_account_id", "content_tags", "grow_tags", "source_updated_at", "source_table"];
+export type SourceField = "platform" | "kwUid" | "display_name" | "content_tags" | "grow_tags" | "source_updated_at" | "source_table" | "profile_url";
+export const REQUIRED_FIELDS: readonly SourceField[] = ["platform", "kwUid", "content_tags", "grow_tags", "source_updated_at", "source_table"];
 export type SourceMapping = Record<SourceField, string>;
 export type SourceMappings = Record<SourcePlatform, SourceMapping>;
 

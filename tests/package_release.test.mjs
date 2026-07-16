@@ -10,7 +10,7 @@ const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.u
 const stagedPluginRoot = fileURLToPath(
   new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
 );
-const VERSION = "3.0.4";
+const VERSION = "3.0.5";
 
 function json(relativePath) {
   return JSON.parse(readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8"));
@@ -38,7 +38,7 @@ function dryRunFiles() {
 before(stageIfImplemented);
 after(() => rmSync(stagingBase, { recursive: true, force: true }));
 
-describe("3.0.4 release metadata", () => {
+describe("3.0.5 release metadata", () => {
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
     const rootPackage = json("package.json");
     const rootLock = json("package-lock.json");
@@ -71,8 +71,17 @@ describe("3.0.4 release metadata", () => {
     assert.equal(manifest.contracts.spec, "./spec/mcp.json");
   });
 
-  it("uses the production YPmcn SSE provider as the bundle MCP server", () => {
-    const expected = {
+  it("uses the active source MCP profile and production SSE in staged packages", () => {
+    const active = {
+      mcpServers: {
+        "ypmcn-mcp": {
+          url: json("spec/mcp.json").providerContractBasis.endpoint,
+          transport: "sse",
+          connectionTimeoutMs: 30000,
+        },
+      },
+    };
+    const production = {
       mcpServers: {
         "ypmcn-mcp": {
           url: "https://mcp.eshypdata.com/sse",
@@ -81,8 +90,10 @@ describe("3.0.4 release metadata", () => {
         },
       },
     };
-    assert.deepEqual(json("YPmcn/.mcp.json"), expected);
-    assert.deepEqual(json("YPmcn/mcp.json"), expected);
+    assert.deepEqual(json("YPmcn/.mcp.json"), active);
+    assert.deepEqual(json("YPmcn/mcp.json"), active);
+    assert.deepEqual(json("packages/.staging/ypmcn-media-assistant/.mcp.json"), production);
+    assert.deepEqual(json("packages/.staging/ypmcn-media-assistant/mcp.json"), production);
   });
 
   it("keeps dependencies owned and exactly pinned", () => {
@@ -92,7 +103,7 @@ describe("3.0.4 release metadata", () => {
     assert.deepEqual(rootPackage.dependencies, { mysql2: "3.22.6" });
     assert.equal(pluginPackage.dependencies.mysql2, "3.22.6");
     assert.equal(pluginPackage.devDependencies.typescript, "5.9.3");
-    assert.equal(pluginPackage.devDependencies.openclaw, "2026.6.11");
+    assert.equal(pluginPackage.devDependencies.openclaw, "2026.4.14");
     assert.equal(vectorPackage.dependencies.mysql2, "3.22.6");
     assert.equal(vectorPackage.devDependencies.typescript, "5.9.3");
   });
