@@ -2,11 +2,11 @@
 
 ## 何时调用
 
-媒介已明确人工调整且需要留审计记录时调用。
+`rank_creators` 已返回当前会话的实际 `run_id`、本地 phase 为 `recommendation_ready`，且媒介已明确人工调整及原因时调用。该工具是业务写，不是只读查询。
 
 ## 输入
 
-必填 `run_id`、`adjustments`、`operator_id`。
+必填当前会话匹配的 `run_id`、至少一项带非空 `reason` 的 `adjustments`、非空 `operator_id`。调用还必须具备当前 `sessionKey` 和 `toolCallId`；不得借用其他会话或推荐 run。
 
 ## 输出成功证据
 
@@ -14,7 +14,7 @@
 
 ## 调用后必须停在哪里
 
-展示实际记录结果；需要时只读查询 run 详情。
+展示实际记录结果并保持 `recommendation_ready`；需要时只读查询 run 详情，确认后才能创建提交批次。
 
 ## 能力边界
 

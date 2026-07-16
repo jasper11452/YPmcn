@@ -7,7 +7,7 @@ const PREFIXES = ["ypmcn__", "mcp__ypmcn__", "ypmcn-mcp__", "ypmcn-provider__"];
 const SHELL_TOOLS = new Set(["bash", "exec", "shell", "powershell", "pwsh"]);
 const READ_ONLY = new Set([
   "select_inquiry_form_fields", "get_recommendation_run_detail", "get_creator_detail",
-  "audit_manual_adjustment", "get_workflow_state",
+  "get_workflow_state",
 ]);
 const ALLOWED: Record<string, Set<string>> = Object.fromEntries(Object.entries({
   requirement_draft: ["validate_requirement"], requirement_ready: ["search_creators"],
@@ -15,7 +15,7 @@ const ALLOWED: Record<string, Set<string>> = Object.fromEntries(Object.entries({
   field_selection_ready: ["create_with_distributions"], distribution_sync_pending: ["sync_mcn_inquiry_status"],
   waiting_return: ["sync_mcn_inquiry_status"], recovering: ["ingest_mcn_submissions"],
   recovery_sync_pending: ["sync_mcn_inquiry_status"], recovered: ["manual_source_creators", "rank_creators"],
-  recommendation_ready: ["create_submission_batch"], submission_batch_ready: ["record_client_feedback"],
+  recommendation_ready: ["audit_manual_adjustment", "create_submission_batch"], submission_batch_ready: ["record_client_feedback"],
   feedback_routing: [], blocked: [], closed: [],
 }).map(([phase, tools]) => [phase, new Set(tools)]));
 const ID_RULES: Record<string, Array<[string, string]>> = {
@@ -99,6 +99,14 @@ export function beforeTool(event: Json, ctx: Json, rootDir: string): Json | unde
   }
   if (["create_with_distributions", "sync_mcn_inquiry_status", "ingest_mcn_submissions"].includes(tool) && !session)
     return deny("INTEGRATION_REQUIRED", "Current-session send evidence is missing.");
+  if (tool === "audit_manual_adjustment") {
+    if (!session) return deny("INTEGRATION_REQUIRED", "Current-session run evidence is missing.");
+    if (!text(input.operator_id)) return deny("INVALID_INPUT", "operator_id is required for an audit write.");
+    if (!Array.isArray(input.adjustments) || input.adjustments.length === 0)
+      return deny("INVALID_INPUT", "adjustments must contain at least one audit entry.");
+    if (input.adjustments.some((adjustment: unknown) => !adjustment || typeof adjustment !== "object" || !text((adjustment as Json).reason)))
+      return deny("INVALID_INPUT", "Every audit adjustment requires a non-empty reason.");
+  }
   if (tool === "create_with_distributions") {
     for (const flag of ["supplyConfirmed", "mcnConfirmed", "messageConfirmed"]) if (session.confirmations?.[flag] !== true) return deny("BLOCKED_CONFIRMATION_REQUIRED", `${flag}=false`);
     if (!session.field_selection?.selected) return deny("BLOCKED_FIELD_SELECTION_REQUIRED", "field selection not confirmed");

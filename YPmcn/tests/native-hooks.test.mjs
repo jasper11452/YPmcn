@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -10,6 +10,22 @@ const pluginRoot = new URL("..", import.meta.url).pathname;
 const tempDir = mkdtempSync(join(tmpdir(), "ypmcn-native-hooks-"));
 const stateFile = join(tempDir, "session_guard.json");
 const hooks = new Map();
+
+function writeSession(phase, runId = "run-native-1") {
+  writeFileSync(stateFile, JSON.stringify({
+    schema_version: 1,
+    sessions: {
+      "native-session": {
+        phase,
+        ids: { requirement_id: "req-native-1", run_id: runId },
+        confirmations: { supplyConfirmed: true, mcnConfirmed: true, messageConfirmed: true },
+        field_selection: { selected: true, fieldNames: ["creator_name"] },
+        sync: { first_sync_done: true, latest_lifecycle: "recovered" },
+        _updated_at_ms: Date.now(),
+      },
+    },
+  }), "utf8");
+}
 
 before(() => {
   process.env.YPMCN_STATE_FILE = stateFile;
@@ -38,6 +54,60 @@ describe("OpenClaw native hook bridge", () => {
     }, { sessionKey: "native-session" });
     assert.equal(result.block, true);
     assert.match(result.blockReason, /INTEGRATION_REQUIRED/);
+  });
+
+  it("guards manual adjustment audits as recommendation-stage writes", async () => {
+    const auditEvent = (params = {}, toolCallId = "call-audit") => ({
+      toolName: "mcp__ypmcn__audit_manual_adjustment",
+      params: {
+        run_id: "run-native-1",
+        adjustments: [{ reason: "客户明确要求调整顺序" }],
+        operator_id: "operator-native-1",
+        ...params,
+      },
+      toolCallId,
+    });
+
+    let result = await hooks.get("before_tool_call")(auditEvent(), {});
+    assert.match(result.blockReason, /INVALID_INPUT/);
+
+    rmSync(stateFile, { force: true });
+    result = await hooks.get("before_tool_call")(auditEvent(), { sessionKey: "native-session" });
+    assert.match(result.blockReason, /INTEGRATION_REQUIRED/);
+
+    writeSession("recovered");
+    result = await hooks.get("before_tool_call")(auditEvent(), { sessionKey: "native-session" });
+    assert.match(result.blockReason, /RECOVERY_ALREADY_TERMINAL/);
+
+    writeSession("submission_batch_ready");
+    result = await hooks.get("before_tool_call")(auditEvent(), { sessionKey: "native-session" });
+    assert.match(result.blockReason, /BLOCKED_PHASE_MISMATCH/);
+
+    writeSession("recommendation_ready");
+    result = await hooks.get("before_tool_call")(auditEvent({ run_id: "wrong-run" }), { sessionKey: "native-session" });
+    assert.match(result.blockReason, /BLOCKED_SEMANTIC_ID_MISMATCH/);
+
+    result = await hooks.get("before_tool_call")(auditEvent({ adjustments: [] }), { sessionKey: "native-session" });
+    assert.match(result.blockReason, /INVALID_INPUT/);
+
+    result = await hooks.get("before_tool_call")(auditEvent({ adjustments: [{}] }), { sessionKey: "native-session" });
+    assert.match(result.blockReason, /INVALID_INPUT/);
+
+    result = await hooks.get("before_tool_call")(auditEvent({ operator_id: "" }), { sessionKey: "native-session" });
+    assert.match(result.blockReason, /INVALID_INPUT/);
+
+    result = await hooks.get("before_tool_call")(auditEvent({}, ""), { sessionKey: "native-session" });
+    assert.match(result.blockReason, /INVALID_INPUT/);
+
+    result = await hooks.get("before_tool_call")(auditEvent(), { sessionKey: "native-session" });
+    assert.equal(result, undefined);
+
+    await hooks.get("after_tool_call")({
+      ...auditEvent(),
+      result: { success: true, data: { audit_id: "audit-native-1" } },
+    }, { sessionKey: "native-session" });
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.sessions["native-session"].phase, "recommendation_ready");
   });
 
   it("projects a successful MCP result and cleans the ended session", async () => {
