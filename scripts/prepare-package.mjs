@@ -5,6 +5,8 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const npm = "npm";
+
 import { verifyRepository } from "./verify.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -20,10 +22,12 @@ const pluginAssets = [
   ".npmignore",
   "README.md",
   "dist",
+  "hooks",
   "mcp.json",
   "openclaw.plugin.json",
   "package.json",
   "skills",
+  "state",
 ];
 
 function run(command, args, cwd, options = {}) {
@@ -32,6 +36,7 @@ function run(command, args, cwd, options = {}) {
     encoding: options.capture ? "utf8" : undefined,
     stdio: options.capture ? ["ignore", "pipe", "inherit"] : "inherit",
     env: process.env,
+    shell: process.platform === "win32",
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -44,8 +49,8 @@ export function stagePackageAssets() {
   rmSync(stagingBase, { recursive: true, force: true });
   rmSync(join(pluginRoot, "spec"), { recursive: true, force: true });
   rmSync(join(pluginRoot, "vector-mcp"), { recursive: true, force: true });
-  run("npm", ["run", "build"], pluginRoot);
-  run("npm", ["run", "build"], vectorRoot);
+  run(npm, ["run", "build"], pluginRoot);
+  run(npm, ["run", "build"], vectorRoot);
   mkdirSync(stagingRoot, { recursive: true });
   for (const asset of pluginAssets) {
     cpSync(join(pluginRoot, asset), join(stagingRoot, asset), { recursive: true });

@@ -53,6 +53,6 @@ npm test
 npm run pack:yp
 ```
 
-安装时使用生成的 `.tgz`，不要直接选择源码目录。reference MCP 仅供测试；其 `simulated=true` 不能作为生产成功证据。
+安装时使用生成的 `.tgz`，不要直接选择源码目录。本地测试结果不能作为生产成功证据。
 
 Agent 指令见 [skills/media-assistant/SKILL.md](skills/media-assistant/SKILL.md)。源码仓库中的最终权威是根 `../spec/`；发布包内的 `spec/` 由统一打包脚本从该目录生成。

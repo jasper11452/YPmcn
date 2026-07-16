@@ -30,11 +30,11 @@
 | Profile / 状态 | `mvp-v2` / `approved` |
 | 正式契约域 | 8 个 |
 | MCP Tool | 15 个（必需 14，可选 1） |
-| Workflow / Hook | 14 个阶段 / 6 个事件 |
+| Workflow / Hook | 14 个阶段 / 3 个事件 |
 | 数据库证明 | 14 项不变量，`external-unverified` |
 | 算法定义 | `external-unverified` |
 | 兼容检测 | `legacy-1.9.4` |
-| Spec 摘要 | `sha256:e346ab7ac87eaea0a5726b0fa61427b9a56bc9964cfbdfc5c9c22440ac900712` |
+| Spec 摘要 | `sha256:1654bfc7bfc56183e2d50a8faf29b5cc6fddd5641a7c3e581221ab62c76c6826` |
 <!-- human-docs:spec-summary:end -->
 
 ## 五条原则
@@ -42,7 +42,7 @@
 1. 安全与数据完整性优先于所有规则。
 2. 已批准 Spec 优先于 Change Proposal、测试、实现和 Agent 推断。
 3. 契约变更先改 Spec，再按 Database → MCP → Hook/Skill → Test → Package 实施。
-4. reference MCP 的模拟成功不是生产证据；provider 不兼容时保持 `integration_required`。
+4. 本地测试和模拟成功不是生产证据；provider 不兼容时保持 `integration_required`。
 5. 完整 Brief、payload、凭据、生成物和旧实现不进入长期源码。
 
 ## 人类最常用的命令

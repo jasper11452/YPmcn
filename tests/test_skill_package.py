@@ -13,7 +13,7 @@ WORKFLOW_PATH = ROOT / "spec" / "workflow.json"
 SKILL = PACKAGE / "skills" / "media-assistant" / "SKILL.md"
 REFERENCES = SKILL.parent / "references"
 TOOLS_DIR = REFERENCES / "tools"
-CSV_SCHEMA = REFERENCES / "creator_candidate_pool_schema.csv"
+CSV_SCHEMA = REFERENCES / "reference_schema.csv"
 
 EXPECTED_REFERENCE_FILES = {
     "ask-user-question-patterns.md",
@@ -21,13 +21,13 @@ EXPECTED_REFERENCE_FILES = {
     "frontend-response.md",
     "hook-behavior.md",
     "mcp-tool-cheatsheet.md",
-    "mcp-tool-routing.md",
+    "contract-gate.md",
+    "phase-tool-matrix.md",
     "requirement-intake.md",
     "requirement-parsing.md",
     "validation-playbook.md",
-    "workflow-state-machine.md",
 }
-EXPECTED_CSV_SHA256 = "da167293e0426c64dd1d92864915bdfa8cf8c48adfd12100e6f2810462b0812a"
+EXPECTED_CSV_SHA256 = "e46a9ecd8c8dccea33c7b4c03d50756a7349c337fb3b08e3c21a207696a82a3a"
 
 
 def read(path: Path) -> str:
@@ -57,7 +57,9 @@ class SkillPackageContractTest(unittest.TestCase):
             PACKAGE / "README.md",
             PACKAGE / "openclaw.plugin.json",
             PACKAGE / "src" / "index.ts",
-            PACKAGE / "src" / "hooks" / "guards.ts",
+            PACKAGE / "hooks" / "pre_tool_guard.py",
+            PACKAGE / "hooks" / "post_tool_update.py",
+            PACKAGE / "hooks" / "session_cleanup.py",
             PROFILE_PATH,
             WORKFLOW_PATH,
             SKILL,
@@ -74,12 +76,7 @@ class SkillPackageContractTest(unittest.TestCase):
         for name in EXPECTED_REFERENCE_FILES:
             self.assertIn(f"references/{name}", text)
         for required in (
-            "当前生产 Endpoint",
             "integration_required",
-            "select_inquiry_form_fields",
-            "sync_mcn_inquiry_status",
-            "字段选择是发送前最后确认点",
-            "普通消息不解除等待",
             "sync → ingest → sync",
         ):
             self.assertIn(required, text)
@@ -108,13 +105,13 @@ class SkillPackageContractTest(unittest.TestCase):
                 self.assertIn(f"`{forbidden}`", error_text, f"{name}: forbidden {forbidden}")
 
     def test_documented_id_routing_matches_current_endpoint(self):
-        routing = read(REFERENCES / "mcp-tool-routing.md")
+        routing = read(REFERENCES / "phase-tool-matrix.md")
         for mapping in (
             "validate_requirement(payload)",
             "search_creators(id)",
             "rank_mcns(id, platform)",
             "rank_creators(requirement_id, limit)",
-            "实际返回并确认字段语义",
+            "证据不足 → `integration_required`",
         ):
             self.assertIn(mapping, routing)
         for obsolete in (
@@ -124,7 +121,7 @@ class SkillPackageContractTest(unittest.TestCase):
             self.assertNotIn(obsolete, routing)
 
     def test_workflow_reference_contains_exact_machine_phases_and_recovery_order(self):
-        text = read(REFERENCES / "workflow-state-machine.md")
+        text = read(REFERENCES / "phase-tool-matrix.md")
         for phase in self.workflow["phases"]:
             self.assertIn(f"`{phase}`", text)
         for required in (
@@ -140,12 +137,12 @@ class SkillPackageContractTest(unittest.TestCase):
             self.assertIn(required, text)
 
     def test_send_and_recovery_docs_are_fail_closed(self):
-        joined = "\n".join(read(path) for path in [SKILL, *TOOLS_DIR.glob("*.md")])
+        joined = "\n".join(read(path) for path in [SKILL, *REFERENCES.glob("*.md"), *TOOLS_DIR.glob("*.md")])
         for required in (
             "用户确认",
             "写结果未知",
             "普通消息不解除等待",
-            "不得把 reference MCP 的 simulated=true 当作生产成功",
+            "只有实际 MCP 返回算证据",
         ):
             self.assertIn(required, joined)
         for pattern in (
@@ -160,7 +157,7 @@ class SkillPackageContractTest(unittest.TestCase):
             self.assertIsNone(re.search(pattern, joined, re.IGNORECASE), pattern)
 
     def test_provider_contract_mismatch_is_a_hard_integration_error(self):
-        joined = read(SKILL)
+        joined = "\n".join(read(path) for path in [SKILL, REFERENCES / "contract-gate.md", REFERENCES / "phase-tool-matrix.md"])
         for required in (
             "当前 Endpoint schema 优先于旧 mvp-v2",
             "select_inquiry_form_fields",
@@ -180,14 +177,14 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertEqual(EXPECTED_CSV_SHA256, hashlib.sha256(raw).hexdigest())
         with CSV_SCHEMA.open("r", encoding="utf-8-sig", newline="") as handle:
             rows = list(csv.DictReader(handle))
-        self.assertEqual(310, len(rows))
+        self.assertEqual(323, len(rows))
         fields = [row["Field"] for row in rows]
         self.assertEqual(len(fields), len(set(fields)))
         for field in (
             "id",
-            "demand_id",
-            "project_name",
-            "brand_name",
+            "demandId",
+            "projectName",
+            "brandName",
             "status",
             "platform",
             "kwUid",
@@ -197,24 +194,20 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_hook_reference_matches_registered_safe_event_surface(self):
         text = read(REFERENCES / "hook-behavior.md")
         for event in (
-            "before_tool_call",
-            "after_tool_call",
-            "tool_result_persist",
-            "message_received",
-            "agent_turn_prepare",
-            "session_end",
+            "PreToolUse",
+            "PostToolUse",
+            "Stop",
         ):
             self.assertIn(f"`{event}`", text)
-        for required in ("TTL", "会话投影", "不改写工具结果", "不记录 payload"):
+        for required in ("TTL", "会话投影", "不记录完整 payload"):
             self.assertIn(required, text)
 
     def test_hook_docs_map_public_projection_to_machine_phases(self):
         text = read(REFERENCES / "hook-behavior.md")
         for required in (
-            "本地 phase/ID 摘要",
-            "不是 provider 事实",
+            "session_id",
+            "未知输出不推进",
             "description 与最终 `columns`",
-            "`mcn_recommendation_id` 只绑定当前会话",
             "旧 `mcn_recommendation_id`",
         ):
             self.assertIn(required, text)
@@ -232,7 +225,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "统一验证覆盖 204 项测试",
             "人类文档同步、自动提交与精简度：5 项",
             "根 workspace 安装图：1 项",
-            "reference MCP 与 provider checker：11 项",
+            "provider checker：8 项；Python Hook：24 项",
             "Skill、工具卡和文档一致性：16 项",
         ):
             self.assertIn(required, text)

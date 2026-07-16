@@ -1,32 +1,28 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "profile": "mvp-v2",
-  "implementation": "YPmcn/src/hooks/register.ts",
+  "implementation": "YPmcn/hooks/pre_tool_guard.py",
   "events": {
-    "before_tool_call": {
-      "responsibility": "deterministic_precondition_and_permission_guards",
-      "mayBlock": true
+    "PreToolUse": {
+      "responsibility": "deterministic_precondition_and_permission_guards_with_soft_reference_context",
+      "mayBlock": true,
+      "script": "YPmcn/hooks/pre_tool_guard.py"
     },
-    "after_tool_call": {
+    "PostToolUse": {
       "responsibility": "validated_runtime_state_projection",
-      "mayBlock": false
+      "mayBlock": false,
+      "script": "YPmcn/hooks/post_tool_update.py"
     },
-    "tool_result_persist": {
-      "responsibility": "preserve_provider_evidence_without_rewrite",
-      "mayBlock": false
-    },
-    "message_received": {
-      "responsibility": "capture_manual_recovery_intent_as_non_authoritative_audit_signal",
-      "mayBlock": false
-    },
-    "agent_turn_prepare": {
-      "responsibility": "inject_redacted_session_projection",
-      "mayBlock": false
-    },
-    "session_end": {
-      "responsibility": "delete_ephemeral_session_projection",
-      "mayBlock": false
+    "Stop": {
+      "responsibility": "delete_expired_session_projections",
+      "mayBlock": false,
+      "script": "YPmcn/hooks/session_cleanup.py"
     }
+  },
+  "stateStore": {
+    "path": "YPmcn/state/session_guard.json",
+    "ttl": "24h",
+    "format": "session_guard_schema_v1"
   },
   "boundaries": {
     "owns": [

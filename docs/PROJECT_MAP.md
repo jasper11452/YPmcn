@@ -6,7 +6,6 @@
 业务来源 → changes/ 决策 → spec/ 契约 → 组件实现 → tests/ 验证 → packages/ 发布
                                    ├─ YPmcn/        Skill + Hook
                                    ├─ vector-mcp/   向量检索
-                                   └─ reference-mcp/无网络演练
 ```
 
 | 位置 | 责任 | 人工检查重点 |
@@ -17,7 +16,6 @@
 | `changes/` | 为什么改、影响什么 | 范围、风险、验证、回滚是否明确 |
 | `YPmcn/` | 可发布插件组件 | Skill/Hook 是否只执行契约允许的行为 |
 | `vector-mcp/` | 创作者向量检索 | 召回可靠性、超时、持久化和隔离 |
-| `reference-mcp/` | 无网络参考实现 | 只用于回归，必须标记 simulated |
 | `tests/` | 仓库总门禁 | 是否锁定契约而不是迁就实现 |
 | `scripts/` | 验证、同步、打包 | 是否确定性、无隐式安装或生产写入 |
 | `docs/` | 人类说明 | 是否短、当前、只解释不复制 Spec |
@@ -29,7 +27,7 @@
 <!-- human-docs:contract-map:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-Spec 摘要：`sha256:e346ab7ac87eaea0a5726b0fa61427b9a56bc9964cfbdfc5c9c22440ac900712`
+Spec 摘要：`sha256:1654bfc7bfc56183e2d50a8faf29b5cc6fddd5641a7c3e581221ab62c76c6826`
 
 | 领域 | 唯一权威 | 人类理解 |
 | --- | --- | --- |
@@ -52,7 +50,7 @@ Spec 摘要：`sha256:e346ab7ac87eaea0a5726b0fa61427b9a56bc9964cfbdfc5c9c22440ac
 | 写表、不变量、幂等 | `spec/database.json` | provider/数据库外部证明 |
 | canonical 需求、字典、金额/deadline、constraint/Join/late data | `spec/requirements.json` | `spec/requirement-dictionary.json`、`spec/schemas/` 与错误映射 |
 | Skill 可调用范围 | `spec/skills.json` | `YPmcn/skills/` 与 Tool 卡 |
-| Hook 事件和守卫 | `spec/hooks.json` | `YPmcn/src/hooks/` 与回归测试 |
+| Hook 事件和守卫 | `spec/hooks.json` | `YPmcn/hooks/*.py` 与 `tests/test_hooks.py` |
 | 错误与重试 | `spec/errors.json` | 写结果未知时的对账路径 |
 | 算法规则 | `spec/algorithms.json` | 未批准时保持阻断，不从代码反推 |
 | Agent 执行边界 | `CLAUDE.md` / `AGENTS.md` | 不改业务 Spec；遵守单写者、最小验证和 Token 上限 |
@@ -63,6 +61,6 @@ Spec 或正式 Change Proposal 提交时会自动刷新三个事实区块；`npm
 ## 三个不要混淆
 
 - `YPmcn/` 是发布组件，不是第二个项目根。
-- `reference-mcp/` 是模拟器，不是生产 provider。
+- 本地测试和模拟结果不是生产 provider 证据。
 - `mcp__ypmcn__<contract-tool>` 是 Host 的唯一业务工具身份；provider `tools/list` 使用 bare name，`vector-mcp` 不属于业务 provider。
 - 发布包中的 `spec/` 是构建快照，不是可编辑事实源。

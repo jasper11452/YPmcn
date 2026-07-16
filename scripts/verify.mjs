@@ -48,15 +48,21 @@ export function verifyRepository() {
       args: ["scripts/scan-secrets.mjs", "--tracked"],
     },
     {
-      name: "OpenClaw plugin contracts and hooks",
+      name: "OpenClaw plugin contracts",
       command: "npm",
       args: ["test"],
       cwd: pluginRoot,
     },
     {
-      name: "reference MCP and provider comparator",
+      name: "provider comparator",
       command: process.execPath,
-      args: ["--test", "tests/reference_mcp.test.mjs", "tests/provider_contract.test.mjs"],
+      args: ["--test", "tests/provider_contract.test.mjs"],
+    },
+    {
+      name: "Python hooks",
+      command: "uv",
+      args: ["run", "--no-project", "python", "-B", "tests/test_hooks.py"],
+      env: { PYTHONDONTWRITEBYTECODE: "1" },
     },
     {
       name: "Skill and operator documentation",

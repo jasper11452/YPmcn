@@ -1,7 +1,7 @@
 {
   "id": "ypmcn-media-assistant",
   "name": "ypmcn-media-assistant",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "description": "YPmcn 媒介助手：对齐当前生产 MCP 的 OpenClaw 工作流插件。",
   "author": {
     "name": "Jasper"

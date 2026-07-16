@@ -1,7 +1,7 @@
 {
   "id": "ypmcn-media-assistant",
-  "version": "3.0.2",
-  "description": "YPmcn 媒介助手：对齐当前生产 MCP 的工具门禁、证据链路与本地会话投影。",
+  "version": "3.0.3",
+  "description": "YPmcn 媒介助手：对齐当前生产 MCP 的工具门禁、证据链路与本地会话投影。Python PreToolUse/PostToolUse hooks。",
   "author": {
     "name": "Jasper"
   },
@@ -15,7 +15,11 @@
     "spec": "./spec/mcp.json",
     "providerVerification": "external-required"
   },
-  "hooks": "./dist/index.js",
+  "hooks": {
+    "pre_tool_guard": "./hooks/pre_tool_guard.py",
+    "post_tool_update": "./hooks/post_tool_update.py",
+    "session_cleanup": "./hooks/session_cleanup.py"
+  },
   "skills": [
     "./skills"
   ]

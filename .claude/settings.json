@@ -6,5 +6,49 @@
     "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "gpt-5.6-sol"
   },
   "disableWorkflows": true,
-  "workflowKeywordTriggerEnabled": false
+  "workflowKeywordTriggerEnabled": false,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/YPmcn/hooks/pre_tool_guard.py"
+            ]
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/YPmcn/hooks/post_tool_update.py"
+            ]
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/YPmcn/hooks/session_cleanup.py"
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

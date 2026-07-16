@@ -13,3 +13,4 @@ vector-mcp/.qdrant-*.json
 vector-mcp/dist/
 
 .playwright-cli/
+.venv/

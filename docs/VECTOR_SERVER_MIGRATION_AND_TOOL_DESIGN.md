@@ -1,372 +1,537 @@
-# 本地向量能力迁移到阿里云 DashVector 与业务工具设计
+# 本地 Qdrant 迁移到 Qdrant Cloud 指南
 
-## 一句话结论
+## 1. 结论与适用范围
 
-- 几十万条达人数据建议使用阿里云 DashVector Serverless，减少数据库部署、扩容、备份和升级工作。
-- 不搬运本地 Qdrant 测试文件，而是从 MySQL 重新生成向量并写入 DashVector。
-- 业务仍然只使用 `search_creators` 和 `rank_creators`。
-- 向量检索与相关性排序是两个业务工具的内部步骤，不新增面向业务的“向量排序工具”。
-- DashVector 或模型服务失败时自动使用 SQL-only，不能阻断正常找达人。
-
-## 一、目标架构
+当前向量库是“达人语义召回”的可重建派生索引，不是通用 RAG 文档库。推荐迁移方式不是复制本地 Qdrant 数据目录，而是：
 
 ```text
-MySQL 达人数据
-→ 本地字段清洗与脱敏
-→ 百炼 text-embedding-v4
-→ DashVector
-→ qwen3-rerank
-→ MySQL 当前记录复核
-→ search_creators / rank_creators 返回结果
+MySQL 权威数据
+→ 使用当前投影规则重新生成 content/commercial 文本
+→ DashScope text-embedding-v4（1024 维）
+→ 写入 Qdrant Cloud 的版本化 Collection
+→ 离线验证
+→ 通过配置或 Collection alias 切流
+→ 保留旧库观察并回滚
 ```
 
-各组件的责任：
+迁移目标：
 
-- MySQL：唯一业务事实源，保存达人当前数据。
-- DashVector：保存可重建的向量索引，不拥有业务写权限。
-- `text-embedding-v4`：把脱敏后的达人标签和需求文本变成向量。
-- `qwen3-rerank`：对召回候选做二次相关性排序。
-- YPmcn：执行硬筛选、调用向量能力、处理降级并返回结果。
+- 保持现有 `content`、`commercial` 双命名向量和 Cosine 距离；
+- 保持 MySQL 为唯一业务事实源，Qdrant 只保存向量和最小回源 metadata；
+- 不改变现有 MCP Tool 的公开契约；
+- 先修复会造成漏数、重复点和版本混查的问题，再迁移全量数据；
+- 云端失败时仍能降级到 SQL-only；
+- 全过程不删除或修改本地 Collection，不触碰生产 MySQL 写权限。
 
-## 二、为什么选择 DashVector
+本文面向当前仓库实现。若代码发生变化，应以 `spec/manifest.json` 指向的正式 Spec 和实际运行代码为准。
 
-当前预计有几十万条达人数据，使用托管服务的主要收益是：
+## 2. 当前实现基线
 
-- 不需要自己维护 Qdrant 容器和数据盘；
-- 不需要自己处理高可用、升级和扩容；
-- Serverless 可以按使用量和存储量计费；
-- 与阿里云服务器、百炼和网络环境更容易统一管理；
-- 后续达人数量和查询量增长时，不需要重新规划单机容量。
-
-需要接受的代价：
-
-- DashVector 与 Qdrant 接口不兼容，需要替换数据库 adapter；
-- 会增加阿里云服务费用；
-- 以后迁出阿里云时仍需重新建立索引。
-
-由于向量可以从 MySQL 重建，迁移和回滚的业务风险可控。
-
-## 三、DashVector 数据结构
-
-当前设计有两类向量：
-
-- `content`：达人类型、内容类型、内容标签、persona、清洗后的简介；
-- `commercial`：品牌、品类、场景、功效、成分和 IP 等商业信息。
-
-推荐使用两个 Collection：
+### 2.1 数据链路
 
 ```text
-creator_content
-creator_commercial
+MySQL 达人表（只读）
+→ 字段白名单投影、规范化和脱敏
+→ DashScope Embedding
+→ Qdrant 双路语义召回
+→ 按 platform + kw_uid 回源 MySQL
+→ 地区/粉丝量等硬过滤
+→ DashScope qwen3-rerank
+→ 达人候选
 ```
 
-两个 Collection 使用相同的达人业务 ID：
+关键职责：
 
-```text
-platform + kw_uid + source_snapshot_date
+- MySQL：权威达人数据和最终硬条件判断；
+- Qdrant：可删除、可重建的语义索引；
+- DashScope：生成向量和精排；
+- `vector-mcp`：同步、双路召回、回源、精排和 SQL-only 降级。
+
+### 2.2 当前运行配置
+
+`createRealRuntime()` 使用：
+
+| 配置 | 当前默认/要求 | 迁移要求 |
+|---|---|---|
+| `VECTOR_MCP_MODE` | real 模式由外部配置 | 云端验证时设为 `real` |
+| `DASHSCOPE_API_KEY` | real 模式必填 | 从密钥管理注入 |
+| `QDRANT_URL` | `http://localhost:6333` | 改为 Cloud cluster URL |
+| `QDRANT_API_KEY` | 可选且代码已读取 | Cloud 必填，从密钥管理注入 |
+| `QDRANT_COLLECTION` | `creator_local_vectors` | 建议先指向版本化物理 Collection 或稳定 alias |
+| `QDRANT_VECTOR_SIZE` | `1024` | 固定为 1024，并校验模型实际输出 |
+| `DASHSCOPE_EMBEDDING_MODEL` | `text-embedding-v4` | 迁移期间不得改变 |
+| `DASHSCOPE_RERANK_MODEL` | `qwen3-rerank` | 迁移期间不得改变 |
+| `VECTOR_VERSION` | `local-v1` | 改为明确发布版本，如 `creator-v1` |
+| `VECTOR_HTTP_TIMEOUT_MS` | `15000` | 按国内到 Cloud 区域的实测延迟调整 |
+| `VECTOR_HTTP_MAX_RETRIES` | `1` | 保持有限重试，避免放大故障 |
+
+注意：`YPmcn/mcp.json` 当前仍传入旧的 `SILICONFLOW_API_KEY`，没有传入 DashScope 和 Qdrant Cloud 配置。从该文件启动 real mode 会在连接 Qdrant 前失败。迁移前必须修正配置注入，但密钥值不得写进仓库。
+
+### 2.3 Collection schema
+
+当前实际 schema：
+
+```json
+{
+  "vectors": {
+    "content": { "size": 1024, "distance": "Cosine" },
+    "commercial": { "size": 1024, "distance": "Cosine" }
+  }
+}
 ```
 
-共同保存的 Metadata 只包含回源所需信息：
+- `content`：必填，描述内容风格、主题和账号画像；
+- `commercial`：可选，描述品牌、行业、品类和合作场景；
+- 写入前严格校验维度和有限数值；
+- `commercial_vector_available` 必须与 point 是否包含 `commercial` 向量一致；
+- 当前 upsert 批大小为 100，使用 `wait=true`。
 
-```text
-platform
-kw_uid
-source_table
-source_row_id
-source_snapshot_date
-source_updated_at
-embedding_model_id
-vector_version
+当前 payload：
+
+```json
+{
+  "platform": "xhs",
+  "kw_uid": "...",
+  "source_table": "xhs_mz",
+  "source_row_id": "...",
+  "source_snapshot_date": "...",
+  "source_updated_at": "...",
+  "embedding_model_id": "text-embedding-v4",
+  "vector_version": "creator-v1",
+  "commercial_vector_available": true
+}
 ```
 
-不写入 DashVector：
+Qdrant 不保存完整达人行、客户 Brief、手机号、凭据或其他敏感原文。查询命中后必须回源 MySQL。
 
-- 原始达人文本；
-- 昵称、手机号、URL 等身份信息；
-- 完整 MySQL 行；
-- Embedding 或 Rerank 分数历史；
-- API Key、数据库密码；
-- 价格、粉丝量等应由 MySQL 判断的硬条件。
+### 2.4 当前召回行为
 
-当前 `text-embedding-v4` 本地验证维度为 1024。正式创建 Collection 前仍需在测试实例确认模型输出维度，Collection 维度必须与模型一致。
+同一条规范化 query 会生成两份相同模型的 query embedding，分别检索 `content` 和 `commercial`。两路结果按 `platform:kw_uid` 去重，以最佳名次合并；当前不是分数加权融合。Qdrant 层只按 `platform` 过滤，其余硬条件在回源 MySQL 后判断。
 
-## 四、从本地 Qdrant 迁移到 DashVector
+默认最终返回 20；`candidateLimit` 默认至少 50、最大可到 1000。迁移验证阶段建议双路各 50，合并后控制在 80 左右，送入 reranker 不超过 50；正式阈值必须由固定评测集决定。
 
-### 推荐方式：从 MySQL 全量重建
+## 3. 迁移前必须解决的问题
 
-不复制本地 Qdrant volume，也不导出测试 point。正式迁移直接从 MySQL 读取最新达人数据，重新脱敏、Embedding 并写入 DashVector。
+以下问题未解决时，不应向正式 Cloud Collection 全量写入。
 
-这样可以：
+### P0：运行配置不一致
 
-- 避免把本地测试残留带到云端；
-- 确保云端索引来自最新 MySQL 数据；
-- 验证正式全量同步流程；
-- 保持 DashVector 随时可删除、可重建。
-
-### 迁移步骤
-
-1. 在阿里云购买 DashVector Serverless，选择与业务服务器相同或网络延迟最低的地域。
-2. 创建专用 Cluster Endpoint 和 API Key。
-3. 创建 `creator_content`、`creator_commercial` 两个 Collection。
-4. 将现有 `RealQdrantClient` 替换为 `DashVectorClient` adapter。
-5. 保持上层同步、搜索、脱敏、MySQL 回源和 SQL-only 降级接口不变。
-6. 使用少量脱敏数据测试写入、查询、Metadata 和删除。
-7. 执行首次全量同步：MySQL → 脱敏 → Embedding → DashVector。
-8. 对比 MySQL 可同步数量与两个 Collection 的 Doc 数量。
-9. 使用真实需求抽样检查召回和 Rerank 结果。
-10. 将本地测试环境切换到 DashVector，并保留 Qdrant 一段观察期。
-11. 稳定后停止本地 Qdrant，后续使用人工触发的增量同步。
-
-## 五、迁移验收
-
-至少确认：
-
-- 两个 Collection 的达人数量与 MySQL 可同步记录基本一致；
-- 同一个达人重复同步不会生成重复 Doc；
-- 达人数据更新后可以覆盖同一业务记录；
-- 已失效达人不会继续返回；
-- `content` 和 `commercial` 查询都能返回正确平台的达人；
-- 查询结果会重新读取 MySQL 当前记录；
-- DashVector 断开时会自动返回 SQL-only 结果；
-- 日志中没有 API Key、数据库密码、原始敏感文本和完整向量；
-- 不把向量相似度当成地区、价格、粉丝量或合规判断。
-
-## 六、回滚方式
-
-如果 DashVector 出现问题：
-
-1. 关闭向量检索开关；
-2. `search_creators`、`rank_creators` 自动使用 SQL-only；
-3. MySQL 保持不变，不执行数据回滚；
-4. 必要时临时切回本地或服务器 Qdrant；
-5. 修复后从 MySQL 重新建立 DashVector Collection；
-6. 抽样验证后恢复向量检索。
-
-DashVector 是派生索引，回滚不应修改 MySQL。
-
-## 七、用户需要提供什么
-
-### 阿里云信息
-
-- 阿里云账号下可购买 DashVector 的权限；
-- 目标地域；
-- DashVector Serverless 实例；
-- Cluster Endpoint；
-- 专用 DashVector API Key；
-- 阿里云服务器与 DashVector 的网络访问策略；
-- 预算与费用告警阈值。
-
-不要把 API Key 发在聊天中。用户只需要把 Key 写入服务器受限 env 文件，并告诉实施人员文件路径。
-
-### MySQL 信息
-
-- MySQL 只读地址和账号；
-- 抖音、小红书实际源表；
-- 达人唯一身份字段；
-- 更新时间或增量游标字段；
-- 哪些达人状态允许进入索引；
-- 全量同步时间窗口。
-
-### 业务验收材料
-
-- 20～50 条有代表性的真实需求；
-- 每条需求期望出现的达人或相关性判断；
-- 明显不应出现的达人类型；
-- 可接受的查询时间和降级行为。
-
-## 八、环境配置
-
-建议通过受限 env 文件或密钥管理服务提供：
+修正 MCP real-mode 环境变量，至少注入：
 
 ```text
-YP_MYSQL_HOST
-YP_MYSQL_PORT
-YP_MYSQL_USER
-YP_MYSQL_PASSWORD
-YP_MYSQL_DATABASE
+VECTOR_MCP_MODE=real
 DASHSCOPE_API_KEY
-DASHSCOPE_WORKSPACE_ID
-DASHVECTOR_API_KEY
-DASHVECTOR_ENDPOINT
-DASHVECTOR_CONTENT_COLLECTION
-DASHVECTOR_COMMERCIAL_COLLECTION
-DASHVECTOR_VECTOR_SIZE
+QDRANT_URL
+QDRANT_API_KEY
+QDRANT_COLLECTION
+QDRANT_VECTOR_SIZE=1024
+VECTOR_VERSION=creator-v1
 ```
 
-配置要求：
+验收：进程能启动；日志和错误不输出 API Key；对 Cloud 只执行只读 health/collection 检查。
 
-- API Key 不写入 Git；
-- 不在日志中输出完整 Endpoint 凭据或请求头；
-- DashVector Key 只授予所需 Collection 权限；
-- 测试和生产使用不同的实例或不同的 Collection；
-- 配置费用告警和调用量监控。
+### P0：增量游标可能漏数
 
-## 九、用户需要操作什么
+当前 SQL 使用 `update_time > cursor`，排序为 `update_time, kwUid`，但 cursor 只保存时间。如果分页边界有相同 `update_time` 的多行，下一页会跳过尚未处理的记录。
 
-用户侧尽量只保留这些动作：
+迁移前应改为复合游标 `(updated_at, kw_uid)`：
 
-1. 购买 DashVector Serverless；
-2. 选择地域并创建实例；
-3. 创建 API Key；
-4. 配置阿里云网络访问；
-5. 把 MySQL 和 DashVector 凭据写入服务器 env 文件；
-6. 提供真实需求用于抽样验收；
-7. 批准正式切换和回滚窗口。
+```sql
+WHERE update_time > ?
+   OR (update_time = ? AND kwUid > ?)
+ORDER BY update_time ASC, kwUid ASC
+```
 
-adapter 开发、全量同步、增量同步、测试和回滚脚本由实施人员完成，不要求业务用户手工操作向量数据。
+游标只有在整批 upsert 成功后推进。必须测试同时间戳跨页、重跑同一页和中途失败恢复。
 
-## 十、向量能力放在哪个工具里
+### P0：Point ID 与保留策略冲突
 
-### `search_creators`：硬筛后做相关性召回和初排
+当前 point ID 由 `platform + kw_uid + source_snapshot_date` 生成；同一达人新快照会形成新 point。搜索会按 `platform:kw_uid` 在单次召回结果中去重，但旧 point 会持续占用存储，并可能让召回候选偏向重复达人。
 
-推荐流程：
+必须二选一：
+
+1. **推荐：仅保留当前达人。** point ID 改为稳定的 `platform + kw_uid`，upsert 覆盖旧版本，并为删除/下线记录同步删除 point；
+2. **保留历史快照。** 当前 Collection 只服务最新数据，历史快照写入独立 Collection，查询明确携带快照范围。
+
+不要在一个线上 Collection 中混合这两种语义。
+
+### P0：版本字段没有查询隔离
+
+`embedding_model_id` 和 `vector_version` 已写入 payload，但当前搜索不按它们过滤。同一 Collection 若混入不同文本规则或模型世代，即使维度相同，也会混查不可比的向量。
+
+首期使用版本化物理 Collection：
 
 ```text
-读取需求
-→ 解析地区、平台、粉丝量、价格等硬条件
-→ MySQL 硬筛
-→ DashVector 相关性检索
-→ qwen3-rerank 精排
-→ MySQL 当前记录复核
-→ 返回候选达人
+creator_vectors_v1_202607
+creator_vectors_v2_...
 ```
 
-向量能力解决的是：“硬条件都满足时，哪些达人和需求内容更匹配？”
-
-例如，客户要找“敏感肌修护、成分讲解能力强”的达人。地区、粉丝量和价格由 MySQL 判断；内容是否匹配由 DashVector 和 Rerank 帮助排序。
-
-### `rank_creators`：对已接受候选做最终业务排序
-
-推荐流程：
+稳定逻辑名建议为：
 
 ```text
-接收已接受候选
-→ 检查候选状态
-→ 读取或重新计算内容相关性
-→ 结合价格、覆盖率、历史表现和缺失情况
-→ 输出最终排序及解释
+creator_vectors_current
 ```
 
-相关性只是一个软排序因素，不能推翻硬条件，也不能把缺失数据直接当成最差数据。
+在应用尚未支持 alias 前，可直接通过 `QDRANT_COLLECTION` 切换；支持 alias 后再原子切换。不得在迁移期间同时改变模型、维度、文本投影规则和存储平台。
 
-### 是否需要两个阶段都调用模型
+### P1：缺少 payload index
 
-最小方案：
-
-- `search_creators` 执行 DashVector 检索和 Rerank，生成相关候选；
-- `rank_creators` 复用相关性结果，并结合业务指标做最终排序。
-
-只有候选数据或需求发生变化时，`rank_creators` 才重新计算相关性，避免重复调用模型增加费用和延迟。
-
-## 十一、是否单独建立“向量排序工具”
-
-### 推荐：不建立公开业务工具
-
-原因：
-
-- 业务用户不需要理解 DashVector、Embedding 或 Rerank；
-- 单独工具可能绕过地区、粉丝量、价格和合规等硬筛选；
-- 调用方需要自己拼接多个步骤，更容易出错；
-- 更换向量服务时会影响公开接口；
-- 失败降级无法统一处理。
-
-对用户而言仍然只有：
-
-- `search_creators`：找达人；
-- `rank_creators`：排达人。
-
-DashVector 只是内部实现方式。
-
-### 如果工程上需要内部能力
-
-可以保留内部函数或内部服务，但不加入公开业务 Tool 列表。
-
-建议内部名称：`rank_creator_relevance`
-
-最小输入：
+当前查询会按 `platform` 过滤，但创建 Collection 后没有创建 payload index。Cloud Collection 创建后、批量导入前至少建立：
 
 ```json
-{
-  "requirement_id": "需求ID",
-  "candidates": [
-    {"platform": "dy", "kw_uid": "达人ID"}
-  ]
-}
+{ "field_name": "platform", "field_schema": "keyword" }
 ```
 
-在没有需求 ID 时，可临时使用：
+仅为实际在 Qdrant filter 中使用的字段建索引。`kw_uid` 目前只用于回源和去重，不是过滤条件；是否建 keyword index 应由后续对账/删除实现决定，不要为全部 payload 字段盲目建索引。
 
-```json
-{
-  "requirement_text": "敏感肌修护，擅长成分讲解",
-  "candidates": [
-    {"platform": "dy", "kw_uid": "达人ID"}
-  ]
-}
-```
+### P1：缺少 stale point 删除和对账
 
-候选达人必须已经通过硬筛选。
+当前实现只能 upsert 或删除整个 Collection，没有 point-level 删除、失效记录同步和全量 ID 对账。正式上线至少要有：
 
-最小输出：
+- MySQL 已删除/下线记录对应的 point 删除；
+- 按 `(platform, kw_uid)` 的抽样或全量对账；
+- 当前模型与 `vector_version` 分布检查；
+- 重复业务身份检查；
+- 可解释的失败清单和有限重试。
 
-```json
-{
-  "status": "ok",
-  "retrieval_mode": "vector",
-  "ranked_candidates": [
-    {"platform": "dy", "kw_uid": "达人ID", "rank": 1}
-  ],
-  "degraded_reason": null
-}
-```
+### P1：候选和 rerank 成本上限过高
 
-降级时：
+`candidateLimit` 当前最大 1000，合并后候选会全部回源并送入 reranker。迁移上线前应收紧默认值和硬上限，避免 Cloud 网络、MySQL 查询和 DashScope 费用同时放大。
 
-```json
-{
-  "status": "degraded",
-  "retrieval_mode": "sql-only",
-  "ranked_candidates": [
-    {"platform": "dy", "kw_uid": "达人ID", "rank": 1}
-  ],
-  "degraded_reason": "vector_store_unavailable"
-}
-```
+## 4. 目标设计
 
-不向业务返回：
+### 4.1 命名
 
-- 原始向量；
-- Embedding 模型内部参数；
-- DashVector Doc ID；
-- 未解释的相似度小数；
-- API 请求详情。
-
-## 十二、最终建议
-
-采用：
+推荐：
 
 ```text
-业务用户
-  ├─ search_creators
-  │    └─ 内部：MySQL 硬筛 + DashVector + Rerank + MySQL 复核
-  └─ rank_creators
-       └─ 内部：相关性 + 价格/表现/缺失处理 + 最终解释
+物理 Collection：creator_vectors_v1_202607
+稳定 alias：      creator_vectors_current
+预发布 alias：    creator_vectors_candidate（可选）
+VECTOR_VERSION：  creator-v1
 ```
 
-不要采用：
+物理 Collection 名携带 schema/数据世代；alias 表达流量角色。不要继续把 `local` 写入云端正式命名。
+
+### 4.2 Schema 创建示例
+
+以下命令仅作为运维模板，先替换占位符并在测试 Cluster 执行。不要把真实 Key 写入 shell history、文档或仓库；优先由密钥管理系统注入环境变量。
+
+```bash
+curl --fail-with-body --silent --show-error \
+  -X PUT "${QDRANT_URL}/collections/creator_vectors_v1_202607" \
+  -H "api-key: ${QDRANT_API_KEY}" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "vectors": {
+      "content": {"size": 1024, "distance": "Cosine"},
+      "commercial": {"size": 1024, "distance": "Cosine"}
+    }
+  }'
+```
+
+创建 `platform` index：
+
+```bash
+curl --fail-with-body --silent --show-error \
+  -X PUT "${QDRANT_URL}/collections/creator_vectors_v1_202607/index" \
+  -H "api-key: ${QDRANT_API_KEY}" \
+  -H "Content-Type: application/json" \
+  --data '{"field_name":"platform","field_schema":"keyword","wait":true}'
+```
+
+随后读取 Collection 信息并确认两个 named vector 的 `size=1024`、`distance=Cosine`。现有 `ensureCollection()` 会校验 named vector schema，但不会创建 payload index 或 alias。
+
+### 4.3 区域与网络
+
+选择 Cloud 区域时，分别测量应用到 Qdrant、应用到 MySQL、应用到 DashScope 的网络延迟。对当前链路，Qdrant 不是唯一远程依赖；跨境或跨地域部署可能使“双路查询 + 回源 + rerank”的尾延迟明显放大。
+
+要求：
+
+- 使用 TLS Cloud URL，不通过公网暴露 Dashboard；
+- 应用和运维使用不同 API Key（若套餐/权限模型支持）；
+- Key 仅存密钥服务或受限环境变量；
+- 测试与正式使用不同 Cluster 或至少不同 Collection；
+- 为国内网络不稳定设置明确 timeout、有限 retry 和 SQL-only 降级；
+- 不在日志中记录完整向量、完整 payload、Brief 或密钥。
+
+## 5. 分阶段迁移 Runbook
+
+### 阶段 0：冻结迁移变量
+
+记录并保持不变：
+
+```yaml
+embedding_model: text-embedding-v4
+dimension: 1024
+distance: Cosine
+named_vectors: [content, commercial]
+projection_version: 当前投影实现的提交号
+vector_version: creator-v1
+source_tables: 实际 dy/xhs 表
+source_cutoff: 全量导出开始时间 T0
+```
+
+同时保存：当前代码 commit、依赖锁文件、可同步 MySQL 数量、各平台数量和固定检索评测集。迁移期间不要升级 embedding 模型或修改投影规则。
+
+### 阶段 1：完成 P0/P1 代码准备
+
+最低完成项：
+
+1. 修正 MCP 环境变量；
+2. 修复复合 cursor；
+3. 确定稳定 point ID/历史快照策略；
+4. 加入 payload index 初始化；
+5. 加入失效 point 删除和对账；
+6. 收紧 candidate/rerank 上限；
+7. 增加版本、数量、失败率和延迟指标；
+8. 为上述行为补相邻测试。
+
+这些是代码变更，不应在 Cloud 控制台手工补丁式维护。
+
+### 阶段 2：创建 Cloud 测试 Cluster 和 Collection
+
+1. 创建最低成本的非生产 Cluster；
+2. 获取 TLS endpoint，创建测试 Key；
+3. 创建版本化 Collection 和 `platform` index；
+4. 用 `GET /collections/{name}` 校验 schema；
+5. 只写 100–1000 条脱敏后的真实达人样本；
+6. 确认 point 数、向量维度、可选 commercial 向量和 payload；
+7. 执行 content/commercial 双路查询；
+8. 验证 MySQL 回源、硬过滤、rerank 和 SQL-only 降级。
+
+禁止从本地数据目录直接复制 segment/WAL 到 Cloud。Qdrant 是派生索引，首选从 MySQL 重新生成；这也能验证新环境的完整同步链路。
+
+### 阶段 3：全量回填
+
+以 MySQL 快照边界 T0 为准，分别按平台稳定分页读取。建议流程：
 
 ```text
-业务用户
-  → search_creators
-  → vector_search
-  → vector_rank
-  → rank_creators
+读取一批
+→ 投影/脱敏
+→ 生成 content 和可选 commercial embedding
+→ 校验维度/有限值
+→ wait=true 批量 upsert
+→ 抽样回读
+→ 持久化成功复合游标和统计
 ```
 
-后一种方式把内部技术步骤暴露给业务，调用复杂、容易绕过规则，也不利于以后更换向量服务。
+原则：
 
-## 参考资料
+- 单批失败不得推进游标；
+- upsert 必须幂等，可安全重跑；
+- provider 限流只做指数退避和有限重试；
+- 失败记录进入脱敏失败清单，不能吞错；
+- 从 100 point/批和低并发开始，根据 429、超时、Cloud CPU/内存和 optimizer 状态调整；
+- 大规模导入才考虑临时降低 HNSW 建索引开销，必须在测试环境验证并在导入后恢复；
+- 不因追求导入速度关闭校验或无限提高并发。
 
-- [DashVector 产品介绍](https://help.aliyun.com/zh/document_detail/2510225.html)
-- [DashVector 快速入门](https://help.aliyun.com/zh/document_detail/2510223.html)
-- [DashVector 计费说明](https://help.aliyun.com/zh/document_detail/2510232.html)
+对当前几十万级预期，重新 embedding 的成本和 DashScope 限流通常比 Qdrant upsert 更可能成为瓶颈，应先测量再调优。
+
+### 阶段 4：追平增量
+
+全量完成后，从 T0 开始用复合 cursor 追增量，直到同步 lag 小于约定阈值。切流前执行最后一轮增量并冻结短暂切换窗口，或让同步任务持续写 candidate Collection。
+
+检查：
+
+- cursor 单调推进且可恢复；
+- 同时间戳数据没有漏读；
+- 更新覆盖相同稳定 point ID；
+- 删除/下线记录已移除；
+- `embedding_model_id`、`vector_version` 只有预期值；
+- `(platform, kw_uid)` 无非预期重复。
+
+### 阶段 5：离线与在线前验收
+
+数据验收：
+
+```text
+MySQL 可同步数
+= Cloud 有效业务身份数
++ 可解释跳过数
++ 可解释失败数
+```
+
+不要只比较 Qdrant point 总数；当前旧 ID 设计可能产生重复业务身份。至少分平台核对：扫描、投影为空、成功、失败、删除、商业向量可用和唯一业务身份数量。
+
+质量验收：
+
+- 固定需求集分别搜索本地和 Cloud；
+- 比较 top-K 重叠、Recall@K、MRR/nDCG；
+- 抽查品牌、品类、内容风格和地区/粉丝硬条件；
+- 确认 Cloud 结果均能按 `platform + kw_uid` 回源；
+- 验证 commercial 缺失时 content 仍可召回；
+- 验证两个不同版本不会混查。
+
+性能验收：
+
+- 记录 Qdrant 双路查询、MySQL 回源、rerank 和端到端 P50/P95/P99；
+- 记录超时率、429、5xx 和 SQL-only 降级率；
+- 用接近真实候选规模测试，不用 `candidateLimit=1000` 作为默认压测；
+- 通过固定并发逐级加压，不直接冲击正式 Cluster。
+
+### 阶段 6：切流
+
+优先使用 alias：
+
+1. candidate Collection 通过全部验收；
+2. 创建或更新 `creator_vectors_current` alias 指向 candidate；
+3. 应用 `QDRANT_COLLECTION` 指向稳定 alias；
+4. 原子切换 alias；
+5. 小流量观察后逐步放量；
+6. 旧 Collection 保持只读且至少保留一个完整观察窗口。
+
+如果当前客户端/运维尚未实现 alias，则先使用配置切换：更新 `QDRANT_URL`、`QDRANT_API_KEY`、`QDRANT_COLLECTION`，滚动重启实例。配置切换不是原子的，应确保实例版本一致，并监控新旧环境同时被访问的窗口。
+
+alias 只重定向请求，不会复制 payload 或向量。必须先完整写入和验证 candidate Collection。
+
+### 阶段 7：观察与收尾
+
+观察期至少覆盖一个业务峰值和一次增量同步周期。确认：
+
+- Cloud 查询和端到端延迟稳定；
+- optimizer/indexing 正常；
+- 同步 lag、失败率和降级率达标；
+- DashScope 费用和 Qdrant Cloud 用量符合预算；
+- 本地与 Cloud 结果差异可解释；
+- 回滚步骤已演练。
+
+观察期结束后再停止本地写入。旧 Collection/本地实例删除属于单独的不可逆操作，需人工批准；本指南不授权删除。
+
+## 6. 回滚方案
+
+触发条件示例：
+
+- 端到端 P95/P99 连续超阈值；
+- Cloud 错误率、超时率或 SQL-only 降级率超阈值；
+- point/业务身份对账失败；
+- 固定评测集显著退化；
+- 版本混查、漏数、重复 point 或回源失败；
+- 成本异常增长。
+
+回滚：
+
+1. 停止向新 Collection 放量，但保留现场只读；
+2. alias 原子切回旧 Collection，或回滚应用的 Qdrant 配置；
+3. 确认 SQL-only 降级仍可用；
+4. 不回滚 MySQL；
+5. 保存脱敏指标、错误码、Collection 状态和同步 cursor；
+6. 修复后从成功游标重放或重新全量构建 candidate；
+7. 重新完成数据、质量和性能验收再切流。
+
+切流前不得删除旧 Collection。模型或投影规则升级时也遵循“新建、回填、验证、alias 切换、观察、再清理”。不同 embedding 模型的向量不能在同一向量空间混用。
+
+## 7. 监控、备份与恢复
+
+### 7.1 最小监控集
+
+Qdrant/Cloud：
+
+- Cluster/Collection 健康状态；
+- point 数、indexed vector 数、待索引量和 optimizer 状态；
+- CPU、内存、磁盘/存储、网络；
+- 请求 QPS、P50/P95/P99、超时、429 和 5xx；
+- 各 named vector 查询延迟。
+
+应用链路：
+
+- embedding/rerank 延迟、失败、限流和费用；
+- 同步 scanned/upserted/skipped/deleted/failed；
+- 复合 cursor 和同步 lag；
+- MySQL 回源缺失率；
+- SQL-only 降级次数、原因和持续时间；
+- 查询使用的 Collection/alias、模型和 vector version。
+
+### 7.2 告警原则
+
+阈值必须根据基线压测设定，不能照搬通用数字。至少建立：可用性、尾延迟、错误率、同步落后、point 数异常变化、存储接近配额、provider 限流和降级率告警。
+
+### 7.3 备份策略
+
+Qdrant 是派生索引，恢复优先级：
+
+1. MySQL + 固定代码/模型配置全量重建；
+2. Qdrant snapshot 加速同版本恢复；
+3. 本地旧 Collection 仅作迁移回滚，不作为长期唯一备份。
+
+迁移前为本地 Collection 创建快照并验证可读；Cloud 上线后按套餐能力配置备份/快照，并实际做恢复演练。快照必须与 Qdrant 版本、Collection schema、模型 ID、vector version 和生成时间关联。不要只验证“快照文件存在”。
+
+不要手工解包、合并或复制 Qdrant segment/WAL。若 Cloud 套餐或版本对 snapshot 导入有约束，以 Cloud 控制台和当前官方文档为准；无法保证兼容时，从 MySQL 重建。
+
+## 8. 安全与数据治理
+
+- MySQL 使用只读账号和最小表权限；
+- Qdrant Key 与 DashScope Key 分离、定期轮换；
+- 禁止把 Key 写进 `mcp.json`、URL、日志、测试 fixture 或提交历史；
+- payload 只保存回源必需字段；
+- Embedding 前继续执行现有白名单投影与脱敏；
+- 不记录完整客户 Brief、完整达人原文、完整向量或完整 provider 响应；
+- Cloud 项目成员和 API Key 权限遵循最小权限；
+- 删除本地实例、Collection 或 snapshot 必须单独审批。
+
+## 9. 验收清单
+
+### 代码与配置
+
+- [ ] MCP real-mode 配置使用 DashScope 和 Qdrant Cloud 变量；
+- [ ] 代码读取 `QDRANT_API_KEY`，密钥未进入仓库或日志；
+- [ ] `QDRANT_VECTOR_SIZE=1024` 与模型输出一致；
+- [ ] 复合 cursor 已实现并覆盖边界测试；
+- [ ] 稳定 point ID/历史策略已确定；
+- [ ] stale point 删除与对账已实现；
+- [ ] candidate/rerank 上限已收紧。
+
+### Schema 与数据
+
+- [ ] `content`、`commercial` 均为 1024 维 Cosine；
+- [ ] `platform` keyword index 已创建；
+- [ ] 模型 ID 和 vector version 分布唯一且符合预期；
+- [ ] 各平台有效业务身份数量与 MySQL 对账；
+- [ ] 重复同步幂等；更新覆盖、删除移除；
+- [ ] commercial 可选向量与 payload 标志一致。
+
+### 功能、质量与可靠性
+
+- [ ] 双路召回、合并、回源、硬过滤、rerank 全链路通过；
+- [ ] 固定评测集达到约定 Recall@K、MRR/nDCG；
+- [ ] P50/P95/P99、错误率和费用在预算内；
+- [ ] Qdrant、Embedding、Rerank 故障均能明确降级；
+- [ ] alias/config 切流和回滚已演练；
+- [ ] 快照恢复或 MySQL 全量重建已演练；
+- [ ] 日志抽查无凭据和敏感完整 payload。
+
+## 10. 推荐实施顺序
+
+1. 修正 MCP 配置；
+2. 修复复合 cursor；
+3. 确定稳定 point ID 和删除策略；
+4. 增加 payload index、版本隔离和对账；
+5. 收紧召回/rerank 上限并建立评测集；
+6. 创建 Cloud 测试 Cluster，导入小样本；
+7. 完成全量回填和增量追平；
+8. 完成数据、质量、性能、安全验收；
+9. alias 或配置小流量切换；
+10. 覆盖业务峰值观察并演练回滚；
+11. 人工批准后再处理本地资源退役。
+
+## 11. 官方参考
+
+- [Qdrant Cloud](https://qdrant.tech/documentation/cloud/)
+- [Collections and named vectors](https://qdrant.tech/documentation/concepts/collections/)
+- [Collection aliases](https://qdrant.tech/documentation/concepts/collections/#collection-aliases)
+- [Payload indexing](https://qdrant.tech/documentation/concepts/indexing/#payload-index)
+- [Points and vector updates](https://qdrant.tech/documentation/concepts/points/)
+- [Bulk upload](https://qdrant.tech/documentation/database-tutorials/bulk-upload/)
+- [Snapshots](https://qdrant.tech/documentation/concepts/snapshots/)
+- [Monitoring](https://qdrant.tech/documentation/guides/monitoring/)
+- [Embedding model migration](https://skills.qdrant.tech/qdrant-model-migration/SKILL.md)
+
+## 12. 当前代码定位
+
+- real runtime：`vector-mcp/src/runtime.ts`
+- Qdrant schema、校验、upsert 和查询：`vector-mcp/src/vector/real-qdrant.ts`
+- 同步、双路召回、回源与 rerank：`vector-mcp/src/vector/pipeline.ts`
+- MySQL 读取与 cursor：`vector-mcp/src/db/mysql-source.ts`
+- 文本投影和脱敏：`vector-mcp/src/source/projection.ts`
+- MCP Tool 入口：`vector-mcp/src/tools/handlers.ts`
+- 当前 MCP 配置：`YPmcn/mcp.json`

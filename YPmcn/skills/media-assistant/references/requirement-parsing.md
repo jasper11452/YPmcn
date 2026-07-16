@@ -2,7 +2,7 @@
 
 ## 权威字段
 
-`creator_candidate_pool_schema.csv` 是当前提供的 153 字段权威。`customer_demands`、`xhs_creator_accounts`、`dy_creator_accounts` 和候选搜索使用同名字段时必须保持语义一致；不擅自改列名或造同义列。
+`reference_schema.csv` 是当前提供的 153 字段权威。`customer_demands`、`xhs_creator_accounts`、`dy_creator_accounts` 和候选搜索使用同名字段时必须保持语义一致；不擅自改列名或造同义列。
 
 ## 常用映射
 

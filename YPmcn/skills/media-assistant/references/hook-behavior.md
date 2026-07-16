@@ -1,15 +1,14 @@
 # Hook 行为
 
-| Hook | 行为 |
-|---|---|
-| `before_tool_call` | 校验 Host qualified 工具名、live 参数、会话 phase、调用证据与发送确认；只会额外阻断 |
-| `after_tool_call` | 仅从实际 `success === true` 且无非空 error 的结果提取最小证据；未知输出不推进 |
-| `message_received` | 只记录当前会话明确 manual 回收意图 |
-| `session_end` | 删除对应 TTL 会话投影 |
-| `tool_result_persist` | 不改写工具结果，保留 provider/MCP 原始证据 |
-| `agent_turn_prepare` | 注入脱敏的本地 phase/ID 摘要，并明确不是 provider 事实；不记录 payload |
+| Claude Hook | Python 实现 | 行为 |
+|---|---|---|
+| `PreToolUse` | `hooks/pre_tool_guard.py` | 校验工具名、参数、会话 phase、语义 ID 与发送确认；允许调用时通过 `additionalContext` 软提醒先读工具卡、契约门禁、阶段矩阵及场景相关 reference |
+| `PostToolUse` | `hooks/post_tool_update.py` | 仅从实际成功结果提取最小证据并推进本地状态；未知输出不推进 |
+| `Stop` | `hooks/session_cleanup.py` | 清理超过 TTL 的会话投影 |
 
-插件注册 `confirm_distribution_send` session action。Gateway 以 `operator.write` scope 校验调用者；action 保持公开 payload：`mcn_recommendation_id`、`operatorRole`、`supplyConfirmed`、`mcnConfirmed`、`messageConfirmed`。其中 `mcn_recommendation_id` 只绑定当前会话实际观察到的本地计划 ID，不发送给 provider。
+Hook 通过 `.claude/settings.json` 挂载，以 `session_id` 隔离状态；不记录完整 payload。
+
+软 reference 门禁不会伪造或持久化“已阅读”状态，也不会因未读而阻断调用。Agent 只能在本会话实际打开 reference 后声称已阅读。
 
 ## provider 外发守卫
 

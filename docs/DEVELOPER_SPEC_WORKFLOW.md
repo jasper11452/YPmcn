@@ -21,7 +21,6 @@ project/
 ├── fix-logs/      # 重要故障根因与预防经验
 ├── YPmcn/         # 可发布 Skill/Hook 插件组件
 ├── vector-mcp/    # 向量检索 MCP 组件
-└── reference-mcp/ # 无网络、非生产证据的参考 MCP
 ```
 
 | 目录 | 修改规则 |
@@ -106,7 +105,7 @@ npm run verify:provider
 
 根 `package.json` 将 `YPmcn` 与 `vector-mcp` 声明为 npm workspaces，根 `package-lock.json` 是统一安装图。`npm run verify` 不隐式安装依赖；全新工作树先执行一次根 `npm ci`，无需对子组件重复安装。
 
-构建成功不等于工作流正确；契约、集成、发布包和生产外部证据是独立门禁。reference MCP 的 `simulated=true` 不能作为生产成功证据。
+构建成功不等于工作流正确；契约、集成、发布包和生产外部证据是独立门禁。本地测试不能作为生产成功证据。
 
 ## 7. Review 与发布
 

@@ -47,3 +47,14 @@ OpenCode 固定使用原生 CLI、`--pure --agent plan`、`yuepu/*` 模型，并
 风险：无或具体风险
 提交：commit hash 或唯一未提交原因
 ```
+
+## YPmcn 硬门禁（上下文压缩后仍须生效）
+
+以下规则在 YPmcn 媒介工作流中**任何情况下不得违反**，Hook 会强制阻断违规调用：
+
+1. **跳步阻断**：不得跳过 14 阶段状态机的任何步骤。阶段顺序由 `PreToolUse` hook 强制执行。
+2. **发送前三项确认**：`create_with_distributions` 前必须完成 supply/MCN/message 三项确认，通过 `confirm_distribution_send` session action 写入。缺任一项 hook 返回 `CONFIRMATION_REQUIRED`。
+3. **终态锁**：`recovered`/`closed` 后禁止重复写入。hook 返回 `RECOVERY_ALREADY_TERMINAL`。
+4. **不模拟成功**：只有实际 MCP 返回算证据，不得用预期返回或示例 JSON 冒充运行结果。
+5. **ID 不发明**：下游 ID 无法从实际返回证明时，停止并返回 `integration_required`。
+6. **Bash 不绕过**：禁止通过 shell/curl/powershell 直接调用 provider 写 API。Hook 返回 `INTEGRATION_REQUIRED`。
