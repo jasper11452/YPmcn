@@ -27,7 +27,7 @@ EXPECTED_REFERENCE_FILES = {
     "requirement-parsing.md",
     "validation-playbook.md",
 }
-EXPECTED_CSV_SHA256 = "a9bd698d2b5e9d1e4ec2c9b57cdf6144e5d8acbbc891e64fa1548b1764d0746e"
+EXPECTED_CSV_SHA256 = "c822ec617d53a4da423dbbcbef2b607f971c16ccc0ec7481874518d85f76fb97"
 
 
 def read(path: Path) -> str:
@@ -248,6 +248,23 @@ class SkillPackageContractTest(unittest.TestCase):
             "kwUid",
         ):
             self.assertIn(field, fields)
+
+    def test_creator_supply_identity_follows_current_mcp(self):
+        texts = [
+            read(SKILL),
+            read(TOOLS_DIR / "search_creators.md"),
+            read(TOOLS_DIR / "get_creator_detail.md"),
+            read(TOOLS_DIR / "ingest_mcn_submissions.md"),
+            read(TOOLS_DIR / "manual_source_creators.md"),
+        ]
+        joined = "\n".join(texts)
+        for required in (
+            "creator_supply_offers.kwUid",
+            "creator_supply_offers.supplier_id",
+            "creator_id",
+            "supplier_binding_id",
+        ):
+            self.assertIn(required, joined)
 
     def test_hook_reference_matches_registered_safe_event_surface(self):
         text = read(REFERENCES / "hook-behavior.md")

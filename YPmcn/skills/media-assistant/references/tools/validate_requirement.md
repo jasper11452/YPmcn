@@ -16,16 +16,16 @@
 
 ## 高频字段优先匹配
 
-字段名以相邻的 `../reference_schema.csv` 为唯一准绳。解析 Brief 或组装
-`payload` 时，先在该表中匹配下列高频字段；禁止把中文业务名直接当作字段名，
-也禁止构造 schema 中不存在的字段。
+字段名和输入格式以相邻的 `../reference_schema.csv` 为唯一准绳。解析 Brief 或组装
+`payload` 时，先在该表中匹配下列高频字段，再按对应 `Type` 生成并校验值；
+禁止把中文业务名直接当作字段名，也禁止构造 schema 中不存在的字段。
 
 ### 需求主字段
 
 | 优先级 | 业务含义 | schema 字段 | 写入规则 |
 |---|---|---|---|
 | P0 | 平台 | `platform` | 规范为 `xiaohongshu` 或 `douyin` |
-| P0 | 达人官方报价 | `kolOfficialPriceL1`, `kolOfficialPriceL2`, `kolOfficialPriceL3` | 小红书与抖音统一按明确档位及 `text` 类型写入；不得写入 `budget*` |
+| P0 | 达人官方报价 | `kolOfficialPriceL1`, `kolOfficialPriceL2`, `kolOfficialPriceL3` | 小红书与抖音统一按明确档位写 `decimal(12,2)` 人民币元单值；不得写入 `budget*` |
 | P0 | 项目总预算 | `budgetMinCents`, `budgetMaxCents`, `budgetRaw` | 仅处理明确的整体/项目总预算；金额统一为分并保留原文 |
 | P0 | 达人类型 | `talentTypeLabel`, `pgyBloggerTypeLabel`, `xtTalentTypeLabel`, `growTalentTypeLabel` | 按平台及原文命中已有标签字段，不确定时不猜 |
 | P0 | 内容形式 | `contentFeatureLabel`, `kolOfficialPriceOther` | 内容特征写标签；只有 L1/L2/L3 无法表达的发文类型报价才写报价 JSON |
@@ -51,8 +51,8 @@ DDL 分别落入对应 `*Raw` 字段；其他原始需求统一保留在 `rawMes
 
 1. “达人报价”“官方价”“刊例价”“单人预算”“单人价格”或与具体发文类型绑定的金额，按报价条件处理，不按项目总预算处理。
 2. 小红书和抖音都写入 `kolOfficialPriceL1/L2/L3`。抖音 1–20 秒、21–60 秒、60 秒以上分别对应 L1、L2、L3；小红书按原文明确的 L1/L2/L3 档位对应。
-3. 官方报价字段为 `text`，保留有证据的单值或区间条件，不套用项目总预算的元转分规则。原文同时给出多个档位时分别写入。
-4. 档位无法确定时保留原文并请求最小确认，不得回退写入 `budget*`。
+3. 官方报价字段为 `decimal(12,2)`，只写有证据的人民币元单值，不套用项目总预算的元转分规则。原文同时给出多个明确档位和单值时分别写入。
+4. 档位无法确定，或原文只有区间/比较条件而没有确定数值时，保留原文并请求最小确认，不得把非数值条件塞入 decimal，也不得回退写入 `budget*`。
 5. 只有明确的项目总预算、整体预算或总成本上限才写 `budgetMinCents/budgetMaxCents/budgetRaw`。
 
 ### 完整性检查
@@ -62,8 +62,9 @@ DDL 分别落入对应 `*Raw` 字段；其他原始需求统一保留在 `rawMes
 ### 匹配顺序
 
 1. 每次调用前读取 `../reference_schema.csv`，先精确匹配上表中的高频字段。
-2. 再按 CSV 的 `Comment` 判断平台语义和单位，尤其注意两平台年龄段、报价档位差异。
-3. 仅在 schema 存在且原文有证据时写入；未命中或有歧义时保留原文并停止猜测。
+2. 按 CSV 的 `Comment` 判断平台语义和单位，尤其注意两平台年龄段、报价档位差异。
+3. 按 CSV 的 `Type` 规范化值并逐字段校验；数值、布尔和 JSON 不得无条件字符串化。
+4. 仅在 schema 存在、原文有证据且值通过 `Type` 校验时写入；未命中、格式不合法或有歧义时保留原文并停止猜测。
 
 以上优先级来自 Claude Code 会话 `7ac17764-97bc-42a5-bc1b-bdb91d7429a5`
 对 239 条小红书需求和 30 条抖音需求的字段频次统计。
@@ -83,3 +84,6 @@ DDL 分别落入对应 `*Raw` 字段；其他原始需求统一保留在 `rawMes
 ## 错误与停止条件
 
 不得编造需求字段。写结果未知时先对账，不盲目重试。
+
+- 同一需求再次调用时沿用已返回的 `demandId`，将 `demandVersion` 递增；不得创建新 `demandId` 或使用相同版本覆盖。
+- 返回 Draft、非 ready、缺失、冲突或待确认项时，立即向用户提出对应的最小澄清问题。用户回答后再用同一 `demandId` 的下一版本调用；不得卡在 Draft 无反馈等待或重复空转。

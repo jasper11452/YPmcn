@@ -18,8 +18,8 @@
 
 ## 能力边界
 
-只查询现有数据库中的单个达人，不打开浏览器补资料。字段缺失、过期或来源冲突必须显式展示，不把缺失当作零或不合格。
+只查询现有数据库中的单个达人，不打开浏览器补资料。当前 MCP 使用 `creator_supply_offers.kwUid` 定位平台达人，并以 `creator_supply_offers.supplier_id` 表示供应商。字段缺失、过期或来源冲突必须显式展示，不把缺失当作零或不合格。
 
 ## 错误与停止条件
 
-不得发送旧 `creator_id`，不得从昵称猜 `kwUid`。
+不得发送旧 `creator_id` 或 Spec 目标字段 `supplier_binding_id`，不得从昵称猜 `kwUid`，也不得自行推导 `supplier_id`。

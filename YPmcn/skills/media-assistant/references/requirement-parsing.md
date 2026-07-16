@@ -2,7 +2,23 @@
 
 ## 权威字段
 
-`reference_schema.csv` 是当前字段权威。`customer_demands`、`xhs_creator_accounts`、`dy_creator_accounts` 和候选搜索使用同名字段时必须保持语义一致；不擅自改列名或造同义列。
+`reference_schema.csv` 由 YP 数据库 `customer_demands` 的只读元数据生成，是当前字段与格式权威。`Field` 是真实列名，`Type` 是真实 MySQL 类型，`Null` 表示是否可传空，`Comment` 说明业务语义和平台差异。`customer_demands`、`xhs_creator_accounts`、`dy_creator_accounts` 和候选搜索使用同名字段时必须保持一致；不擅自改列名、造同义列或发明数据库不存在的格式。
+
+## Type 解析规则
+
+先按 `Comment` 判断原文对应哪个字段，再严格按该行 MySQL `Type` 生成值：
+
+- `char(N)` / `varchar(N)` / `text`：输出 JSON 字符串；`char`/`varchar` 不得超过 `N` 个字符。
+- `int` / `bigint`：输出 JSON 整数，不带千分位、单位或小数。计数和分金额不得写中文单位。
+- `decimal(P,S)`：输出 JSON 数值，最多 `S` 位小数、总有效位不超过 `P`；百分比字段统一写 0–1 小数，例如 20% 写 `0.2`。
+- `tinyint(1)`：布尔语义统一写 `1` 或 `0`；不得写 `"是"`、`"否"`、`"true"` 等字符串。
+- `enum('a','b')`：只输出枚举中列出的字符串；用户别名先标准化。
+- `date`：输出 `YYYY-MM-DD`；`datetime`：输出 `YYYY-MM-DD HH:mm:ss`。年份或具体时刻不能唯一确定时不得补猜。
+- `json`：输出实际 JSON 数组或对象，不得二次序列化为带转义的 JSON 字符串。
+
+字段单位由 `Comment` 和专用规则共同决定：`budgetMinCents/budgetMaxCents` 是人民币分；`kolOfficialPrice*`、`kolPredictPrice*`、`downloadPrice*` 和其他报价/成本字段是数据库 decimal 数值，按人民币元写单个数字。数据库没有为报价字段提供区间或比较表达式类型，因此 `30000-50000`、`>=40000` 不得直接塞入 decimal 字段；应保留原文并列入歧义，直到能得到一个确定数值或 Provider 提供专用范围字段。
+
+提交前逐字段执行一次 `Type`、`Null`、长度和精度校验。任何必填缺失、数值越界、枚举不合法、单位错误、格式不匹配或需要猜测才能转换，均进入歧义清单并阻断调用。
 
 ## 两遍解析
 
@@ -24,15 +40,15 @@
 | 抖音 / DY / Douyin | `platform=douyin` |
 | 人数 | `quantityTotal` 正整数 |
 | 项目总预算 / 整体预算 3 万元 | `budgetMinCents`、`budgetMaxCents`、`budgetRaw`；金额写分 |
-| 达人官方价 / 刊例价 / 单人预算 / 单人价格 | 按明确档位和 `text` 类型写 `kolOfficialPriceL1`、`kolOfficialPriceL2` 或 `kolOfficialPriceL3` |
+| 达人官方价 / 刊例价 / 单人预算 / 单人价格 | 按明确档位写人民币元数值到 `decimal(12,2)` 的 `kolOfficialPriceL1`、`kolOfficialPriceL2` 或 `kolOfficialPriceL3` |
 | 20% 返点 | `0.2` |
-| 截止时间 | 带时区 `submissionDeadlineAt`，并写 `submissionDeadlineRaw` |
+| 截止时间 | 按当前会话时区解析为 `YYYY-MM-DD HH:mm:ss` 写 `submissionDeadlineAt`，原文写 `submissionDeadlineRaw` |
 | 内容与类目 | `contentThemeLabel`、`contentTag`、`industryTagLabel`、`businessIndustry` 等已声明字段 |
 
 ## 官方报价档位
 
 - 小红书和抖音统一使用 `kolOfficialPriceL1`、`kolOfficialPriceL2`、`kolOfficialPriceL3` 承载达人官方报价筛选，不得写入 `budgetMinCents`、`budgetMaxCents` 或 `budgetRaw`。
-- 官方报价字段类型为 `text`，按原文证据保留单值或区间条件；不得套用项目总预算的“元转分”规则。
+- 官方报价字段类型为 `decimal(12,2)`，只写有原文证据的人民币元单值；不得套用项目总预算的“元转分”规则。区间或比较条件不能直接写入，必须保留原文并请求最小确认。
 - 抖音按视频时长映射：1–20 秒 → `kolOfficialPriceL1`，21–60 秒 → `kolOfficialPriceL2`，60 秒以上 → `kolOfficialPriceL3`。
 - 小红书按原文明确的 L1/L2/L3 档位写入对应字段；原文未给出可确定档位时保留原文并请求最小确认，不猜档位。
 - 同一 Brief 明确包含多个报价档位时分别写入对应字段；只有无法由 L1/L2/L3 表达的发文类型报价才使用 `kolOfficialPriceOther`。
