@@ -50,12 +50,20 @@ describe("current Endpoint contract loader", () => {
     }
   });
 
-  it("loads directly coupled specs without promoting session phases to provider facts", () => {
+  it("loads database-derived workflow authority without requiring host sessions", () => {
     const workflow = loadWorkflowContract();
-    assert.equal(workflow.projectionStatus, "local-session-projection");
-    assert.equal(workflow.stateAuthority.providerFacts, false);
+    assert.equal(workflow.projectionStatus, "database-derived");
+    assert.equal(workflow.stateAuthority.providerFacts, true);
+    assert.equal(workflow.stateAuthority.sessionLifecycleRequired, false);
     assert.equal(workflow.stateAuthority.providerOutputSchemaAdvertised, false);
     assert.equal(workflow.stateAuthority.missingEvidenceBehavior, "no-phase-advance");
+    assert.match(workflow.policies.rankCreatorsPrerequisite, /distribution.*recovery/i);
+    const rankTransition = workflow.transitions.find((item) => item.trigger?.name === "rank_creators");
+    assert.ok(rankTransition.guards.some((guard) => /distribution/.test(guard)));
+    assert.ok(rankTransition.guards.some((guard) => /recovery/.test(guard)));
+    assert.equal(workflow.transitions.some((item) =>
+      item.from === "waiting_mcn_return" && item.trigger?.name === "manual_source_creators"
+    ), false);
     assert.equal(Object.isFrozen(workflow), true);
     assert.equal(loadDatabaseContract().profile, "mvp-v2");
     assert.equal(loadErrorCatalog().profile, "mvp-v2");

@@ -12,21 +12,24 @@
 ## 解析原则
 
 - 保留原文，不把推测写成客户事实。
-- 先把 Brief 拆成不可再分的原子需求，再逐条映射；每条必须进入 schema 字段、`rawMessagesJson` 或歧义清单，禁止静默丢弃。
-- 每次解析先读取 `reference_schema.csv`。字段名必须命中 `Field`，值必须通过对应 `Type` 校验，业务含义和平台差异以 `Comment` 为准。
+- 先把 Brief 拆成不可再分的原子需求，再逐条映射；每条必须进入一个明确的 schema 字段，没有专用字段时才进入 `rawMessagesJson`。禁止只放在说明文字、歧义清单后继续调用或静默丢弃。
+- 任一必填字段为空、值不唯一或语义不明确时，立即提出最小澄清问题并停止；不得调用 `validate_requirement` 写 Draft 试错。
+- 使用 `tools/validate_requirement.md` 已列出的高频映射和运行时 schema。运行时禁止读取数据库 CSV；未覆盖、类型冲突或平台语义不明的字段进入 `rawMessagesJson` 或最小澄清，不自行扩展字段。
 - 平台仅写全拼 `xiaohongshu`、`douyin`；把“小红书/XHS/红书”和“抖音/DY/Douyin”分别标准化，缩写不得进入业务 Tool。
 - 项目总预算金额写分，返点写 0–1 小数。自然语言时间先按当前会话时区消歧，再按数据库 `datetime` 格式 `YYYY-MM-DD HH:mm:ss` 写入；原始时区表达保留到对应 `*Raw` 字段。
 - 达人官方价、刊例价、单人预算或与发文类型绑定的价格，按明确档位和 schema 的 `decimal(12,2)` 写人民币元单值到 `kolOfficialPriceL1/L2/L3`；小红书与抖音使用同一组三档字段，不得换算后写入 `budget*`。区间或比较条件无法写入 decimal，必须保留原文并确认确定值。
+- “粉丝 10 万以上”等比较条件没有专用 min/max 字段时直接进入 `rawMessagesJson`；不得把下限写成 `followercount` 单值，也不得为此查 CSV。
+- “品类/行业：母婴”等普通行业条件写 `businessIndustry` 字符串；不猜 JSON 标签结构。
 - `int`/`bigint`/`decimal` 输出 JSON 数值，`tinyint(1)` 布尔字段输出 `1`/`0`，`json` 输出实际数组/对象，字符类型输出字符串；不得把所有值无条件字符串化。
 - 只有明确的项目总预算或整体预算才写 `budgetMinCents/budgetMaxCents/budgetRaw`；单值总预算可按已确认口径映射为闭区间。
 - 报价档位不确定就停在 `requirement_draft`，不得猜测。
-- 扩展筛选字段必须来自 `creator_candidate_pool_schema.csv`。
+- 用户要求候选池扩展筛选但当前字段无法表达时，先保留原文并说明能力边界；运行时不读取候选表 CSV。
 
 ## 调用前预览与评分
 
 调用 `validate_requirement` 前先发送一条用户可见消息，顺序固定为：
 
-1. `解析字段`：展示即将提交的完整 payload，不隐藏空缺造成的业务影响。
+1. `解析字段（字段预览）`：展示即将提交的完整 payload，不隐藏空缺造成的业务影响。
 2. `原文保留`：列出无法可靠结构化但已进入 `rawMessagesJson` 的要求。
 3. `歧义/缺失`：列出需要确认的档位、年份、平台拆分或数量口径。
 4. `解析评分`：展示总分和各项扣分。
@@ -45,4 +48,4 @@
 
 只有 `success === true`、`data.id` 存在、`data.status === ready` 时，才把 ID 记为 `requirement_id` 并进入搜索。status 非 ready 时只向媒介展示缺项，不伪造补齐。
 
-同一用户需求在补充信息、修正字段或再次校验时，必须沿用 Provider 已返回的 `demandId`，并将 `demandVersion` 递增后再调用；不得为同一需求生成新的 `demandId`。如果返回 `requirement_draft`、status 非 ready，或响应指出缺失、冲突、待确认字段，立即把具体问题转换为最小用户澄清问题并等待回答；不得持续停在 Draft、静默等待或使用相同版本反复调用。
+同一用户需求在补充信息、修正字段或再次校验时，必须沿用 Provider 已返回的 `demandId`，并省略 `demandVersion`，由 Provider 原子分配下一版本；不得自行递增版本或为同一需求生成新的 `demandId`。如果返回 `requirement_draft`、status 非 ready，或响应指出缺失、冲突、待确认字段，立即把具体问题转换为最小用户澄清问题并等待回答；不得持续停在 Draft、静默等待或重放相同写入。

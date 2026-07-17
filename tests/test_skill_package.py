@@ -127,13 +127,11 @@ class SkillPackageContractTest(unittest.TestCase):
         for phase in self.workflow["phases"]:
             self.assertIn(f"`{phase}`", text)
         for required in (
-            "distribution_sync_pending",
-            "实际 success",
-            "manual",
-            "scheduled",
-            "ctx.trigger=cron",
-            "recovery_sync_pending",
-            "最终 sync",
+            "workflow_state",
+            "allowed_actions",
+            "数据库",
+            "in_progress",
+            "succeeded/failed/unknown",
             "不得盲目重试",
         ):
             self.assertIn(required, text)
@@ -143,15 +141,12 @@ class SkillPackageContractTest(unittest.TestCase):
         for required in (
             "用户确认",
             "写结果未知",
-            "普通消息不解除等待",
             "只有实际 MCP 返回算证据",
         ):
             self.assertIn(required, joined)
         for pattern in (
             r"preview_only\s*[:=]\s*true",
             r"先\s*preview",
-            r"waiting_mcn_return",
-            r"candidate_pool_enriched",
             r"回收到候选池",
             r"解除项目分发等待锁",
             r"当前不创建\s*Cron",
@@ -271,21 +266,21 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_hook_reference_matches_registered_safe_event_surface(self):
         text = read(REFERENCES / "hook-behavior.md")
         for event in (
-            "PreToolUse",
-            "PostToolUse",
-            "Stop",
+            "before_tool_call",
+            "after_tool_call",
+            "session_end",
         ):
             self.assertIn(f"`{event}`", text)
-        for required in ("TTL", "会话投影", "不记录完整 payload"):
+        for required in ("TTL", "无会话依赖", "不记录完整 payload"):
             self.assertIn(required, text)
 
     def test_hook_docs_map_public_projection_to_machine_phases(self):
         text = read(REFERENCES / "hook-behavior.md")
         for required in (
-            "session_id",
-            "未知输出不推进",
-            "description 与最终 `columns`",
-            "旧 `mcn_recommendation_id`",
+            "不要求 `sessionKey`",
+            "不推进数据库 phase",
+            "workflow_state/allowed_actions",
+            "结果未知",
         ):
             self.assertIn(required, text)
 

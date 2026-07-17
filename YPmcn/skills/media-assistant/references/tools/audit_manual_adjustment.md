@@ -2,11 +2,11 @@
 
 ## 何时调用
 
-`rank_creators` 已返回当前会话的实际 `run_id`、本地 phase 为 `recommendation_ready`，且媒介已明确人工调整及原因时调用。该工具是业务写，不是只读查询。
+`rank_creators` 已返回实际 `run_id`，权威状态为 `recommendation_ready`，且媒介已明确人工调整及原因时调用。该工具是业务写，不是只读查询。
 
 ## 输入
 
-必填当前会话匹配的 `run_id`、至少一项带非空 `reason` 的 `adjustments`、非空 `operator_id`。调用还必须具备当前 `sessionKey` 和 `toolCallId`；不得借用其他会话或推荐 run。
+必填权威状态匹配的 `run_id`、至少一项带非空 `reason` 的 `adjustments`、非空 `operator_id`。不得借用其他需求的推荐 run。
 
 ## 输出成功证据
 

@@ -167,7 +167,7 @@ export type ContractProfile = MvpContractProfile | LegacyContractProfile;
 export interface WorkflowContract {
   schemaVersion: number;
   profile: "mvp-v2";
-  projectionStatus: "local-session-projection";
+  projectionStatus: "database-derived";
   phases: string[];
   allowedActions: string[];
   stateAuthority: Record<string, unknown>;

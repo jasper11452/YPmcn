@@ -65,9 +65,9 @@ try {
   assert.equal(inspected.plugin.imported, true);
   assert.equal(inspected.plugin.status, "loaded");
   assert.deepEqual(inspected.diagnostics, []);
-  assert.equal(inspected.plugin.hookCount, 3, `expected 3 native hooks: ${JSON.stringify(inspected.typedHooks)}`);
+  assert.equal(inspected.plugin.hookCount, 4, `expected 4 native hooks: ${JSON.stringify(inspected.typedHooks)}`);
   const hookNames = inspected.typedHooks.map((hook) => hook.event ?? hook.name ?? hook.hookName).sort();
-  assert.deepEqual(hookNames, ["after_tool_call", "before_tool_call", "session_end"], JSON.stringify(inspected.typedHooks));
+  assert.deepEqual(hookNames, ["after_tool_call", "before_prompt_build", "before_tool_call", "session_end"], JSON.stringify(inspected.typedHooks));
 
   const skills = JSON.parse(run(["skills", "check", "--json"]));
   const serialized = JSON.stringify(skills);

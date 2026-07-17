@@ -1,16 +1,41 @@
-# 人工确认模式
+# AskUserQuestion 交互
 
-问题应短、互斥、可执行，选项不超过 3 个。一次只确认会改变下一动作的决策。
+## 通用规则
 
-## 发送前
+- 只在歧义会改变结果、缺少关键字段或需要不可逆确认时弹框。
+- 问题文字必须自包含：当前事实、待决定事项、差异和选项后果都写入弹框。
+- 提供 2–3 个业务选项，不添加“拒绝/取消”；Reject 按钮已经承担停止动作。
+- 最后一项必须允许用户自行输入。当前宿主若没有真实输入框，不得放一个无法输入的“其他”；让用户 Reject 后在聊天补充，并标记宿主能力未达标。
+- Reject、超时或无结构化答案均视为未授权，停止当前动作。
 
-1. 供需判断：接受 / 调整筛选 / 停止。
-2. 目标 MCN：接受名单 / 调整名单 / 停止。
-3. 外发消息：确认文案 / 修改 / 停止。
-4. 字段选择：由 `select_inquiry_form_fields` 完成最后确认。
+## 需求澄清
 
-三项确认分别对应 `supplyConfirmed`、`mcnConfirmed`、`messageConfirmed`。确认完成后，由具备 `operator.write` scope 的客户端通过 `confirm_distribution_send` session action 写入当前 `mcn_recommendation_id` 的会话证据；不能从 `before_tool_call` 虚构字段，也不能用一次笼统“继续”替代所有证据。
+问题中展示已解析需求和唯一冲突点。选项使用完整业务含义，例如“预算为单账号 3 万元”而不是“选项 A”。自由输入用于用户提供新的数值或规则。
 
-## 回收
+## 列表选择
 
-普通询问进度不代表回收确认。仅“继续回收”“现在回收”“提前回收”或等价结构化确认触发 manual 路径。scheduled 路径不向用户补问，必须由 cron 上下文触发。
+Ask 当前最多 4 个选项。候选过多时提供 2–3 个有明确范围的推荐组合，自由输入允许填写机构编号；不要截断事实后让用户盲选。
+
+## 搜索后供给方案确认
+
+`search_creators` 成功后、调用 `rank_mcns` 或其他后续业务 Tool 前必须弹框。问题中展示以下字段与计算口径：
+
+- `demand_count`：已校验的 `quantityTotal`；
+- `database_candidate_count`：本次搜索实际候选数；
+- `supply_demand_ratio`：`database_candidate_count / demand_count`；
+- `recommended_mcn_count`、`recommended_manual_count`；
+- `recommended_mcn_manual_ratio`：上述两个建议数量之比。
+
+缺任一输入时停止，不猜测。保留 Hook 返回的 `[YP_SUPPLY_PLAN_CONFIRMATION:<confirmation_id>]`，选项固定为“确认供给方案”“调整方案”。只有精确选择“确认供给方案”才允许用相同 `id + platform` 调用 `rank_mcns`。
+
+## 外发确认
+
+首次 `create_with_distributions` 会被 Hook 阻断并返回 `confirmation_id`。随后调用 Ask：
+
+- 问题中原样保留 `[YP_CONFIRMATION:<confirmation_id>]`。
+- 展示项目名称、需求摘要、MCN 名单和数量、截止时间、表单字段、消息摘要以及“不可逆”。
+- 业务选项固定为“确认发送”“需要修改”。
+- 只有实际结果精确包含“确认发送”才授权。
+- 用完全相同参数重试；任一参数变化都需要新确认。
+
+写结果未知时确认凭证进入 unknown，必须先调用 `get_workflow_state`，不得再次弹框后重发。

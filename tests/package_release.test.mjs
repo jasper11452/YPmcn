@@ -10,7 +10,7 @@ const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.u
 const stagedPluginRoot = fileURLToPath(
   new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
 );
-const VERSION = "3.0.5";
+const VERSION = "3.0.6";
 
 function json(relativePath) {
   return JSON.parse(readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8"));
@@ -38,7 +38,7 @@ function dryRunFiles() {
 before(stageIfImplemented);
 after(() => rmSync(stagingBase, { recursive: true, force: true }));
 
-describe("3.0.5 release metadata", () => {
+describe("3.0.6 release metadata", () => {
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
     const rootPackage = json("package.json");
     const rootLock = json("package-lock.json");
@@ -63,7 +63,6 @@ describe("3.0.5 release metadata", () => {
     const manifest = json("YPmcn/openclaw.plugin.json");
     assert.deepEqual(pluginPackage.openclaw, {
       extensions: ["./dist/index.js"],
-      hooks: ["./hooks/ypmcn-media-assistant"],
     });
     assert.equal(manifest.hooks, undefined);
     assert.equal(pluginPackage["openclaw.extensions"], undefined);
@@ -118,7 +117,7 @@ describe("reproducible plugin package", () => {
     }
   });
 
-  it("does not trigger npm install in OpenClaw plugin or hook-pack installers", () => {
+  it("does not trigger npm install in the OpenClaw plugin installer", () => {
     const stagedPackage = json("packages/.staging/ypmcn-media-assistant/package.json");
     assert.equal(stagedPackage.dependencies, undefined);
   });
@@ -131,8 +130,7 @@ describe("reproducible plugin package", () => {
   it("excludes legacy Python hooks and bytecode from the cross-platform archive", () => {
     const files = dryRunFiles();
     assert.equal(files.some((path) => /(?:\.py|\.pyc)$|__pycache__/.test(path)), false);
-    assert.ok(files.includes("hooks/ypmcn-media-assistant/HOOK.md"));
-    assert.ok(files.includes("hooks/ypmcn-media-assistant/handler.js"));
+    assert.equal(files.some((path) => path.startsWith("hooks/")), false);
   });
 
   it("excludes source, tests, mocks, scripts, and secret files", () => {

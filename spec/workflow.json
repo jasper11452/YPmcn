@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "profile": "mvp-v2",
-  "projectionStatus": "local-session-projection",
+  "projectionStatus": "database-derived",
   "vectorDegradationPolicy": {
     "mode": "explicit-sql-only",
     "preserveBusinessWorkflow": true,
@@ -14,18 +14,15 @@
   "phases": [
     "requirement_draft",
     "requirement_ready",
-    "search_completed",
+    "candidate_pool_ready",
     "mcn_planning",
-    "field_selection_ready",
-    "distribution_sync_pending",
-    "waiting_return",
-    "recovering",
-    "recovery_sync_pending",
-    "recovered",
+    "waiting_mcn_return",
+    "candidate_pool_enriched",
     "recommendation_ready",
     "submission_batch_ready",
     "feedback_routing",
-    "blocked"
+    "blocked",
+    "closed"
   ],
   "allowedActions": [
     "validate_requirement",
@@ -35,141 +32,124 @@
     "create_with_distributions",
     "sync_mcn_inquiry_status",
     "ingest_mcn_submissions",
+    "manual_source_creators",
     "rank_creators",
+    "audit_manual_adjustment",
     "create_submission_batch",
-    "record_client_feedback"
+    "record_client_feedback",
+    "get_workflow_state"
   ],
   "stateAuthority": {
-    "source": "hook-session-projection",
+    "source": "database-derived-provider-state",
     "schema": "schemas/workflow-state.schema.json",
-    "providerFacts": false,
+    "providerFacts": true,
     "providerOutputSchemaAdvertised": false,
-    "phaseAdvance": "explicit-actual-returned-evidence-only",
+    "phaseAdvance": "derive-after-each-write-from-committed-facts",
     "missingEvidenceBehavior": "no-phase-advance",
     "unknownWriteResult": "WRITE_RESULT_UNKNOWN",
-    "mayGrantProviderAuthority": false,
+    "mayGrantProviderAuthority": true,
     "mayDenyForSafety": true,
-    "sessionTtl": "24h",
-    "rawPayloadStored": false
+    "sessionLifecycleRequired": false,
+    "rawPayloadStored": false,
+    "ledger": "mcp_tool_call_ledger"
   },
   "policies": {
-    "outwardSendConfirmation": "sessionKey + toolCallId + operator.write + supply/mcn/message confirmations",
-    "fieldSelectionBinding": "description field names map one-to-one in order to final columns",
-    "unsupportedProviderArguments": [
-      "candidate_pool_id",
-      "mcn_recommendation_id",
-      "preview_only",
-      "remindAt",
-      "trigger"
-    ],
-    "recoverySequence": [
-      "sync_mcn_inquiry_status",
-      "ingest_mcn_submissions",
-      "sync_mcn_inquiry_status"
-    ],
-    "scheduledRecoveryRequires": "ctx.trigger=cron and cron_job_id",
-    "providerStatuses": "observed-only; never interpreted as advertised facts"
+    "outwardSendConfirmation": "ten-minute one-time request fingerprint confirmed through AskUserQuestion",
+    "fieldSelectionBinding": "selected columns remain preparation evidence until a real distribution is committed",
+    "unsupportedProviderArguments": ["candidate_pool_id", "mcn_recommendation_id", "preview_only", "remindAt", "trigger"],
+    "stateRefresh": "on resume, compaction, unknown write, conflict, missing state, and before outward send",
+    "unknownWriteRecovery": "get_workflow_state by demand identity or ledger trace_id; never blind retry",
+    "postSearchSupplyPlanConfirmation": "AskUserQuestion confirms fielded supply-demand ratio and MCN/manual allocation before rank_mcns",
+    "manualSourcingPlacement": "optional pre-send enrichment only; never proves distribution or recovery",
+    "rankCreatorsPrerequisite": "committed WeCom distribution plus completed recovery"
   },
   "transitions": [
     {
-      "id": "requirement-validated",
+      "id": "requirement-ready",
       "from": "requirement_draft",
-      "trigger": { "type": "tool", "name": "validate_requirement" },
-      "guards": ["payload matches live input schema"],
-      "evidence": ["actual success === true", "actual data.requirement_id or data.id"],
+      "trigger": {"type": "tool", "name": "validate_requirement"},
+      "guards": ["payload matches live schema"],
+      "evidence": ["committed ready customer_demands row"],
       "nextPhase": "requirement_ready"
     },
     {
-      "id": "search-completed",
+      "id": "candidate-pool-ready",
       "from": "requirement_ready",
-      "trigger": { "type": "tool", "name": "search_creators" },
-      "guards": ["params.id matches current requirement evidence"],
-      "evidence": ["actual success === true"],
-      "nextPhase": "search_completed"
+      "trigger": {"type": "tool", "name": "search_creators"},
+      "guards": ["requirement identity resolves uniquely"],
+      "evidence": ["committed creator_candidate_pool rows"],
+      "nextPhase": "candidate_pool_ready"
     },
     {
-      "id": "mcn-plan-observed",
-      "from": "search_completed",
-      "trigger": { "type": "tool", "name": "rank_mcns" },
-      "guards": ["params.id matches current requirement evidence"],
-      "evidence": ["actual success === true", "actual mcn_recommendation_id or id for local confirmation binding"],
+      "id": "mcn-plan-ready",
+      "from": "candidate_pool_ready",
+      "trigger": {"type": "tool", "name": "rank_mcns"},
+      "guards": ["candidate pool belongs to the same requirement", "one-time Ask supply-plan confirmation binds demand_count, database_candidate_count, supply_demand_ratio, recommended_mcn_count, recommended_manual_count, and recommended_mcn_manual_ratio"],
+      "evidence": ["committed mcn_recommendation_items rows"],
       "nextPhase": "mcn_planning"
     },
     {
-      "id": "field-description-observed",
+      "id": "distribution-waiting",
       "from": "mcn_planning",
-      "trigger": { "type": "tool", "name": "select_inquiry_form_fields" },
-      "guards": ["description parses as unique 数据库字段名：字段备注 lines"],
-      "evidence": ["actual success === true", "actual description"],
-      "nextPhase": "field_selection_ready"
+      "trigger": {"type": "tool", "name": "create_with_distributions"},
+      "guards": ["one-time Ask confirmation matches the unchanged request fingerprint", "supplier and prefill rows resolve one requirement"],
+      "evidence": ["real project and distribution mirrored to mcn_inquiries"],
+      "nextPhase": "waiting_mcn_return"
     },
     {
-      "id": "distribution-sent",
-      "from": "field_selection_ready",
-      "trigger": { "type": "tool", "name": "create_with_distributions" },
-      "guards": [
-        "sessionKey and toolCallId present",
-        "operator.write confirmation binds local mcn recommendation evidence",
-        "columns bind one-to-one to selected description",
-        "all live required inputs present"
-      ],
-      "evidence": ["actual success === true", "actual project_id", "actual mcn_id"],
-      "nextPhase": "distribution_sync_pending"
+      "id": "manual-supply-before-send-from-candidate-pool",
+      "from": "candidate_pool_ready",
+      "trigger": {"type": "tool", "name": "manual_source_creators"},
+      "guards": ["supply plan is confirmed", "manual results are real and verifiable", "no distribution has been sent"],
+      "evidence": ["committed eligible manual candidates"],
+      "nextPhase": "candidate_pool_ready"
     },
     {
-      "id": "initial-sync-observed",
-      "from": "distribution_sync_pending",
-      "trigger": { "type": "tool", "name": "sync_mcn_inquiry_status" },
-      "guards": ["requirement_id, project_id, and mcn_id match current evidence"],
-      "evidence": ["actual success === true"],
-      "nextPhase": "waiting_return"
+      "id": "manual-supply-before-send-from-mcn-planning",
+      "from": "mcn_planning",
+      "trigger": {"type": "tool", "name": "manual_source_creators"},
+      "guards": ["manual results are real and verifiable", "no distribution has been sent"],
+      "evidence": ["committed eligible manual candidates"],
+      "nextPhase": "mcn_planning"
     },
     {
-      "id": "recovery-sync-observed",
-      "from": "waiting_return",
-      "trigger": { "type": "tool", "name": "sync_mcn_inquiry_status" },
-      "guards": ["current manual intent or scheduled cron evidence"],
-      "evidence": ["actual success === true", "actual inquiry_id required before ingest"],
-      "nextPhase": "recovering"
+      "id": "submission-ingested",
+      "from": "waiting_mcn_return",
+      "trigger": {"type": "tool", "name": "ingest_mcn_submissions"},
+      "guards": ["inquiry identity and ownership resolve uniquely"],
+      "evidence": ["committed valid mcn_submission_items and updated inquiry"],
+      "nextPhase": "candidate_pool_enriched"
     },
     {
-      "id": "ingest-observed",
-      "from": "recovering",
-      "trigger": { "type": "tool", "name": "ingest_mcn_submissions" },
-      "guards": ["inquiry_id and recovery origin match current sync evidence"],
-      "evidence": ["actual success === true"],
-      "nextPhase": "recovery_sync_pending"
+      "id": "recovery-completed",
+      "from": "waiting_mcn_return",
+      "trigger": {"type": "tool", "name": "sync_mcn_inquiry_status"},
+      "guards": ["committed WeCom distribution exists", "all active platform inquiries are recovered or closed"],
+      "evidence": ["authoritative completed recovery lifecycle"],
+      "nextPhase": "candidate_pool_enriched"
     },
     {
-      "id": "final-sync-observed",
-      "from": "recovery_sync_pending",
-      "trigger": { "type": "tool", "name": "sync_mcn_inquiry_status" },
-      "guards": ["sync identifiers and recovery origin match current ingest evidence"],
-      "evidence": ["actual success === true"],
-      "nextPhase": "recovered"
-    },
-    {
-      "id": "recommendation-run-observed",
-      "from": "recovered",
-      "trigger": { "type": "tool", "name": "rank_creators" },
-      "guards": ["requirement_id matches current evidence"],
-      "evidence": ["actual success === true", "actual run_id promised by tool description"],
+      "id": "recommendation-ready",
+      "from": "candidate_pool_enriched",
+      "trigger": {"type": "tool", "name": "rank_creators"},
+      "guards": ["committed WeCom distribution exists", "all active platform recovery facts are complete"],
+      "evidence": ["successful recommendation_run and recommendation items"],
       "nextPhase": "recommendation_ready"
     },
     {
-      "id": "submission-batch-observed",
+      "id": "submission-ready",
       "from": "recommendation_ready",
-      "trigger": { "type": "tool", "name": "create_submission_batch" },
-      "guards": ["run_id matches current evidence"],
-      "evidence": ["actual success === true"],
+      "trigger": {"type": "tool", "name": "create_submission_batch"},
+      "guards": ["run identity matches authoritative state"],
+      "evidence": ["committed submission batch and creator submissions"],
       "nextPhase": "submission_batch_ready"
     },
     {
-      "id": "feedback-observed",
+      "id": "feedback-recorded",
       "from": "submission_batch_ready",
-      "trigger": { "type": "tool", "name": "record_client_feedback" },
-      "guards": ["run_id matches current evidence"],
-      "evidence": ["actual success === true"],
+      "trigger": {"type": "tool", "name": "record_client_feedback"},
+      "guards": ["run identity matches authoritative state"],
+      "evidence": ["committed feedback facts"],
       "nextPhase": "feedback_routing"
     }
   ]

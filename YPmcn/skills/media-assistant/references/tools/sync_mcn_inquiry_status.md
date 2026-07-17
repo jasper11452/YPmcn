@@ -2,7 +2,7 @@
 
 ## 何时调用
 
-当前仅用于登记一次“同步请求元数据”。它尚不能完成真实供应商状态同步。
+外部项目已创建，需要从真实 distribution 对账机构发送、回填或提交状态时调用。
 
 ## 输入
 
@@ -11,15 +11,16 @@
 ## 输出成功证据
 
 - retain actual returned payload as downstream evidence
+- 返回真实 distribution 对应的 `inquiry_ids`、`workflow_state` 与 `allowed_actions`
 
 ## 调用后必须停在哪里
 
-不得根据该工具返回推进到“已回收”。等待 MCP 修复后，必须以真实外部状态和 `inquiry_id` 为准。
+只依据返回的真实状态与 `inquiry_ids` 决定等待、ingest 或继续同步；没有提交事实时不得声称已回收。
 
 ## 能力边界
 
-当前实现只读写 `mcn_inquiry_status_syncs`，不查询外部供应商项目，不创建或更新 `mcn_inquiries`，也不会提供可供 ingest 使用的可靠 `inquiry_id`。因此现在只是同步任务登记，不是状态对账。
+服务端读取 `core_project/core_distribution`，验证 requirement、project、mcn 归属，并创建或更新 `mcn_inquiries`。它不抓取不存在的回填内容，也不以定时任务元数据替代真实 distribution 状态。
 
 ## 错误与停止条件
 
-三个 ID 任一无法由实际证据证明时返回 `integration_required`。未知写结果不盲目重试。
+三个 ID 任一无法由实际证据证明、找不到真实 distribution 或机构不属于该需求时停止。未知写结果不盲目重试，使用 `get_workflow_state` 对账。

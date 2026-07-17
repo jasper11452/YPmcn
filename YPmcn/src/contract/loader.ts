@@ -982,7 +982,7 @@ export function loadWorkflowContract(): WorkflowContract {
   if (
     value.schemaVersion !== 1 ||
     value.profile !== "mvp-v2" ||
-    value.projectionStatus !== "local-session-projection"
+    value.projectionStatus !== "database-derived"
   ) {
     throw new Error("workflow contract identity is invalid");
   }
@@ -995,16 +995,16 @@ export function loadWorkflowContract(): WorkflowContract {
   requireUnique(value.allowedActions, "workflow allowedActions");
   const stateAuthority = requireRecord(value.stateAuthority, "workflow stateAuthority");
   if (
-    stateAuthority.source !== "hook-session-projection" ||
-    stateAuthority.providerFacts !== false ||
+    stateAuthority.source !== "database-derived-provider-state" ||
+    stateAuthority.providerFacts !== true ||
     stateAuthority.providerOutputSchemaAdvertised !== false ||
-    stateAuthority.phaseAdvance !== "explicit-actual-returned-evidence-only" ||
+    stateAuthority.phaseAdvance !== "derive-after-each-write-from-committed-facts" ||
     stateAuthority.missingEvidenceBehavior !== "no-phase-advance" ||
     stateAuthority.unknownWriteResult !== "WRITE_RESULT_UNKNOWN" ||
-    stateAuthority.mayGrantProviderAuthority !== false ||
+    stateAuthority.mayGrantProviderAuthority !== true ||
     stateAuthority.mayDenyForSafety !== true
   ) {
-    throw new Error("workflow state must be a fail-closed local projection");
+    throw new Error("workflow state must be derived from committed provider database facts");
   }
   const profile = loadContractProfile("mvp-v2");
   const transitions = requireArray(value.transitions, "workflow transitions").map(
