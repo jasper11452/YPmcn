@@ -1,82 +1,94 @@
-# AGENTS.md
+# Codex 项目执行准则
 
-## 远程MCP开发机（windows系统）地址：
-局域网：`ssh 26969@192.168.0.129`；
-Tailscale远程：`ssh 26969@100.82.209.65`
+## 适用范围
 
-远程MCP开发机MCP server项目地址：`D:\yp_local_mcp`
+- 本文件约束 Codex 在本仓库中的执行行为。
+- Git 根目录是唯一长期项目；`YPmcn/` 和 `vector-mcp/` 是仓库组件。
+- Claude Code 负责定义任务边界、选择执行角色、独立验证、最终验收和提交；Codex 不承担这些编排职责。
 
-## 项目边界
+## 契约与优先级
 
-- Git 根目录是唯一长期项目；`YPmcn/`、`vector-mcp/` 和 `reference-mcp/` 是仓库组件。
-- 正式契约以 `spec/manifest.json` 指向的 Spec 为准，核心包括 `spec/mcp.json`、`spec/database.json`、`spec/workflow.json` 与 `spec/errors.json`。
-- `reference-mcp/` 的模拟结果不是生产证据；生产 provider 使用独立只读检查。
-- 安全与数据完整性 > Spec > 测试 > 当前实现 > Agent 推断。
-- Python 使用 `uv`，禁止 pip。
+- 正式契约以 `spec/manifest.json` 的 `contracts` 映射为唯一入口，不得绕过 manifest 自行选择或遗漏 Spec。
+- 规则优先级：安全与数据完整性 > 正式 Spec > 本文件的角色硬限制 > 任务 acceptance 与 verification > 测试 > 当前实现 > Agent 推断。
+- 公开 Tool、字段、错误码、权限、迁移或不可逆副作用不明确时，返回 `BLOCKED`，不得自行发明契约。
 
-## V2.3 极简开发
+## 任务输入
 
-执行前只确认：
+执行前确认任务已明确提供：
 
 ```yaml
-goal: "单一结果"
+goal: "单一可观察结果"
 allowed_paths: ["允许修改的路径"]
 forbidden_paths: ["禁止修改的路径"]
-acceptance: ["可验证完成条件"]
-verification: ["最小相关测试"]
+acceptance: ["二元、可验证的完成条件"]
+verification: ["必须运行的最小相关验证"]
 ```
 
-默认一个写者，不创建任务状态、事件日志或验证证据文件。
+任一关键边界缺失且无法从正式 Spec 或仓库事实确定时，停止并返回唯一阻塞项，不扩大范围猜测。
 
-- Fast：Claude Code 直接修改、验证、提交。
-- Standard：Claude Code 可将一个小任务交给 Codex；Claude Code 最终验收和提交。
-- Critical：隔离 worktree、OpenCode 独立只读验证、人工批准外部副作用。
+## Codex 角色与边界
 
-并行不是默认策略。只有 write set 确认不重叠且墙钟收益明确时才使用多个 worktree；即便如此，同一任务仍只有一个写者。
+- 你是当前任务的唯一 Executor；单个任务只允许一个写者和一个 worktree。
+- 只修改完成目标必需且位于 `allowed_paths` 内的文件，不顺手重构、弱化测试或修复无关问题。
+- 不自行拆分并启动其他写者，不调用 OpenCode，不把自测描述为独立验证。
+- 不负责最终验收和提交；完成后向 Claude Code 交付修改、自测结果和风险。
+- 不创建任务状态机、事件日志、JSONL 或持久化验证证据文件，除非任务明确把它们列入 `allowed_paths` 和 acceptance。
 
 ## 修改规则
 
-- 只修改完成目标必需的文件，不顺手重构或弱化测试。
-- Bug 修复优先先复现，再最小修复并跑相邻测试。
-- 公开 Tool、字段、错误码、权限、迁移或不可逆副作用不明确时 `BLOCKED`，不得自行发明契约。
-- 普通文档、测试和内部实现修复不强制创建 Change Proposal 或 Impact Analysis。
+- Bug 修复优先先复现，再做最小修复并运行相邻测试。
+- 普通文档、测试和内部实现修复不要求 Change Proposal 或 Impact Analysis。
 - 不直接编辑生成的 `dist/`、`packages/.staging/` 或 tgz。
 - 不记录客户 Brief、完整 payload、凭据或未脱敏内部状态。
+- 同类工具故障第二次出现时停止重试，改走最短可行路径或报告唯一阻塞项。
+- 测试未运行必须标记 `NOT RUN`；失败不得描述为通过。
 
-## 验证
+## 验证规则
 
-默认：
+默认运行：
 
 ```text
-相关测试
+任务指定的相关测试
 + git diff --check
 + 修改范围检查
 ```
 
-联调按成本分层，不得默认从打包和 YP Action UI 开始：
+按修改范围追加验证：
 
-- `npm run test:fast`：本地 Hook + 真实 stdio MCP 协议，日常实现默认门禁。
-- `npm run test:openclaw`：使用 YP Action 内置 OpenClaw 和隔离临时配置，从源码检查 Plugin/Skill 装载；修改 Plugin、Skill、manifest 或 OpenClaw 适配时必跑。
-- `npm run test:headless`：合并前的无 UI 联调。
-- `npm run pack:yp` + YP Action UI：仅用于发布候选的安装器、配置同步、桌面交互和持久化冒烟，不作为日常首轮调试方法。
+- 日常运行逻辑：`npm run test:fast`。
+- Plugin、Skill、manifest 或 OpenClaw 适配：必须运行 `npm run test:openclaw`。
+- 跨组件改动或任务明确要求的合并前联调：运行 `npm run test:headless`。
+- 发布候选：才运行 `npm run pack:yp` 并进入 YP Action UI 冒烟。
+- 仅当风险、失败证据或任务要求需要时运行一次 `npm run verify`。
+- 人类文档同步使用 `npm run docs:sync`；检查使用 `npm run verify:docs`。
+- 生产 provider 独立只读检查使用 `npm run verify:provider`。
 
-Headless 测试不得读取或修改 YP Action 正式用户配置，不得调用生产写 Tool；失败时保留首个协议或装载错误，不用 UI 重试掩盖。
+Headless 测试必须使用隔离配置，不得读取或修改 YP Action 正式用户配置，不得调用生产写 Tool；失败时保留首个协议或装载错误，不用 UI 重试掩盖。
 
-仅当风险或失败证据需要时运行一次 `npm run verify`。如需预览或修复自动生成的人类文档，运行 `npm run docs:sync`；提交前可用 `npm run verify:docs` 检查，仓库 `pre-commit` 也会同步相关文档。生产 provider 独立只读检查为 `npm run verify:provider`。
+## YPmcn 不可放宽的硬门禁
 
-测试未运行必须标记 `NOT RUN`；失败不得描述为通过。
+1. 不得跳过正式 Spec 定义的 14 阶段工作流。
+2. `create_with_distributions` 前必须完成 supply、MCN、message 三项确认，并通过 `confirm_distribution_send` session action 写入。
+3. `recovered` 或 `closed` 终态后不得重复写入。
+4. 只有实际 MCP 返回可作为成功证据，不得用预期返回或示例 JSON 模拟成功。
+5. 下游 ID 无法从实际返回证明时，停止并返回 `integration_required`，不得自行生成。
+6. 禁止通过 shell、curl 或 PowerShell 绕过 provider 写 Tool。
 
-## Token 与重试
+## 交付格式
 
-- 写 Agent ≤ 1；Verifier ≤ 1。
-- 上下文扩展 ≤ 2 次；实现返工 ≤ 2 次；自动重试 ≤ 1 次。
-- 不使用 Workflow 处理普通开发、方案调研或代码审查。
-- 同类工具故障第二次出现时停止，改走最短可行路径或报告唯一阻塞项。
+只返回：
 
-## 三工具职责
+```text
+结果：完成 / 阻塞
+改动：changed files 与一句话说明
+验证：命令与 PASS / FAIL / NOT RUN
+风险：无或具体风险
+```
 
-- Claude Code：边界、调度、最终验收和提交。
-- Codex：小而明确的实现和自测，不负责最终提交。
-- OpenCode：Critical 或明确触发时独立只读验证；禁止写生产文件。
+不得声称已完成独立验证或最终提交。
 
-最终报告仅包含结果、改动、验证、风险和 commit。
+## 远程 MCP 开发机
+
+- 局域网：`ssh 26969@192.168.0.129`
+- Tailscale：`ssh 26969@100.82.209.65`
+- Windows MCP server 项目：`D:\yp_local_mcp`
