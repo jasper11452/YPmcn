@@ -69,7 +69,7 @@ def assert_advisory(label, output, expected_code=None):
 def assert_reference_context(label, output, tool, expected_references):
     global PASS, FAIL
     context = output.get("hookSpecificOutput", {}).get("additionalContext", "")
-    required = [f"references/tools/{tool}.md", *expected_references]
+    required = expected_references
     missing = [reference for reference in required if reference not in context]
     if not missing and "actually opened" in context:
         PASS += 1
@@ -149,10 +149,8 @@ assert_reference_context(
     output,
     "validate_requirement",
     [
-        "references/contract-gate.md",
-        "references/phase-tool-matrix.md",
+        "references/execution-gates.md",
         "references/requirement-intake.md",
-        "references/requirement-parsing.md",
     ],
 )
 

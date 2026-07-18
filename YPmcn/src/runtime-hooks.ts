@@ -15,6 +15,7 @@ const WORKFLOW_STATE_TTL_MS = 10 * 60 * 1_000;
 const SUPPLY_PLAN_TTL_MS = 10 * 60 * 1_000;
 const BLOCKED_TOOL_TURN_TTL_MS = 2 * 60 * 1_000;
 const TRUSTED_ID_TTL_MS = 10 * 60 * 1_000;
+const READY_REQUIREMENT_TTL_MS = 10 * 60 * 1_000;
 const WECOM_TEMPLATE_ID = "ypmcn-wecom-inquiry-v1";
 const WECOM_TEMPLATE_RELATIVE_PATH = join("skills", "media-assistant", "assets", "wecom_inquiry_template.txt");
 const CONFIRMATION_MARKER = /\[YP_CONFIRMATION:([0-9a-f-]{36})\]/i;
@@ -205,7 +206,7 @@ function deny(code: string, message: string): Json {
 function store(rootDir: string): { path: string; data: Json } {
   const path = statePath(rootDir);
   const data = load(path);
-  data.schema_version = 8;
+  data.schema_version = 9;
   data.confirmations ??= {};
   if (!Array.isArray(data.trusted_ids)) data.trusted_ids = [];
   if (!data.blocked_requirement_semantics || typeof data.blocked_requirement_semantics !== "object" || Array.isArray(data.blocked_requirement_semantics)) {
@@ -241,6 +242,14 @@ function store(rootDir: string): { path: string; data: Json } {
     delete data.prompt_requirement_gate;
     changed = true;
   }
+  if (data.ready_requirement_binding && Number(data.ready_requirement_binding.expires_at_ms ?? 0) <= now) {
+    delete data.ready_requirement_binding;
+    changed = true;
+  }
+  if (data.latest_requirement_id && Number(data.latest_requirement_id.expires_at_ms ?? 0) <= now) {
+    delete data.latest_requirement_id;
+    changed = true;
+  }
   if (data.blocked_tool_turn && Number(data.blocked_tool_turn.expires_at_ms ?? 0) <= now) {
     delete data.blocked_tool_turn;
     changed = true;
@@ -258,11 +267,13 @@ function store(rootDir: string): { path: string; data: Json } {
   return { path, data };
 }
 
-export function beginPromptTurn(rootDir: string, preview?: Json): void {
+export function beginPromptTurn(rootDir: string, preview?: Json, readyPayload?: Json): void {
   const current = store(rootDir);
   current.data.prompt_epoch = Number(current.data.prompt_epoch ?? 0) + 1;
   current.data.blocked_requirement_semantics = {};
   delete current.data.blocked_tool_turn;
+  delete current.data.prompt_requirement_gate;
+  delete current.data.ready_requirement_binding;
   if (preview && preview.gate !== "ready") {
     current.data.prompt_requirement_gate = {
       gate: preview.gate,
@@ -274,8 +285,18 @@ export function beginPromptTurn(rootDir: string, preview?: Json): void {
       observed_at_ms: Date.now(),
       expires_at_ms: Date.now() + CONFIRMATION_TTL_MS,
     };
-  } else {
-    delete current.data.prompt_requirement_gate;
+  } else if (preview?.gate === "ready" && readyPayload && typeof readyPayload === "object") {
+    const audit = readyPayload.rawMessagesJson;
+    current.data.ready_requirement_binding = {
+      status: "pending",
+      preview_fingerprint: fingerprint(preview),
+      payload_fingerprint: fingerprint(readyPayload),
+      audit_fingerprint: fingerprint(audit),
+      atom_count: Array.isArray(audit?.atoms) ? audit.atoms.length : 0,
+      prompt_epoch: current.data.prompt_epoch,
+      observed_at_ms: Date.now(),
+      expires_at_ms: Date.now() + READY_REQUIREMENT_TTL_MS,
+    };
   }
   save(current.path, current.data);
 }
@@ -285,12 +306,13 @@ const CONTINUATION_BLOCK_CODES = new Set([
   "YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED",
   "WRITE_RESULT_UNKNOWN",
   "WORKFLOW_STATE_REFRESH_REQUIRED",
+  "BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED",
 ]);
 
 export function recordBlockedToolResult(rootDir: string, result: Json | undefined): void {
   if (!result?.block || !text(result.blockReason)) return;
   const code = result.blockReason.split(":", 1)[0];
-  if (code.startsWith("BLOCKED_") || CONTINUATION_BLOCK_CODES.has(code)) return;
+  if (code === "BLOCKED_PREVIOUS_HOOK_RESULT" || CONTINUATION_BLOCK_CODES.has(code)) return;
   const current = store(rootDir);
   const now = Date.now();
   current.data.blocked_tool_turn = {
@@ -309,6 +331,45 @@ export function blockedToolTurnFailure(rootDir: string): Json | undefined {
     "BLOCKED_PREVIOUS_HOOK_RESULT",
     `A previous Tool call in this user turn was blocked with ${blocked.code}; stop without changing arguments or calling another Tool until the next user turn.`,
   );
+}
+
+function readyRequirementFailure(
+  raw: string,
+  input: Json,
+  current: { path: string; data: Json },
+): Json | undefined {
+  const binding = current.data.ready_requirement_binding;
+  if (!binding || typeof binding !== "object" || binding.status === "validated") return undefined;
+  if (binding.status !== "pending") {
+    return deny(
+      "BLOCKED_REQUIREMENT_VALIDATION_IN_FLIGHT",
+      "The authoritative Ready Preview validation is already in flight or failed; stop until a new user turn.",
+    );
+  }
+  if (normalize(raw) !== "validate_requirement") {
+    return deny(
+      "BLOCKED_REQUIREMENT_VALIDATION_REQUIRED",
+      "A Ready Preview is bound to this turn; the only permitted Tool is validate_requirement with the exact injected arguments.",
+    );
+  }
+  const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
+  if (!text(binding.payload_fingerprint) || fingerprint(payload) !== binding.payload_fingerprint) {
+    return deny(
+      "BLOCKED_REQUIREMENT_PREVIEW_MISMATCH",
+      "validate_requirement.payload must exactly match the authoritative Ready Preview, including status, projection, originalBrief, ordered atoms, and coverageCheck; do not rebuild or rewrite it.",
+    );
+  }
+  return undefined;
+}
+
+function markReadyRequirementInFlight(current: { path: string; data: Json }, payload: Json): void {
+  const binding = current.data.ready_requirement_binding;
+  if (!binding || typeof binding !== "object" || binding.status !== "pending") return;
+  if (binding.payload_fingerprint !== fingerprint(payload)) return;
+  binding.status = "in_flight";
+  binding.updated_at_ms = Date.now();
+  current.data.ready_requirement_binding = binding;
+  save(current.path, current.data);
 }
 
 function saveReceipt(rootDir: string, id: string, receipt: Json): void {
@@ -402,13 +463,25 @@ function recordTrustedIds(event: Json, tool: string, rootDir: string): void {
   if (!successful(event.error ? { isError: true } : event.result)) return;
   const result = unwrap(event.result);
   const valuesByKind = collectTrustedIds(result);
+  let validatedRequirementId: string | undefined;
   if (tool === "validate_requirement") {
-    const requirementId = result?.data?.id ?? result?.id;
-    if (text(requirementId)) valuesByKind.set("requirement_id", new Set([requirementId.trim()]));
+    const requirementId = result?.data?.id;
+    if (text(requirementId) || (typeof requirementId === "number" && Number.isFinite(requirementId))) {
+      validatedRequirementId = String(requirementId).trim();
+      valuesByKind.set("requirement_id", new Set([validatedRequirementId]));
+    }
   }
-  if (valuesByKind.size === 0) return;
+  if (valuesByKind.size === 0) {
+    if (tool === "validate_requirement") {
+      const current = store(rootDir);
+      delete current.data.latest_requirement_id;
+      save(current.path, current.data);
+    }
+    return;
+  }
   const current = store(rootDir);
   const now = Date.now();
+  if (tool === "validate_requirement") delete current.data.latest_requirement_id;
   for (const [kind, values] of valuesByKind) {
     for (const value of values) {
       current.data.trusted_ids = current.data.trusted_ids.filter((receipt: Json) =>
@@ -423,6 +496,14 @@ function recordTrustedIds(event: Json, tool: string, rootDir: string): void {
       });
     }
   }
+  if (validatedRequirementId) {
+    current.data.latest_requirement_id = {
+      value: validatedRequirementId,
+      source_tool: "validate_requirement",
+      observed_at_ms: now,
+      expires_at_ms: now + TRUSTED_ID_TTL_MS,
+    };
+  }
   save(current.path, current.data);
 }
 
@@ -431,6 +512,13 @@ function hasTrustedId(rootDir: string, kind: string, value: unknown): boolean {
   return store(rootDir).data.trusted_ids.some((receipt: Json) =>
     receipt.kind === kind && receipt.value === value.trim()
   );
+}
+
+function latestRequirementId(data: Json): string | undefined {
+  const binding = data.latest_requirement_id;
+  return binding && typeof binding === "object" && binding.source_tool === "validate_requirement" && text(binding.value)
+    ? binding.value.trim()
+    : undefined;
 }
 
 function recordValue(value: unknown): Json | undefined {
@@ -1405,6 +1493,8 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
   const current = store(rootDir);
   const promptGateFailure = promptRequirementGate(raw, input, current);
   if (promptGateFailure) return promptGateFailure;
+  const readyFailure = readyRequirementFailure(raw, input, current);
+  if (readyFailure) return readyFailure;
   if (SHELL_TOOLS.has(raw.toLowerCase())) {
     const command = [input.command, input.cmd, input.script, input.input].filter(text).join("\n");
     return PROVIDER_WRITE_TARGET.test(command) && SHELL_WRITE_CLIENT.test(command)
@@ -1419,6 +1509,21 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
   if (issues.length > 0) {
     const first = issues[0];
     return deny(first.code, `${first.path}: ${first.message}`);
+  }
+  if (tool === "search_creators") {
+    const expectedId = latestRequirementId(current.data);
+    if (!expectedId) {
+      return deny(
+        "ID_PROVENANCE_REQUIRED",
+        "$.id must equal data.id from the latest successful validate_requirement response; demand_id and invented IDs are not accepted.",
+      );
+    }
+    if (input.id.trim() !== expectedId) {
+      return deny(
+        "ID_PROVENANCE_MISMATCH",
+        "$.id does not equal data.id from the latest successful validate_requirement response; never substitute demand_id or demand_version.",
+      );
+    }
   }
   if (tool === "get_creator_detail" && !hasTrustedId(rootDir, "kwUid", input.kwUid)) {
     return deny(
@@ -1478,6 +1583,7 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
     if (emptyField) {
       return blockRequirement(deny("BLOCKED_REQUIREMENT_INCOMPLETE", `payload.${emptyField[0]} is empty; omit optional fields and clarify required fields before validation.`));
     }
+    markReadyRequirementInFlight(current, payload);
   }
   if (tool === "rank_mcns") return authorizeSupplyPlan(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined);
   if (tool === "create_with_distributions") {
@@ -1486,14 +1592,55 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
   return undefined;
 }
 
+function explicitToolFailureCode(event: Json): string | undefined {
+  const root = unwrap(event.result);
+  if (!event.error && (!root || typeof root !== "object" || (root.success !== false && root.isError !== true))) {
+    return undefined;
+  }
+  const error = event.error ?? root?.error;
+  const candidate = error && typeof error === "object"
+    ? error.code ?? error.error_code ?? error.name
+    : undefined;
+  const code = [candidate, root?.code, root?.error_code].find(text);
+  return code ? code.trim().replace(/[^A-Za-z0-9_-]/g, "_") : "MCP_TOOL_FAILED";
+}
+
+function settleReadyRequirement(event: Json, input: Json, rootDir: string): void {
+  const current = store(rootDir);
+  const binding = current.data.ready_requirement_binding;
+  const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
+  if (!binding || typeof binding !== "object" || binding.status !== "in_flight" ||
+    binding.payload_fingerprint !== fingerprint(payload)) return;
+  binding.status = successful(event.error ? { isError: true } : event.result) ? "validated" : "failed";
+  binding.updated_at_ms = Date.now();
+  current.data.ready_requirement_binding = binding;
+  save(current.path, current.data);
+}
+
+function recordFailedContinuousTool(event: Json, tool: string, rootDir: string): void {
+  if (tool !== "validate_requirement" && tool !== "search_creators") return;
+  const code = explicitToolFailureCode(event);
+  if (!code) return;
+  recordBlockedToolResult(
+    rootDir,
+    deny(code, `${tool} returned an explicit failure; stop without retrying or switching Tools until the next user turn.`),
+  );
+}
+
 export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
   const raw = String(event.toolName ?? event.name ?? "").trim();
   const input = event.params && typeof event.params === "object" ? event.params :
     event.arguments && typeof event.arguments === "object" ? event.arguments : {};
   const tool = normalize(raw);
   if (tool) recordTrustedIds(event, tool, rootDir);
+  if (tool === "validate_requirement") {
+    settleReadyRequirement(event, input, rootDir);
+    recordFailedContinuousTool(event, tool, rootDir);
+    return;
+  }
   if (tool === "search_creators") {
     recordSupplyPlan(event, input, rootDir);
+    recordFailedContinuousTool(event, tool, rootDir);
     return;
   }
   if (tool === "get_workflow_state") {

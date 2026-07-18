@@ -306,15 +306,12 @@ describe("YP Action native hook guard", () => {
   });
 
   it("keeps tool references aligned with fail-closed requirement and recovery gates", () => {
-    const validateReference = readFileSync(new URL("../skills/media-assistant/references/tools/validate_requirement.md", import.meta.url), "utf8");
-    const rankReference = readFileSync(new URL("../skills/media-assistant/references/tools/rank_creators.md", import.meta.url), "utf8");
+    const executionReference = readFileSync(new URL("../skills/media-assistant/references/execution-gates.md", import.meta.url), "utf8");
     const intakeReference = readFileSync(new URL("../skills/media-assistant/references/requirement-intake.md", import.meta.url), "utf8");
-    assert.doesNotMatch(validateReference, /待澄清才写 `draft`|待澄清项时才传 `status: "draft"`/);
-    assert.match(validateReference, /不得传 `status: "draft"`/);
-    assert.match(rankReference, /企微外发已成功/);
-    assert.match(rankReference, /回收完成/);
-    assert.doesNotMatch(rankReference, /不强制这些证据一定来自 MCN 回收/);
-    assert.match(intakeReference, /省略 `demandVersion`/);
+    assert.match(intakeReference, /不得传 `draft`/);
+    assert.match(executionReference, /真实外发/);
+    assert.match(executionReference, /全部回收/);
+    assert.match(intakeReference, /省略 `id\/demandVersion`/);
     assert.doesNotMatch(intakeReference, /将 `demandVersion` 递增后再调用/);
   });
 
@@ -339,13 +336,18 @@ describe("YP Action native hook guard", () => {
   it("allows read-only reference searches that mention a provider tool", async () => {
     const result = await hooks.get("before_tool_call")({
       toolName: "exec",
-      params: { command: "grep -n create_with_distributions references/phase-tool-matrix.md" },
+      params: { command: "grep -n create_with_distributions references/execution-gates.md" },
       toolCallId: "call-doc-search",
     }, {});
     assert.equal(result, undefined);
   });
 
   it("validates every declared MCP call without requiring sessionKey", async () => {
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload() },
+      result: { success: true, data: { id: "req-1" }, error: null },
+    }, {});
     const valid = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__search_creators",
       params: { id: "req-1" },
@@ -362,7 +364,7 @@ describe("YP Action native hook guard", () => {
     assert.match(invalid.blockReason, /INVALID_INPUT/);
   });
 
-  it("stops the turn after a non-BLOCKED Hook denial", async () => {
+  it("stops the turn after any non-continuation Hook denial", async () => {
     await hooks.get("before_prompt_build")({ prompt: "恢复状态", messages: [] }, {});
     const invalid = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__get_workflow_state",
@@ -376,6 +378,18 @@ describe("YP Action native hook guard", () => {
     }, {});
     assert.match(retried.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT/);
     assert.match(retried.blockReason, /INVALID_INPUT/);
+
+    await hooks.get("before_prompt_build")({ prompt: "具体守卫优先", messages: [] }, {});
+    await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__get_workflow_state",
+      params: { demand_id: "demand-2" },
+    }, {});
+    const specific = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params: distributionParams({ projectName: "具体守卫优先测试" }),
+    }, {});
+    assert.match(specific.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*INVALID_INPUT/);
+    assert.doesNotMatch(specific.blockReason, /WORKFLOW_STATE_REFRESH_REQUIRED/);
 
     await hooks.get("before_prompt_build")({ prompt: "用户明确重试", messages: [] }, {});
     assert.equal(await hooks.get("before_tool_call")({
@@ -522,6 +536,7 @@ describe("YP Action native hook guard", () => {
       requirementPayload({ rawMessagesJson: "{\"role\":\"client\"}" }),
       requirementPayload({ note: "__UNRESOLVED__" }),
     ]) {
+      await hooks.get("before_prompt_build")({ prompt: "invalid requirement payload", messages: [] }, {});
       const blocked = await hooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__validate_requirement",
         params: { payload },
@@ -532,7 +547,7 @@ describe("YP Action native hook guard", () => {
     }
   });
 
-  it("blocks same-turn mapped-to-preserved rewrites after a requirement denial", async () => {
+  it("blocks every same-turn rewrite after a requirement denial", async () => {
     await hooks.get("before_prompt_build")({ prompt: "新需求", messages: [] }, {});
     const first = requirementPayload({ quantityTotal: 0, rebate: "[0.3,0.3]" });
     first.rawMessagesJson.originalBrief += "，返点30%";
@@ -560,8 +575,7 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__validate_requirement",
       params: { payload: rewritten },
     }, {});
-    assert.match(downgrade.blockReason, /BLOCKED_REQUIREMENT_SEMANTIC_REWRITE/);
-    assert.match(downgrade.blockReason, /rebate/);
+    assert.match(downgrade.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*BLOCKED_REQUIREMENT_INCOMPLETE/);
 
     await hooks.get("before_prompt_build")({ prompt: "用户明确修正", messages: [] }, {});
     const nextTurn = await hooks.get("before_tool_call")({
@@ -648,6 +662,7 @@ describe("YP Action native hook guard", () => {
     assert.equal(blockedMissing.block, true);
     assert.match(blockedMissing.blockReason, /kolOfficialPriceL1\/L2\/L3 is business-required/);
 
+    await hooks.get("before_prompt_build")({ prompt: "invalid unit budget serialization", messages: [] }, {});
     const blockedInvalid = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__validate_requirement",
       params: { payload: requirementPayload({ kolOfficialPriceL1: "5000" }) },
@@ -657,6 +672,7 @@ describe("YP Action native hook guard", () => {
     assert.match(blockedInvalid.blockReason, /canonical non-negative range string/);
 
     for (const kolOfficialPriceL1 of ["[0,0]", "[5000,3000]", "[0, 5000]", [0, 5000]]) {
+      await hooks.get("before_prompt_build")({ prompt: "invalid unit budget range", messages: [] }, {});
       const blockedRange = await hooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__validate_requirement",
         params: { payload: requirementPayload({ kolOfficialPriceL1 }) },
@@ -688,6 +704,7 @@ describe("YP Action native hook guard", () => {
       { femaleRate: "[0, 0.5]" },
       { femaleRateMin: 0, femaleRateMax: 0.5 },
     ]) {
+      await hooks.get("before_prompt_build")({ prompt: "invalid range serialization", messages: [] }, {});
       const blocked = await hooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__validate_requirement",
         params: { payload: requirementPayload(overrides) },
@@ -706,6 +723,7 @@ describe("YP Action native hook guard", () => {
       requirementPayload({ contentFeatureLabel: "种草" }),
       requirementPayload({ projectStartStart: "2099/07/01" }),
     ]) {
+      await hooks.get("before_prompt_build")({ prompt: "invalid requirement field", messages: [] }, {});
       const blocked = await hooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__validate_requirement",
         params: { payload },
@@ -907,6 +925,7 @@ describe("YP Action native hook guard", () => {
     assert.equal(disallowed.block, true);
     assert.match(disallowed.blockReason, /BLOCKED_WORKFLOW_ACTION/);
 
+    await hooks.get("before_prompt_build")({ prompt: "检查另一个项目的状态", messages: [] }, {});
     await recordWorkflowState("另一个项目");
     const mismatch = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-state-mismatch",

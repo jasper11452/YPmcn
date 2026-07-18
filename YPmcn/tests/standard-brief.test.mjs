@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { parseStandardBrief, renderStandardBriefReply } from "../dist/standard-brief.js";
+import {
+  buildStandardBriefReadyPayload,
+  extractStandardBrief,
+  parseStandardBrief,
+  renderStandardBriefReply,
+} from "../dist/standard-brief.js";
 
 const EXACT_BRIEF = "品牌：阿里巴巴；项目：千问61儿童节；平台：小红书；档期：2026-07-30至2026-07-31；价格：4w以下；返点：30%以上；内容：类似于AI帮忙送儿童节礼物；账号类型：母婴类，亲子相关；数量：5个；提报截止：2026-07-20 11:00。";
 
 function assertExactPreview(preview) {
   assert.equal(preview.gate, "semantic_ambiguity");
   assert.deepEqual(preview.missingRequired, []);
-  assert.deepEqual(preview.semanticAmbiguities, ["creatorPriceTier", "accountTaxonomy"]);
+  assert.deepEqual(preview.semanticAmbiguities, ["creatorPriceTier"]);
   assert.deepEqual(preview.projection, {
     brandName: "阿里巴巴",
     projectName: "千问61儿童节",
@@ -23,8 +28,8 @@ function assertExactPreview(preview) {
   assert.deepEqual(preview.summary, {
     atomCount: 11,
     mappedCount: 9,
-    preservedCount: 0,
-    unresolvedCount: 2,
+    preservedCount: 1,
+    unresolvedCount: 1,
   });
 
   const schedules = preview.atoms.filter((atom) => atom.field === "projectStartStart" || atom.field === "projectStartEnd");
@@ -59,14 +64,82 @@ describe("deterministic standard Brief parser", () => {
     }
   });
 
+  it("resolves a yearless Chinese deadline from the authoritative clock and preserves account direction", () => {
+    const brief = [
+      "品牌：阿里巴巴",
+      "项目：千问61儿童节",
+      "平台：小红书",
+      "合作形式：图文",
+      "档期：7.30-7.31",
+      "单价：4w以下",
+      "返点：30%以上",
+      "内容：类似于AI帮忙送儿童节礼物",
+      "账号类型：母婴类，亲子相关",
+      "数量：5个",
+      "提报时间：7月20号上午11:00",
+    ].join("\n");
+    const preview = parseStandardBrief(brief, new Date("2026-07-18T15:44:56Z"), "Asia/Shanghai");
+
+    assert.equal(preview.gate, "ready");
+    assert.deepEqual(preview.missingRequired, []);
+    assert.deepEqual(preview.semanticAmbiguities, []);
+    assert.equal(preview.projection.submissionDeadlineAt, "2026-07-20 11:00:00");
+    assert.equal(preview.projection.kolOfficialPriceL1, "[0,40000]");
+    assert.deepEqual(preview.summary, { atomCount: 11, mappedCount: 8, preservedCount: 3, unresolvedCount: 0 });
+    assert.deepEqual(preview.atoms.find((atom) => atom.field === "accountTaxonomy"), {
+      sourceText: "账号类型：母婴类，亲子相关",
+      field: "accountTaxonomy",
+      resolution: "preserved",
+      disposition: "preserved",
+      preservedText: "账号类型：母婴类，亲子相关",
+      confidence: 1,
+      inferred: false,
+    });
+  });
+
+  it("selects the last complete structured Brief instead of a field label quoted in operator instructions", () => {
+    const brief = [
+      "品牌：阿里巴巴",
+      "项目：千问61儿童节",
+      "平台：小红书",
+      "合作形式：图文",
+      "档期：7.30-7.31",
+      "单价：4w以下",
+      "返点：25%以上",
+      "内容：类似于AI帮忙送儿童节礼物",
+      "账号类型：母婴类，亲子相关",
+      "数量：5个",
+      "提报时间：7月20号上午11:00",
+    ].join("\n");
+    const prompt = [
+      "只使用权威 Preview，尤其是“返点：25%以上”）。若校验成功",
+      "再调用一次 search_creators",
+      "任何 Hook/MCP 失败立即停止",
+      "不重试。继续禁止所有外发。",
+      "```brief",
+      brief,
+      "```",
+    ].join("\n");
+
+    assert.equal(extractStandardBrief(prompt), brief);
+    const preview = parseStandardBrief(prompt, new Date("2026-07-18T15:44:56Z"), "Asia/Shanghai");
+    const payload = buildStandardBriefReadyPayload(prompt, preview);
+    assert.equal(preview.gate, "ready");
+    assert.deepEqual(preview.summary, { atomCount: 11, mappedCount: 8, preservedCount: 3, unresolvedCount: 0 });
+    assert.equal(preview.projection.rebate, "[0.25,1]");
+    assert.equal(payload.rawMessagesJson.originalBrief, brief);
+    assert.equal(payload.rawMessagesJson.atoms.length, 11);
+    assert.ok(payload.rawMessagesJson.atoms.every((atom) => !/search_creators|Hook\/MCP|禁止所有外发/.test(atom.sourceText)));
+  });
+
   it("extracts the labeled Brief from operator instructions and renders one exact reply", () => {
     const preview = parseStandardBrief(`请输出权威预览并且确认前不要调用任何 Tool。${EXACT_BRIEF}`);
     assertExactPreview(preview);
     const reply = renderStandardBriefReply(preview);
     assert.match(reply, /"gate": "semantic_ambiguity"/);
-    assert.match(reply, /"unresolvedCount": 2/);
+    assert.match(reply, /"unresolvedCount": 1/);
     assert.match(reply, /价格口径/);
-    assert.match(reply, /账号类型/);
+    assert.doesNotMatch(reply, /若为 taxonomy/);
     assert.match(reply, /确认完成前不得调用任何 Tool/);
     assert.doesNotMatch(reply, /请输出权威预览/);
   });

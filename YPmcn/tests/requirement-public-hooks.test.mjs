@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,19 @@ const QWEN_BRIEF = [
 
 const DESCRIPTION = "图文为主；段子梗图表情包、AI深度使用/创作者、颜值或P图攻略、二次元（柯南优先）、明星粉丝P图偶像变小";
 const EXACT_SEMICOLON_BRIEF = "品牌：阿里巴巴；项目：千问61儿童节；平台：小红书；档期：2026-07-30至2026-07-31；价格：4w以下；返点：30%以上；内容：类似于AI帮忙送儿童节礼物；账号类型：母婴类，亲子相关；数量：5个；提报截止：2026-07-20 11:00。";
+const LIVE_BRIEF = [
+  "品牌：阿里巴巴",
+  "项目：千问61儿童节",
+  "平台：小红书",
+  "合作形式：图文",
+  "档期：7.30-7.31",
+  "单价：4w以下",
+  "返点：25%以上",
+  "内容：类似于AI帮忙送儿童节礼物",
+  "账号类型：母婴类，亲子相关",
+  "数量：5个",
+  "提报时间：7月20号上午11:00",
+].join("\n");
 
 function mapped(sourceText, targetField, inferred = false) {
   return { sourceText, disposition: "mapped", targetField, confidence: 1, inferred };
@@ -86,6 +99,11 @@ async function guard(toolName, params) {
   return hooks.get("before_tool_call")({ toolName, params }, {});
 }
 
+function authoritativePayload(result) {
+  const marker = "YPmcn authoritative validate_requirement arguments (use this object exactly; do not rebuild any field or audit atom):\n";
+  return JSON.parse(result.prependContext.slice(result.prependContext.indexOf(marker) + marker.length).split("\n", 1)[0]).payload;
+}
+
 before(() => {
   const template = join(rootDir, "skills", "media-assistant", "assets", "wecom_inquiry_template.txt");
   mkdirSync(dirname(template), { recursive: true });
@@ -100,19 +118,113 @@ before(() => {
 after(() => rmSync(rootDir, { recursive: true, force: true }));
 
 describe("requirement behavior through public plugin hooks", () => {
-  it("publishes the exact semicolon Brief preview with the semantic-ambiguity gate", async () => {
+  it("publishes the exact semicolon Brief preview with only the unresolved price gate", async () => {
     const result = await newTurn(EXACT_SEMICOLON_BRIEF);
     const marker = "YPmcn authoritative machine-readable requirement preview (do not recount, remap, or replace):\n";
     const preview = JSON.parse(result.prependContext.slice(result.prependContext.indexOf(marker) + marker.length).split("\n", 1)[0]);
 
     assert.equal(preview.gate, "semantic_ambiguity");
     assert.deepEqual(preview.missingRequired, []);
-    assert.deepEqual(preview.semanticAmbiguities, ["creatorPriceTier", "accountTaxonomy"]);
+    assert.deepEqual(preview.semanticAmbiguities, ["creatorPriceTier"]);
     assert.equal(preview.projection.quantityTotal, 5);
     assert.equal(preview.projection.rebate, "[0.3,1]");
-    assert.deepEqual(preview.summary, { atomCount: 11, mappedCount: 9, preservedCount: 0, unresolvedCount: 2 });
+    assert.deepEqual(preview.summary, { atomCount: 11, mappedCount: 9, preservedCount: 1, unresolvedCount: 1 });
     assert.match(result.prependContext, /YPmcn mandatory unresolved-Brief response: do not call any Tool/);
-    assert.match(result.prependContext, /<YPmcnExactReply>[\s\S]*"brandName": "阿里巴巴"[\s\S]*"unresolvedCount": 2[\s\S]*<\/YPmcnExactReply>/);
+    assert.match(result.prependContext, /<YPmcnExactReply>[\s\S]*"brandName": "阿里巴巴"[\s\S]*"unresolvedCount": 1[\s\S]*<\/YPmcnExactReply>/);
+  });
+
+  it("makes the live yearless Alibaba Brief ready without taxonomy clarification", async () => {
+    const result = await newTurn(LIVE_BRIEF);
+    const marker = "YPmcn authoritative machine-readable requirement preview (do not recount, remap, or replace):\n";
+    const preview = JSON.parse(result.prependContext.slice(result.prependContext.indexOf(marker) + marker.length).split("\n", 1)[0]);
+    const payload = authoritativePayload(result);
+
+    assert.equal(preview.gate, "ready");
+    assert.deepEqual(preview.missingRequired, []);
+    assert.deepEqual(preview.semanticAmbiguities, []);
+    assert.equal(preview.projection.submissionDeadlineAt.slice(5), "07-20 11:00:00");
+    assert.equal(preview.projection.kolOfficialPriceL1, "[0,40000]");
+    assert.equal(preview.projection.rebate, "[0.25,1]");
+    assert.equal(preview.atoms.find((atom) => atom.field === "accountTaxonomy")?.resolution, "preserved");
+    assert.equal(payload.status, "ready");
+    assert.equal(payload.rawMessagesJson.originalBrief, LIVE_BRIEF);
+    assert.equal(payload.rawMessagesJson.atoms.length, 11);
+    assert.doesNotMatch(result.prependContext, /YPmcn mandatory unresolved-Brief response/);
+  });
+
+  it("binds validate_requirement to the Ready Preview and stops every same-turn reconstruction retry", async () => {
+    const wrongFirstToolTurn = await newTurn(LIVE_BRIEF);
+    const exactFirstPayload = authoritativePayload(wrongFirstToolTurn);
+    const wrongFirstTool = await guard("search", { query: "候选达人" });
+    assert.match(wrongFirstTool.blockReason, /BLOCKED_REQUIREMENT_VALIDATION_REQUIRED.*only permitted Tool is validate_requirement/);
+    const firstToolRetry = await guard("mcp__ypmcn__validate_requirement", { payload: exactFirstPayload });
+    assert.match(firstToolRetry.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*BLOCKED_REQUIREMENT_VALIDATION_REQUIRED/);
+
+    for (const mutate of [
+      (payload) => { delete payload.rawMessagesJson; },
+      (payload) => { delete payload.status; },
+      (payload) => {
+        const rebate = payload.rawMessagesJson.atoms.find((atom) => atom.targetField === "rebate");
+        rebate.sourceText = "返点：25以上";
+      },
+    ]) {
+      const result = await newTurn(LIVE_BRIEF);
+      const exactPayload = authoritativePayload(result);
+      const rebuilt = structuredClone(exactPayload);
+      mutate(rebuilt);
+      const blocked = await guard("mcp__ypmcn__validate_requirement", { payload: rebuilt });
+      assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_PREVIEW_MISMATCH/);
+
+      const retried = await guard("mcp__ypmcn__validate_requirement", { payload: exactPayload });
+      assert.match(retried.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*BLOCKED_REQUIREMENT_PREVIEW_MISMATCH/);
+    }
+
+    const persisted = readFileSync(join(rootDir, "state", "confirmation_guard.json"), "utf8");
+    assert.match(persisted, /"payload_fingerprint": "[0-9a-f]{64}"/);
+    assert.doesNotMatch(persisted, /阿里巴巴|千问61儿童节|返点：25%以上/);
+  });
+
+  it("requires search_creators.id to equal the latest successful validate_requirement.data.id", async () => {
+    const result = await newTurn(LIVE_BRIEF);
+    const payload = authoritativePayload(result);
+    assert.equal(await guard("mcp__ypmcn__validate_requirement", { payload }), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload },
+      result: {
+        success: true,
+        data: { id: "requirement-row-id", demand_id: "demand-route-id", demand_version: 1 },
+        error: null,
+      },
+    }, {});
+
+    const wrong = await guard("mcp__ypmcn__search_creators", { id: "demand-route-id" });
+    assert.match(wrong.blockReason, /ID_PROVENANCE_MISMATCH.*data\.id/);
+    const correctedSameTurn = await guard("mcp__ypmcn__search_creators", { id: "requirement-row-id" });
+    assert.match(correctedSameTurn.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*ID_PROVENANCE_MISMATCH/);
+
+    await newTurn("用户开启新轮次并明确继续候选检索");
+    assert.equal(await guard("mcp__ypmcn__search_creators", { id: "requirement-row-id" }), undefined);
+  });
+
+  it("stops the turn after an explicit validate/search MCP failure", async () => {
+    const result = await newTurn(LIVE_BRIEF);
+    const payload = authoritativePayload(result);
+    assert.equal(await guard("mcp__ypmcn__validate_requirement", { payload }), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload },
+      result: { success: true, data: { id: "failed-search-requirement-id" }, error: null },
+    }, {});
+    assert.equal(await guard("mcp__ypmcn__search_creators", { id: "failed-search-requirement-id" }), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__search_creators",
+      params: { id: "failed-search-requirement-id" },
+      result: { success: false, data: null, error: { code: "DEMAND_NOT_FOUND" } },
+    }, {});
+
+    const retried = await guard("mcp__ypmcn__search_creators", { id: "failed-search-requirement-id" });
+    assert.match(retried.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*DEMAND_NOT_FOUND/);
   });
 
   it("short-circuits unresolved standard Briefs with one deterministic zero-Tool reply", async () => {
@@ -121,7 +233,7 @@ describe("requirement behavior through public plugin hooks", () => {
     assert.equal(result.reason, "ypmcn_requirement_semantic_ambiguity");
     assert.match(result.reply.text, /"gate": "semantic_ambiguity"/);
     assert.match(result.reply.text, /"brandName": "阿里巴巴"/);
-    assert.match(result.reply.text, /"unresolvedCount": 2/);
+    assert.match(result.reply.text, /"unresolvedCount": 1/);
     assert.match(result.reply.text, /确认完成前不得调用任何 Tool/);
     assert.doesNotMatch(result.reply.text, /请按权威预览解析/);
 
@@ -210,7 +322,7 @@ describe("requirement behavior through public plugin hooks", () => {
     }
   });
 
-  it("keeps unresolved price and natural-language account taxonomy behind semantic clarification", async () => {
+  it("preserves natural-language account direction while requiring confirmation for a direct taxonomy mapping", async () => {
     await newTurn("ambiguous unit price");
     const price = qwenPayload();
     delete price.kolOfficialPriceL1;

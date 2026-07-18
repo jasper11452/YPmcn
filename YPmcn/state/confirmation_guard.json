@@ -1,0 +1,9 @@
+{
+  "schema_version": 9,
+  "confirmations": {},
+  "trusted_ids": [],
+  "blocked_requirement_semantics": {},
+  "supply_plans": {},
+  "workflow_states": {},
+  "prompt_epoch": 0
+}

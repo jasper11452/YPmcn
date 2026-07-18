@@ -8,17 +8,21 @@ import {
   recordBlockedToolResult,
 } from "./runtime-hooks.js";
 import {
+  buildStandardBriefReadyPayload,
   isStandardBrief,
   parseStandardBrief,
   renderStandardBriefPreview,
+  renderStandardBriefReadyArguments,
   renderStandardBriefReply,
 } from "./standard-brief.js";
 
 export {
+  buildStandardBriefReadyPayload,
   extractStandardBrief,
   isStandardBrief,
   parseStandardBrief,
   renderStandardBriefPreview,
+  renderStandardBriefReadyArguments,
   renderStandardBriefReply,
 } from "./standard-brief.js";
 
@@ -118,12 +122,14 @@ export function createYpmcnPlugin(
       const now = new Date();
       const timeZone = localTimeZone();
       const preview = isStandardBrief(prompt) ? parseStandardBrief(prompt, now, timeZone) : undefined;
-      beginPromptTurn(rootDir, preview);
+      const readyPayload = preview ? buildStandardBriefReadyPayload(prompt, preview) : undefined;
+      beginPromptTurn(rootDir, preview, readyPayload);
       return {
         prependSystemContext: YPMCN_FAST_PATH,
         prependContext: [
           buildRequirementRuntimeClock(now, timeZone),
           preview ? renderStandardBriefPreview(preview) : "",
+          readyPayload ? renderStandardBriefReadyArguments(readyPayload) : "",
           preview && preview.gate !== "ready"
             ? `YPmcn mandatory unresolved-Brief response: do not call any Tool. Return the following response exactly, without recounting, paraphrasing, or adding text:\n<YPmcnExactReply>\n${renderStandardBriefReply(preview)}\n</YPmcnExactReply>`
             : "",
@@ -141,7 +147,9 @@ export function createYpmcnPlugin(
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         api.logger.error(`before_tool_call guard failed: ${reason}`);
-        return { block: true, blockReason: `YPmcn guard unavailable: ${reason}` };
+        const result = { block: true, blockReason: `YPmcn guard unavailable: ${reason}` };
+        recordBlockedToolResult(rootDir, result);
+        return result;
       }
     });
 

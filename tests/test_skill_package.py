@@ -10,22 +10,15 @@ PROFILE_PATH = ROOT / "spec" / "mcp.json"
 WORKFLOW_PATH = ROOT / "spec" / "workflow.json"
 SKILL = PACKAGE / "skills" / "media-assistant" / "SKILL.md"
 REFERENCES = SKILL.parent / "references"
-TOOLS_DIR = REFERENCES / "tools"
 SCHEMA = REFERENCES / "reference_schema.json"
 REQUIREMENT_CASES = ROOT / "tests" / "goldens" / "requirement_cases.json"
 REQUIREMENT_REGRESSIONS = ROOT / "tests" / "goldens" / "requirement_regressions.json"
 
 EXPECTED_REFERENCE_FILES = {
-    "ask-user-question-patterns.md",
+    "execution-gates.md",
     "form-field-mapping.md",
     "frontend-response.md",
-    "hook-behavior.md",
-    "mcp-tool-cheatsheet.md",
-    "contract-gate.md",
-    "phase-tool-matrix.md",
     "requirement-intake.md",
-    "requirement-parsing.md",
-    "validation-playbook.md",
 }
 
 
@@ -33,13 +26,15 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def section(text: str, heading: str) -> str:
-    match = re.search(
-        rf"^## {re.escape(heading)}\s*$\n(.*?)(?=^## |\Z)",
-        text,
-        re.MULTILINE | re.DOTALL,
+def count_han(text: str) -> int:
+    ranges = (
+        (0x3400, 0x4DBF),
+        (0x4E00, 0x9FFF),
+        (0xF900, 0xFAFF),
+        (0x20000, 0x2EBEF),
+        (0x30000, 0x323AF),
     )
-    return match.group(1) if match else ""
+    return sum(any(start <= ord(char) <= end for start, end in ranges) for char in text)
 
 
 class SkillPackageContractTest(unittest.TestCase):
@@ -75,69 +70,49 @@ class SkillPackageContractTest(unittest.TestCase):
             self.assertIn(f"references/{name}", text)
         for required in (
             "integration_required",
-            "sync → ingest → sync",
+            "execution-gates.md",
         ):
             self.assertIn(required, text)
         for path in SKILL.parent.rglob("*"):
             if path.is_file():
                 self.assertLessEqual(len(path.read_bytes().splitlines()), 50, path)
 
+    def test_skill_markdown_stays_within_three_thousand_han_characters(self):
+        markdown = [SKILL, *sorted(REFERENCES.rglob("*.md"))]
+        self.assertEqual(1 + len(EXPECTED_REFERENCE_FILES), len(markdown))
+        self.assertLessEqual(sum(count_han(read(path)) for path in markdown), 3000)
+
     def test_skill_stops_after_hook_block_without_semantic_rewrite(self):
-        text = read(SKILL)
+        text = "\n".join((read(SKILL), read(REFERENCES / "execution-gates.md")))
         for required in (
-            "Hook 返回任意阻断结果后",
+            "Hook 任意阻断后立即停止",
             '`details.status="blocked"`',
-            "不得自动改写 payload、把同一 ID 改作另一种查询模式",
+            "不改写 payload、ID 或已映射字段",
             '`details.deniedReason="plugin-before-tool-call"`',
-            "明确说明“未到达 MCP/Provider”",
-            "只有结果包含实际远程 MCP response evidence 时才可归因 MCP/Provider",
-            "禁止把已映射的真实业务字段（包括 `rebate`）降级为 `preserved`",
-            "用户要求“失败即停止”时绝不重试",
+            "未到 MCP/Provider",
+            "只有实际远程 response/trace 才能归因 MCP/Provider",
+            "用户要求失败即停时绝不重试",
         ):
             self.assertIn(required, text)
 
     def test_skill_requires_provenance_for_detail_and_write_ids(self):
         text = read(SKILL)
         for required in (
-            "逐项核对 ID 血缘",
-            "必须逐字复制自当前工作流中受信 Tool 的实际成功响应或已验证状态查询",
-            "不得用虚构 ID 调详情工具来探测其是否存在",
+            "核对 ID 血缘",
+            "实际成功响应或已验证状态返回的 ID",
+            "不得猜测、串用或用虚构 ID 探测详情",
             "integration_required",
         ):
             self.assertIn(required, text)
 
-    def test_every_declared_tool_has_one_structured_card(self):
-        actual = {path.stem for path in TOOLS_DIR.glob("*.md")}
-        documented_tools = self.all_tools - {"search_creator_tag_vectors"}
-        self.assertEqual(documented_tools, actual)
-        for name in documented_tools:
-            text = read(TOOLS_DIR / f"{name}.md")
-            self.assertTrue(text.startswith(f"# {name}\n"), name)
-            for heading in ("何时调用", "输入", "输出成功证据", "调用后必须停在哪里", "错误与停止条件"):
-                self.assertTrue(section(text, heading).strip(), f"{name}: {heading}")
-
-    def test_tool_card_inputs_and_success_evidence_derive_from_profile(self):
-        for name in self.all_tools - {"search_creator_tag_vectors"}:
-            contract = self.profile["tools"][name]
-            text = read(TOOLS_DIR / f"{name}.md")
-            input_text = section(text, "输入")
-            success_text = section(text, "输出成功证据")
-            error_text = section(text, "错误与停止条件")
-            for key in contract["required"]:
-                self.assertIn(f"`{key}`", input_text, f"{name}: required {key}")
-            for evidence in contract["successEvidence"]:
-                self.assertIn(evidence, success_text, f"{name}: evidence {evidence}")
-            for forbidden in contract["forbidden"]:
-                self.assertIn(f"`{forbidden}`", error_text, f"{name}: forbidden {forbidden}")
-
     def test_documented_id_routing_matches_current_endpoint(self):
-        routing = read(REFERENCES / "phase-tool-matrix.md")
+        routing = read(REFERENCES / "execution-gates.md")
         for mapping in (
-            "validate_requirement(payload)",
-            "search_creators(id)",
-            "rank_mcns(id, platform)",
-            "rank_creators(requirement_id, limit)",
-            "证据不足 → `integration_required`",
+            "需求身份来自 `validate_requirement`",
+            "`demand_id+demand_version` 只用于状态版本",
+            "`project_id+mcn_id+requirement_id` 绑定 distribution",
+            "`inquiry_id` 绑定回收",
+            "`run_id` 只来自精排或验证状态",
         ):
             self.assertIn(mapping, routing)
         for obsolete in (
@@ -146,26 +121,28 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertNotIn(obsolete, routing)
 
-    def test_workflow_reference_contains_exact_machine_phases_and_recovery_order(self):
-        text = read(REFERENCES / "phase-tool-matrix.md")
-        for phase in self.workflow["phases"]:
-            self.assertIn(f"`{phase}`", text)
+    def test_workflow_reference_routes_to_machine_contract_and_recovery_order(self):
+        text = read(REFERENCES / "execution-gates.md")
         for required in (
+            "spec/manifest.json",
+            "spec/mcp.json",
+            "spec/workflow.json",
             "workflow_state",
             "allowed_actions",
-            "数据库",
-            "started",
-            "succeeded/failed/unknown",
-            "不得盲目重试",
+            "sync → ingest_mcn_submissions → sync",
+            "禁止盲重试",
         ):
             self.assertIn(required, text)
+        self.assertEqual(len(self.workflow["phases"]), len(set(self.workflow["phases"])))
 
     def test_send_and_recovery_docs_are_fail_closed(self):
-        joined = "\n".join(read(path) for path in [SKILL, *REFERENCES.glob("*.md"), *TOOLS_DIR.glob("*.md")])
+        joined = "\n".join(read(path) for path in [SKILL, *REFERENCES.glob("*.md")])
         for required in (
-            "用户确认",
+            "confirm_distribution_send",
             "写结果未知",
-            "只有实际 MCP 返回算证据",
+            "只有实际 MCP 返回算成功证据",
+            "真实外发",
+            "全部回收",
         ):
             self.assertIn(required, joined)
         for pattern in (
@@ -176,18 +153,12 @@ class SkillPackageContractTest(unittest.TestCase):
             r"当前不创建\s*Cron",
         ):
             self.assertIsNone(re.search(pattern, joined, re.IGNORECASE), pattern)
-        ingest = read(TOOLS_DIR / "ingest_mcn_submissions.md")
-        self.assertIn("待部署后端源码已把本 Tool 接入 `mcp_tool_call_ledger`", ingest)
-        self.assertIn("当前远程响应给出 trace/重放证据", ingest)
-        self.assertNotIn("写入受 MCP 调用 Ledger 保护", ingest)
-
     def test_provider_contract_mismatch_is_a_hard_integration_error(self):
-        joined = "\n".join(read(path) for path in [SKILL, REFERENCES / "contract-gate.md", REFERENCES / "phase-tool-matrix.md"])
+        joined = "\n".join(read(path) for path in [SKILL, REFERENCES / "execution-gates.md"])
         for required in (
-            "当前 Endpoint schema 优先于旧 mvp-v2",
+            "Endpoint schema 优先",
             "select_inquiry_form_fields",
             "create_with_distributions",
-            "sync_mcn_inquiry_status",
             "integration_required",
         ):
             self.assertIn(required, joined)
@@ -196,49 +167,44 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_reference_file_inventory_is_exact(self):
         actual = {path.name for path in REFERENCES.glob("*.md")}
         self.assertEqual(EXPECTED_REFERENCE_FILES, actual)
+        self.assertFalse(any((REFERENCES / "tools").glob("*.md")))
 
     def test_requirement_parsing_routes_creator_price_to_official_price_tiers(self):
-        parsing = read(REFERENCES / "requirement-parsing.md")
         intake = read(REFERENCES / "requirement-intake.md")
-        tool_card = read(TOOLS_DIR / "validate_requirement.md")
-        joined = "\n".join((parsing, intake, tool_card))
+        schema_fields = {row["Field"] for row in json.loads(read(SCHEMA))["columns"]}
         for field in (
             "kolOfficialPriceL1",
             "kolOfficialPriceL2",
             "kolOfficialPriceL3",
         ):
-            self.assertIn(field, parsing)
-            self.assertIn(field, tool_card)
+            self.assertIn(field, intake)
         for required in (
-            "单人预算",
+            "单达人预算",
             "项目总预算",
             "小红书",
             "抖音",
-            "1–20 秒",
-            "21–60 秒",
+            "1–20",
+            "21–60",
             "60 秒以上",
             '"[min,max]"',
-            "当前表没有 `businessIndustry`",
             "不得杜撰字段",
         ):
-            self.assertIn(required, joined)
+            self.assertIn(required, intake)
+        self.assertNotIn("businessIndustry", schema_fields)
         for obsolete in (
             "`quantity_total`",
             "`submission_deadline_at`",
             "`content_requirements`",
             "`category_requirements`",
         ):
-            self.assertNotIn(obsolete, parsing)
+            self.assertNotIn(obsolete, intake)
 
     def test_requirement_intake_uses_three_state_gate_before_persistence(self):
         skill = read(SKILL)
-        parsing = read(REFERENCES / "requirement-parsing.md")
         intake = read(REFERENCES / "requirement-intake.md")
-        tool_card = read(TOOLS_DIR / "validate_requirement.md")
-        routing = read(REFERENCES / "phase-tool-matrix.md")
-        joined = "\n".join((skill, parsing, intake, tool_card, routing))
+        joined = "\n".join((skill, intake))
         for required in (
-            "原文保留",
+            "原文",
             "missing_required",
             "semantic_ambiguity",
             "`ready`",
@@ -246,13 +212,9 @@ class SkillPackageContractTest(unittest.TestCase):
             "__UNRESOLVED__",
             "ypmcn-brief-v1",
             "currentLocalDateTime",
-            "没有可用于该字段的具体候选值",
-            "没有数字的模糊数量",
-            "先完整生成缺失清单和歧义清单",
-            "原子需求",
-            'followercount: "[100000,300000]"',
-            'femaleRate: "[0.5,1]"',
-            'kolOfficialPriceL2: "[3000,5000]"',
+            "完整 Brief 拆成原子需求",
+            "缺失、歧义清单",
+            "30%+→[0.3,1]",
             '`{"payload": {..., "status": "ready"}}`',
         ):
             self.assertIn(required, joined)
@@ -430,39 +392,35 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_creator_search_field_authority_matches_current_database(self):
         texts = [
             read(SKILL),
-            read(TOOLS_DIR / "search_creators.md"),
-            read(TOOLS_DIR / "get_creator_detail.md"),
-            read(TOOLS_DIR / "ingest_mcn_submissions.md"),
-            read(TOOLS_DIR / "manual_source_creators.md"),
+            read(REFERENCES / "execution-gates.md"),
+            read(REFERENCES / "requirement-intake.md"),
         ]
         joined = "\n".join(texts)
         for required in (
             "kolOfficialPriceL1/L2/L3",
-            "达人—机构关系",
-            "不是机构实际返点",
+            "需求返点不是机构实际返点",
             "creator_id",
             "supplier_binding_id",
         ):
             self.assertIn(required, joined)
 
     def test_hook_reference_matches_registered_safe_event_surface(self):
-        text = read(REFERENCES / "hook-behavior.md")
+        text = read(REFERENCES / "execution-gates.md")
         for event in (
             "before_tool_call",
             "after_tool_call",
             "session_end",
         ):
             self.assertIn(f"`{event}`", text)
-        for required in ("TTL", "无会话依赖", "不记录完整 payload"):
+        for required in ("无会话依赖", "不记录完整 payload"):
             self.assertIn(required, text)
 
     def test_hook_docs_map_public_projection_to_machine_phases(self):
-        text = read(REFERENCES / "hook-behavior.md")
+        text = read(REFERENCES / "execution-gates.md")
         for required in (
-            "不要求 `sessionKey`",
             "不推进数据库 phase",
-            "workflow_state/allowed_actions",
-            "结果未知",
+            "workflow_state + allowed_actions",
+            "写结果未知",
         ):
             self.assertIn(required, text)
 
@@ -478,7 +436,7 @@ class SkillPackageContractTest(unittest.TestCase):
         for required in (
             "OpenClaw 插件、契约与 Native Node Hook",
             "provider checker",
-            "Skill、工具卡和文档一致性",
+            "Skill、按需引用和文档一致性",
             "旧 Python Hook 状态机已从当前验收门禁移除",
         ):
             self.assertIn(required, text)
@@ -500,7 +458,6 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_docs_do_not_embed_machine_paths_or_pip_install(self):
         paths = [ROOT / "AGENTS.md", ROOT / "CLAUDE.md", ROOT / "README.md", PACKAGE / "README.md", SKILL]
         paths.extend(REFERENCES.glob("*.md"))
-        paths.extend(TOOLS_DIR.glob("*.md"))
         joined = "\n".join(read(path) for path in paths if path.exists())
         self.assertNotIn("/Users/", joined)
         self.assertNotIn("pip install", joined)

@@ -33,13 +33,68 @@ export type StandardBriefPreview = {
 type LocatedAtom = StandardBriefPreviewAtom & { start: number; end: number };
 
 const REQUIRED_FIELDS = ["platform", "quantityTotal", "submissionDeadlineAt", "creatorPriceTier"] as const;
-const FIELD_LABEL = "(?:品牌|产品|项目|(?:发布|传播)?平台|档期|价格|单价|预算|报价|返点(?:要求)?|返佣|内容|账号类型|达人类型|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?)";
+const FIELD_LABEL = "(?:品牌|产品|项目|(?:发布|传播)?平台|档期|价格|单价|预算|报价|返点(?:要求)?|返佣|内容|账号类型|达人类型|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?(?:时间)?)";
+const BRIEF_BLOCK_LABEL = `(?:${FIELD_LABEL}|合作形式|参考账号)`;
+
+type BriefCandidate = {
+  start: number;
+  value: string;
+  fieldCount: number;
+};
+
+function fieldMatches(value: string): RegExpMatchArray[] {
+  return [...value.matchAll(new RegExp(`(${BRIEF_BLOCK_LABEL})\\s*[：:]`, "gi"))];
+}
+
+function structuredLine(value: string): boolean {
+  return new RegExp(`^\\s*(?:[-*]\\s*)?[“”"'「」『』]?\\s*${BRIEF_BLOCK_LABEL}\\s*[：:]`, "i").test(value);
+}
+
+function structuredBriefCandidates(input: string): BriefCandidate[] {
+  const lines = input.split("\n");
+  const offsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    offsets.push(offset);
+    offset += line.length + 1;
+  }
+
+  const candidates: BriefCandidate[] = [];
+  for (let index = 0; index < lines.length;) {
+    const matches = fieldMatches(lines[index]);
+    const startsWithField = structuredLine(lines[index]);
+    if (!startsWithField && matches.length < 3) {
+      index += 1;
+      continue;
+    }
+
+    const startInLine = matches[0]?.index ?? 0;
+    let endIndex = index + 1;
+    while (endIndex < lines.length && structuredLine(lines[endIndex])) endIndex += 1;
+    const value = [lines[index].slice(startInLine), ...lines.slice(index + 1, endIndex)].join("\n").trim();
+    const candidateFields = fieldMatches(value);
+    if (candidateFields.length >= 3) {
+      candidates.push({
+        start: offsets[index] + startInLine,
+        value,
+        fieldCount: candidateFields.length,
+      });
+    }
+    index = endIndex;
+  }
+  return candidates;
+}
 
 export function extractStandardBrief(input: string): string {
+  const candidates = structuredBriefCandidates(input);
+  const selected = candidates.reduce<BriefCandidate | undefined>((best, candidate) => {
+    if (!best || candidate.fieldCount > best.fieldCount) return candidate;
+    if (candidate.fieldCount === best.fieldCount && candidate.start > best.start) return candidate;
+    return best;
+  }, undefined);
   const firstField = new RegExp(`${FIELD_LABEL}\\s*[：:]`, "i").exec(input);
-  if (!firstField) return input.trim();
-  return input
-    .slice(firstField.index)
+  const value = selected?.value ?? (firstField ? input.slice(firstField.index) : input);
+  return value
     .trim()
     .replace(/[。！？!?]+$/g, "")
     .trim();
@@ -66,6 +121,24 @@ function localDate(now: Date, timeZone: string): Date {
   return new Date(Date.UTC(values.year, values.month - 1, values.day));
 }
 
+function dateTimeForMonthDay(now: Date, timeZone: string, month: number, day: number, hour: number, minute: number): string | undefined {
+  const today = localDate(now, timeZone);
+  let year = today.getUTCFullYear();
+  if (month < today.getUTCMonth() + 1 || (month === today.getUTCMonth() + 1 && day < today.getUTCDate())) year += 1;
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (candidate.getUTCFullYear() !== year || candidate.getUTCMonth() + 1 !== month || candidate.getUTCDate() !== day) return undefined;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+}
+
+function normalizedHour(hour: number, period: string | undefined): number | undefined {
+  if (hour > 23) return undefined;
+  if (!period) return hour;
+  if (hour > 12) return undefined;
+  if (/下午|晚上/.test(period)) return hour === 12 ? 12 : hour + 12;
+  if (/上午|早上/.test(period)) return hour === 12 ? 0 : hour;
+  return hour === 0 ? 12 : hour;
+}
+
 function dateTimeForRelativeDay(now: Date, timeZone: string, days: number, hour: number, minute: number): string {
   const date = localDate(now, timeZone);
   date.setUTCDate(date.getUTCDate() + days);
@@ -87,6 +160,7 @@ function addMatch(
   matches: LocatedAtom[],
   pattern: RegExp,
   build: (match: RegExpExecArray) => Omit<LocatedAtom, "start" | "end" | "sourceText"> | undefined,
+  allowOverlap = false,
 ): void {
   pattern.lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -95,7 +169,7 @@ function addMatch(
     if (!built) continue;
     const start = match.index;
     const end = start + match[0].length;
-    if (matches.some((item) => start < item.end && end > item.start)) continue;
+    if (!allowOverlap && matches.some((item) => start < item.end && end > item.start)) continue;
     matches.push({ ...built, sourceText: match[0], start, end });
   }
 }
@@ -205,7 +279,7 @@ export function parseStandardBrief(
       confidence: 1,
       inferred: false,
     };
-  });
+  }, true);
 
   addMatch(brief, matches, /(?:单达人|达人)?(?:价格|单价|预算|报价)\s*[：:]?\s*(?:L\s*[123]\s*)?(?:单达人|达人)?\s*(?:(?<lower>\d+(?:\.\d+)?)\s*(?<lowerUnit>[kKwW万千]?)\s*[-~～—至到]\s*(?<upper>\d+(?:\.\d+)?)\s*(?<upperUnit>[kKwW万千]?)|(?<exact>\d+(?:\.\d+)?)\s*(?<exactUnit>[kKwW万千]?))\s*元?\s*(?<upperOnly>以内|以下|封顶|之内)?/gi, (match) => {
     const range = priceRange(match);
@@ -233,11 +307,11 @@ export function parseStandardBrief(
     };
   });
 
-  addMatch(brief, matches, labeledFieldPattern("(?:账号类型|达人类型)"), () => ({
+  addMatch(brief, matches, labeledFieldPattern("(?:账号类型|达人类型)"), (match) => ({
     field: "accountTaxonomy",
-    resolution: "semantic_ambiguity",
-    candidates: ["contentTag", "pgyBloggerTypeLabel", "xtTalentTypeLabel"],
-    reason: "Natural-language account type cannot be assigned to a platform taxonomy without confirmation.",
+    resolution: "preserved",
+    disposition: "preserved",
+    preservedText: match[0],
     confidence: 1,
     inferred: false,
   }));
@@ -261,6 +335,23 @@ export function parseStandardBrief(
       disposition: "mapped",
       targetField: "submissionDeadlineAt",
       value: dateTimeForRelativeDay(now, timeZone, relative, hour, minute),
+      confidence: 1,
+      inferred: true,
+    };
+  });
+
+  addMatch(brief, matches, /(?:DDL|截止(?:时间)?|提报(?:截止)?(?:时间)?)\s*[：:]?\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?\s*(上午|早上|中午|下午|晚上)?\s*(\d{1,2})(?::|点)(\d{1,2})?\s*(?:前|之前)?/gi, (match) => {
+    const hour = normalizedHour(Number(match[4]), match[3]);
+    const minute = Number(match[5] ?? 0);
+    if (hour === undefined || minute > 59) return undefined;
+    const value = dateTimeForMonthDay(now, timeZone, Number(match[1]), Number(match[2]), hour, minute);
+    if (!value) return undefined;
+    return {
+      field: "submissionDeadlineAt",
+      resolution: "mapped",
+      disposition: "mapped",
+      targetField: "submissionDeadlineAt",
+      value,
       confidence: 1,
       inferred: true,
     };
@@ -382,6 +473,42 @@ export function parseStandardBrief(
 
 export function renderStandardBriefPreview(preview: StandardBriefPreview): string {
   return `YPmcn authoritative machine-readable requirement preview (do not recount, remap, or replace):\n${JSON.stringify(preview)}`;
+}
+
+export function buildStandardBriefReadyPayload(
+  input: string,
+  preview: StandardBriefPreview,
+): Record<string, unknown> | undefined {
+  if (preview.gate !== "ready" || preview.summary.unresolvedCount !== 0) return undefined;
+  const atoms = preview.atoms.map((atom) => {
+    if (!atom.sourceText || (atom.disposition !== "mapped" && atom.disposition !== "preserved")) return undefined;
+    const base = {
+      sourceText: atom.sourceText,
+      disposition: atom.disposition,
+      confidence: atom.confidence,
+      inferred: atom.inferred,
+    };
+    if (atom.disposition === "mapped" && atom.targetField) return { ...base, targetField: atom.targetField };
+    if (atom.disposition === "preserved" && atom.preservedText === atom.sourceText) {
+      return { ...base, preservedText: atom.preservedText };
+    }
+    return undefined;
+  });
+  if (atoms.some((atom) => atom === undefined)) return undefined;
+  return {
+    ...preview.projection,
+    rawMessagesJson: {
+      schemaVersion: "ypmcn-brief-v1",
+      originalBrief: extractStandardBrief(input),
+      atoms,
+      coverageCheck: { ...preview.summary },
+    },
+    status: "ready",
+  };
+}
+
+export function renderStandardBriefReadyArguments(payload: Record<string, unknown>): string {
+  return `YPmcn authoritative validate_requirement arguments (use this object exactly; do not rebuild any field or audit atom):\n${JSON.stringify({ payload })}`;
 }
 
 function ambiguityQuestion(field: string): string {

@@ -39,12 +39,12 @@
 | --- | --- | --- |
 | OpenClaw 插件、契约与 Native Node Hook | `npm run test:fast` | 当前 Node 门禁、业务契约和本地 vector MCP 协议 smoke |
 | OpenClaw 源码装载 | `npm run test:openclaw` | YP 内置 OpenClaw 能装载 Plugin/Skill/四个 typed Hook，并能注册 SSE 配置 |
-| 全仓库离线门禁 | `npm run verify` | Spec、文档、安装图、密钥扫描、Skill、工具卡、向量组件和发布包一致性 |
+| 全仓库离线门禁 | `npm run verify` | Spec、文档、安装图、密钥扫描、Skill 引用、向量组件和发布包一致性 |
 | provider checker（开发） | `npm run verify:provider` | 仅对当前开发 endpoint 执行 initialize 与 `tools/list`；网络和服务必须真实可达 |
 | provider checker（生产诊断） | `npm run verify:provider:prod` | 仅查看生产 endpoint 当前广告面，不产生业务写入 |
 | 真实业务链 | 《高效联调测试指南》§4 | 真实 Agent → MCP → 开发库 → 测试企微 → 回收 → CSV → 新 session 恢复 |
 
-旧 Python Hook 状态机已从当前验收门禁移除，也不进入发布包。`tests/test_hooks.py` 与 `YPmcn/hooks/*.py` 目前只保留为历史回归工件，需要考古时显式运行 `npm run test:legacy-hooks`；其结果不是当前执行面或 workflow 恢复证据。Skill、工具卡和文档一致性继续由 `npm run verify` 检查。
+旧 Python Hook 状态机已从当前验收门禁移除，也不进入发布包。`tests/test_hooks.py` 与 `YPmcn/hooks/*.py` 目前只保留为历史回归工件，需要考古时显式运行 `npm run test:legacy-hooks`；其结果不是当前执行面或 workflow 恢复证据。Skill、按需引用和文档一致性继续由 `npm run verify` 检查。
 
 这些命令在当前 SHA 通过时，只能同时证明：
 

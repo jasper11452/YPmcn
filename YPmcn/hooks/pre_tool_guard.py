@@ -81,16 +81,13 @@ ISO_WITH_TIMEZONE = re.compile(
 SEND_ROLES = {"media", "procurement"}
 
 COMMON_REFERENCES = [
-    "references/contract-gate.md",
-    "references/phase-tool-matrix.md",
+    "references/execution-gates.md",
 ]
 
 SCENARIO_REFERENCES = {
-    "validate_requirement": ["references/requirement-intake.md", "references/requirement-parsing.md"],
-    "select_inquiry_form_fields": ["references/form-field-mapping.md", "references/ask-user-question-patterns.md"],
-    "create_with_distributions": ["references/form-field-mapping.md", "references/ask-user-question-patterns.md"],
-    "sync_mcn_inquiry_status": ["references/hook-behavior.md"],
-    "ingest_mcn_submissions": ["references/hook-behavior.md"],
+    "validate_requirement": ["references/requirement-intake.md"],
+    "select_inquiry_form_fields": ["references/form-field-mapping.md"],
+    "create_with_distributions": ["references/form-field-mapping.md", "references/frontend-response.md"],
     "record_client_feedback": ["references/frontend-response.md"],
 }
 
@@ -111,8 +108,8 @@ def get_session(state_data, session_key):
 
 
 def reference_context(tool):
-    references = [f"references/tools/{tool}.md", *COMMON_REFERENCES]
-    references.extend(SCENARIO_REFERENCES.get(tool, ["references/mcp-tool-cheatsheet.md"]))
+    references = [*COMMON_REFERENCES]
+    references.extend(SCENARIO_REFERENCES.get(tool, []))
     ordered = list(dict.fromkeys(references))
     return (
         "SOFT_REFERENCE_GATE: Before executing this tool, read the current Skill references: "
