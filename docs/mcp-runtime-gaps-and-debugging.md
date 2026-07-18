@@ -1,20 +1,20 @@
 # 开发 MCP 现状、修复清单与联合调试
 
-基线：开发 Provider `http://192.168.0.129:32008/sse`，15 个公开工具，MySQL 数据库 `ypmcn`。本文记录尚未在 MCP 服务端修复的问题；Skill、Hook 和 Spec 不得把目标能力写成当前能力。
+基线：开发与生产 Provider 统一使用 `https://mcp.eshypdata.com/sse`，正式契约要求 15 个业务工具，MySQL 数据库为 `ypmcn`。当前 endpoint 的写行为、幂等和恢复链仍需真实联调验证；Skill、Hook 和 Spec 不得把未验证源码写成线上能力。
 
 ## 当前问题与后果
 
 ### 1. 询价状态没有真正同步
 
-`sync_mcn_inquiry_status` 当前只读写 `mcn_inquiry_status_syncs`，不访问供应商侧状态，也不创建或更新 `mcn_inquiries`。`create_with_distributions` 又只写外部项目 API，因此后续 `ingest_mcn_submissions` 找不到本地 inquiry，主链可能在回收前断开。
+远程已部署版本尚未复核。独立后端工作树现已读取 `core_project/core_distribution/core_notificationlog`，先验证机构属于当前需求与平台的 MCN 推荐，再按 `mcn_recommendation_item_id + attempt_no` 创建或更新 `mcn_inquiries`，并幂等更新 `mcn_inquiry_status_syncs`。重复 sync 单测保持同一 inquiry；外部显示 submitted 但行尚未 ingest 时，工作流停在 `returned_not_ingested`。
 
-修复：以 `project_id + mcn_id` 查询外部项目和分发状态；在事务中 upsert `mcn_inquiries`，保存外部状态、最后同步时间、错误和来源版本；返回稳定的 `inquiry_id`、状态及是否可 ingest。重复调用按同一业务键幂等。
+剩余验收：部署后用真实 project/supplier 执行首次 sync、回收、ingest、再次 sync，并在新 session 仅凭需求身份恢复；不能用本地单测替代。
 
 ### 2. 幂等账本没有启用
 
-`mcp_tool_call_ledger` 表存在但为 0 行，工具实现没有统一使用它。后果是未知结果后无法凭 `toolCallId` 对账，外部创建、批次创建和人工调整存在重复写风险，也无法统一追踪一次调用的最终结果。
+真实开发库的 `mcp_tool_call_ledger` 仍为 0 行，说明部署态尚未产生证据。独立后端工作树已把 10 个本地写入口和 1 个外部创建入口接入统一包装器：同 key/hash 重放原结果，不同 hash 冲突，本地失败回滚业务写，外部响应未知持久化为 unknown 并禁止重发。
 
-修复：所有业务写在事务入口登记 `toolCallId + tool + business_key + request_hash`；成功保存响应摘要和资源 ID；相同 key/hash 返回原结果，不同 hash 冲突；外部调用采用 pending → succeeded/failed/unknown 状态，并提供 reconcile。
+剩余验收：MCP 中间层必须在同一业务意图及自动重试中转发稳定 `Idempotency-Key`；外部 API 还需明确持久化该键或提供按键查询。状态 sync 没有显式 key 时允许重新读取最新快照，因为其业务写本身按唯一键 upsert；这不能推广到其他写 Tool。
 
 ### 3. “审计”并未真正启用
 
@@ -22,11 +22,11 @@
 
 修复：新增不可变 `audit_events`，至少记录 actor、toolCallId、entity、entity_id、before、after、reason、trace_id、created_at；业务更新与事件写入同一事务。读取历史只查事件，禁止 update/delete 审计行。
 
-### 4. 需求预算语义被代理层错误转换
+### 4. 需求范围必须在 Agent 调用前规范化
 
-`budgetMinCents/budgetMaxCents/budgetRaw` 只表示项目总预算。用户说“单个达人预算/单人价格/达人报价”时，应写 `kolOfficialPriceL1/L2/L3`（人民币元），不能写 budget。未说明档位时必须让用户选择；抖音 L1/L2/L3 对应 1–20 秒、21–60 秒、60 秒以上。
+`customer_demands` 与 `field_match_mapping` 已确认是权威。Agent 调 `validate_requirement` 前，把范围字段统一为无空格字符串 `"[min,max]"`；上限条件例如“不超过 50%”写 `"[0,0.5]"`。单达人预算写 `kolOfficialPriceL1/L2/L3`（人民币元范围），未说明档位时询问；项目总预算没有专用列，只在 `rawMessagesJson` 保留原文。
 
-当前代理层仍可能把达人价格区间归一到 budget，后果是搜索按总预算误筛、单位错位并污染需求记录。修复 `_normalize_validate_requirement_payload`：只有明确“项目总预算/整体预算”才生成 budget；单达人金额仅写已确认报价档位，区间在服务端提供正式范围字段前保留原文并返回待确认。
+Skill/Hook 已阻断自然语言范围、数组、倒序、比例大于 1、虚构字段和缺少报价档位的请求。后端只按 `(platform,source_field_name,match_status='已匹配')` 拆成已确认的目标 Min/Max，Agent 不生成目标字段名。
 
 ### 5. 广告参数有名无实
 
@@ -39,7 +39,7 @@
 
 ### 6. 供应商返点事实源写错
 
-`creator_supply_offers` 没有持久化价格/返点列；当前供应商返点事实源是 `core_supplier.default_rebate_rate`，通过 `creator_supply_offers.supplier_id` 关联。需求中的 `rebateMinRate/rebateMaxRate` 只是筛选条件，不能当作供应商实际返点。
+`creator_supply_offers` 没有持久化价格/返点列；当前供应商返点事实源是 `core_supplier.default_rebate_rate`，通过 `creator_supply_offers.supplier_id` 关联。需求中的 `customer_demands.rebate` 只是客户原始要求，不能当作供应商实际返点。
 
 ## 逐工具数据库事实
 
@@ -50,7 +50,7 @@
 | `rank_mcns` | 读需求/候选/offer/supplier；写 `mcn_recommendation_items`；返回 `mcn_run_id` |
 | `select_inquiry_form_fields` | 本地网页/回调，不读写业务库 |
 | `create_with_distributions` | 写外部项目 API，不写开发 MySQL |
-| `sync_mcn_inquiry_status` | 仅读写 `mcn_inquiry_status_syncs` |
+| `sync_mcn_inquiry_status` | 本地待部署源码读发送方三表，upsert `mcn_inquiries` 与同步元数据 |
 | `ingest_mcn_submissions` | 读 inquiry/demand/supplier；写 submissions/offers/candidates/平台达人 |
 | `manual_source_creators` | 写 candidates/offers/平台达人 |
 | `rank_creators` | 读 candidates/offers/平台达人/MCN 推荐；写 runs/items |
@@ -65,11 +65,11 @@
 
 日常开发固定走四层，只有发布候选才打包：
 
-1. `npm run test:fast`：源码 Hook + 真实 stdio MCP 协议，先抓协议、字段和 phase 错误。
+1. `npm run test:fast`：源码 Plugin/Hook/契约回归，先抓字段、确认门禁和 phase 错误。
 2. `npm run verify:provider`：直接对开发 SSE 做 `initialize + tools/list` 契约快照，发现工具/参数漂移。
 3. Hook 响应回放：把脱敏后的真实工具响应作为测试 fixture 输入 `runtime-hooks`，验证 `mcn_run_id`、价格、返点、unknown outcome 和 phase，不需要启动桌面端。
 4. `npm run test:openclaw`：从源码加载 Plugin/Skill，使用隔离配置检查宿主装载。
 
 联调建议新增服务端测试接口或脚本：用测试 demand 调 15 个工具中的只读工具和可回滚写工具；MySQL 写测试放事务后 rollback，外部写使用 sandbox/fake adapter。每次 MCP 修改自动导出 `tools/list` 和脱敏响应 fixture，仓库 CI 对比 Spec、Tool 文档与 Hook 回放。
 
-发布候选才运行 `npm run pack:yp` 并在 YP Action/OpenClaw 做一次安装器、配置同步和桌面交互冒烟。当前演示包明确写入开发 SSE，不代表生产地址已验收。
+发布候选才运行 `npm run pack:yp` 并在 YP Action/OpenClaw 做安装器冒烟，随后必须按《高效联调测试指南》用真实需求完成 Agent → MCP → 开发库 → 测试企微 → 回收 → CSV → 新 session 恢复的 Live E2E。当前包写入统一远程 SSE；只读契约检查不能替代远程写行为与 Live E2E。宿主对 bundle remote SSE 的自动注册仍需在干净 YP Action 安装环境验证。

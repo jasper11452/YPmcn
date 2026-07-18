@@ -1,12 +1,12 @@
-# YPmcn v3 集成与上线就绪报告
+# YPmcn 3.0.8 集成与上线就绪报告
 
-日期：2026-07-12
+日期：2026-07-18
 
 目标契约：`mvp-v2`
 
-发布版本：`3.0.0`
+仓库版本：`3.0.8`
 
-## 当前开发数据库契约（2026-07-16）
+## 当前开发数据库契约（2026-07-18）
 
 - 平台落库与业务 Tool 使用 `xiaohongshu`、`douyin`；`xhs`、`dy` 仅作为输入别名。
 - MySQL 达人身份物理列、MCP 参数与代码字段统一使用 `kwUid`。
@@ -22,37 +22,38 @@
 | 评估面 | 结果 | 结论 |
 | --- | --- | --- |
 | 正式契约收口 | **PASS** | P0 与首批 P1 已有唯一 Spec 落点、JSON Schema、loader 与契约测试。 |
-| 下游实现就绪 | **BLOCKED** | CHG-2026-007 是 contract-only；数据库、provider 与 Hook/Skill 尚未按新契约迁移。 |
+| 插件与本地门禁 | **PARTIAL** | Skill、打包和 Native Node Hook 已进入当前执行面；它们是 deny-only 安全层，不能替代服务端状态与写幂等。 |
 | 独立只读审查 | **待本变更冻结后执行** | OpenCode 必须复验冻结 SHA，并确认 Git 与 plan 目录无写入。 |
-| 生产 provider 契约 | **FAIL / BLOCKED** | 生产 SSE 当前路由到通用演示 MCP，14 个必需业务工具与可选状态工具均不可发现。 |
-| 生产数据库与后端不变量 | **EXTERNAL-UNVERIFIED** | Spec 已声明 14 项必须证明的不变量，但仓库测试不能代替迁移、约束、并发和部署证据。 |
-| 生产总体就绪 | **NO-GO** | 现有包只能代表旧 SHA 的离线证据；CHG-2026-007 下游实现、provider、数据库、Algorithm 与凭据门禁通过前不得开启生产新链路。 |
+| 开发 provider 契约 | **READ-ONLY PASS** | 开发与生产现统一使用公开 SSE endpoint；2026-07-18 实时 `tools/list` 确认 15 个目标业务 Tool 齐全且输入 schema 无差异。 |
+| 生产 provider 契约 | **READ-ONLY PASS** | 同一统一 endpoint 的 2026-07-18 实时只读检查通过；这不等于写行为或 Live E2E 通过。 |
+| 数据库与后端不变量 | **DIRECTLY VERIFIED / SOURCE IMPLEMENTED / REMOTE UNVERIFIED** | 2026-07-18 已从当前机器只读直连 MySQL 8.0.36 核对真实表、列、索引和行数；`customer_demands` 与 `field_match_mapping` 作为权威保持不改。独立后端工作树已接入 ledger、真实 distribution/notification sync 与工作流派生测试，但远程进程尚未部署验收。 |
+| 生产总体就绪 | **NO-GO** | `3.0.8` 的本地证据不能代替当前 provider、数据库迁移、真实 Agent E2E、Algorithm 和凭据门禁。 |
 
-这里的生产阻塞不是通过更多本地测试就能消除。当前开发 Provider 位于 `http://192.168.0.129:32008/sse`，生产 `https://mcp.eshypdata.com/sse` 暂未路由到 YPmcn 业务服务。Host 只以 `mcp__ypmcn__<contract-tool>` 识别业务工具；本地 `vector-mcp` 仍不得伪装成远程业务 provider，公开向量查询仅在远程 Provider 实际广告 `search_creator_tag_vectors` 后启用。
+这里的阻塞不是通过更多本地单测就能消除。仓库的开发与生产 Provider 均配置为 `https://mcp.eshypdata.com/sse`，不再存在开发机专线、SSH 隧道或本地端口转发路径。统一 endpoint 的只读 `tools/list` 只能证明当前广告契约，不证明写 Tool、远程后端部署或 Live E2E 已通过。Host 只以 `mcp__ypmcn__<contract-tool>` 识别业务工具；本地 `vector-mcp` 不进入插件包，向量能力应作为远程 `search_creators`/`rank_creators` 的内部组件。
 
 ## 2. 仓库验收证据
 
-CHG-2026-007 的目标验收命令是 `npm run verify`。通过后它只证明仓库契约、现有回归与离线组件自洽，不证明下游部署完成。当前统一验证覆盖 204 项测试；上一冻结基线的证据原文为“统一验证覆盖 191 项测试”。当前清单已移除 13 项废弃的跨 Session Agent 控制面测试，并纳入此后新增的契约与回归测试。
+`npm run verify` 通过后只证明当前 checkout 的契约、回归、构建和离线发布结构自洽，不证明远程服务或真实业务链完成。测试数会随改动变化，因此不再把旧的 191/204 项数字当门禁；发布记录应保存命令、提交 SHA、时间和原始退出码。当前清单是：
 
-- Spec 治理与漂移门禁：11 项，覆盖 manifest、Schema 引用、字典 hash、逐工具输出和 finding 唯一落点。
-- 人类文档同步、自动提交与精简度：5 项。
-- 根 workspace 安装图：1 项。
-- 密钥与发布边界：16 项。
-- OpenClaw 插件、契约与 Hook：122 项，覆盖实体、输出契约、工作流状态和错误语义。
-- provider checker：8 项；Python Hook：24 项。
-- Skill、工具卡和文档一致性：16 项。
-- 向量 MCP 可靠性：14 项。
-- 可复现发布包：8 项。
+| 检查 | 命令 | 能证明什么 |
+| --- | --- | --- |
+| OpenClaw 插件、契约与 Native Node Hook | `npm run test:fast` | 当前 Node 门禁、业务契约和本地 vector MCP 协议 smoke |
+| OpenClaw 源码装载 | `npm run test:openclaw` | YP 内置 OpenClaw 能装载 Plugin/Skill/四个 typed Hook，并能注册 SSE 配置 |
+| 全仓库离线门禁 | `npm run verify` | Spec、文档、安装图、密钥扫描、Skill、工具卡、向量组件和发布包一致性 |
+| provider checker（开发） | `npm run verify:provider` | 仅对当前开发 endpoint 执行 initialize 与 `tools/list`；网络和服务必须真实可达 |
+| provider checker（生产诊断） | `npm run verify:provider:prod` | 仅查看生产 endpoint 当前广告面，不产生业务写入 |
+| 真实业务链 | 《高效联调测试指南》§4 | 真实 Agent → MCP → 开发库 → 测试企微 → 回收 → CSV → 新 session 恢复 |
 
-验证结果同时证明：
+旧 Python Hook 状态机已从当前验收门禁移除，也不进入发布包。`tests/test_hooks.py` 与 `YPmcn/hooks/*.py` 目前只保留为历史回归工件，需要考古时显式运行 `npm run test:legacy-hooks`；其结果不是当前执行面或 workflow 恢复证据。Skill、工具卡和文档一致性继续由 `npm run verify` 检查。
+
+这些命令在当前 SHA 通过时，只能同时证明：
 
 - `create_with_distributions` 缺少会话、调用证据、发送角色、三项确认、字段快照或正确阶段时均 fail closed。
 - 禁止 `preview_only` 和 shell/curl 绕过 provider 写接口。
-- 现有 Hook 回归仍证明当前会话确认与 `ctx.trigger=cron` 只能作为本地 deny-only 防线；它们不能授予目标服务端动作。
-- 目标恢复契约固定为 `refresh → request → finalize`；现有工具映射为 `sync → ingest → sync`，终态 refresh 为无副作用 no-op，服务端迁移留给后续 Change。
-- Python Hook 测试只验证本地守卫与状态机，不作为生产 provider 证据。
+- Native Node Hook 的请求指纹与确认只能作为本地 deny-only 防线；它们不能授予服务端动作，也不是写幂等账本。
+- 目标恢复顺序仍为 `sync → ingest → sync`；独立后端工作树已覆盖真实表查询、同一推荐项 inquiry upsert 与 `returned_not_ingested` 单测，只有部署后再通过新 session 聚合 Live E2E 才算真正恢复。
 - tracked 文件和发布包的密钥扫描均为零发现；发布包不包含 mock、测试、源码、凭据或绝对路径。
-- 既有 `3.0.0` tgz 只代表其生成 SHA 的历史证据；本 contract-only 任务不生成或发布新包。
+- 任一 tgz 只代表其生成 SHA 的离线证据；版本号相同也不能自动继承另一提交的测试结论。
 
 独立验证必须在实现提交冻结后由不同模型只读检查完整差异，复跑密钥扫描及关键测试，并把结果写入本任务 verification 工件。未完成前不得把本节解释为 Reviewer 已批准。
 
@@ -70,32 +71,23 @@ npm run verify:provider
 npm run verify:provider:prod
 ```
 
-2026-07-16 实测结果：开发机 15 个业务工具与当前必需输入契约一致；生产 SSE 仅广告 `add`、`greet`、`get_time`、`get_time_zone`、`duck_duck_go`、`get_cat_image`，14 个必需业务工具及 `get_workflow_state` 全部缺失。公开向量查询 `search_creator_tag_vectors` 正在接入，当前作为可选能力，不影响既有 15 工具开发联调，但未实际广告前不得声称可用。
+旧开发 endpoint 与旧生产快照只保留为历史背景，不能作为统一 endpoint 的当前证据。开发与生产现在都由 `https://mcp.eshypdata.com/sse` 提供。2026-07-18 执行 `npm run verify:provider` 得到 `PASS`：15 个目标业务 Tool 齐全、输入 schema 无差异，schema hash 为 `843f3eaf76b511cdb9fffbdc70a56b8d3497ffcb32c05d42304d506953ace68e`。后续验收仍须保存当次结果；若实时广告面不一致，应报告契约漂移，不得沿用本次结果判定通过。
 
-检查器只发送 `initialize`、`notifications/initialized` 和 `tools/list`，不会调用任何业务工具或产生写入。开发机 PASS 不是生产部署证据；生产域名恢复正确路由前保持 NO-GO。
+检查器只发送 `initialize`、`notifications/initialized` 和 `tools/list`，不会调用业务 Tool。向量能力的当前目标是 `search_creators`/`rank_creators` 的服务端内部实现，不要求普通 Agent 看到 `search_creator_tag_vectors`；公开 vector Tool 是否出现不能作为这 15 个业务 Tool 的通过条件。只读 PASS 也不是完整生产业务链证据。
 
 ## 4. 尚需外部证明的数据库与后端不变量
 
-`spec/database.json` 是目标验收要求，不是 migration 或 deployment proof。以下 14 项当前均为 `external-unverified`：
+`spec/database.json` 记录的是 2026-07-18 对开发库的真实只读观察，不是 migration 或 deployment proof。当前最小核对面是：
 
-| 不变量 | 责任边界 | 放行证据 |
+| 不变量 | 当前证据 | 放行证据 |
 | --- | --- | --- |
-| supplier binding 唯一 | 生产数据库 | 每个 `(mcn_id, provider, scope, as_of)` 恰好一个 active binding；provider supplier ID 物理唯一。 |
-| 单一 send operation | 分发 provider 后端 | idempotency key 与 provider correlation key 唯一；每次发送引用一个 persisted selection result。 |
-| 稳定 provider correlation | 分发 provider 后端 | 未知写结果先按 correlation 查询，同 operation 对账，不直接重发。 |
-| 首次 refresh 原子性 | 同步后端 | snapshot、batch、每 supplier inquiry、cron 在同一事务中创建或复用。 |
-| provider 引用唯一 | 数据库与 provider | distribution ID、token、fill link 非空唯一。 |
-| 提交摄取幂等 | ingest 后端 | `(provider_distribution_id, provider_row_id)` 唯一。 |
-| 单一 recovery owner | 恢复协调器 | request 通过 state version CAS/行锁只产生一个 owner。 |
-| 多来源合并优先级 | 排名后端 | 继续证明 approved source priority；算法权重仍由外部 Algorithm Spec 决定。 |
-| submission batch 重试 | submission 后端 | 同 run 复用未完成批次，仅 approved next action 创建新批次。 |
-| 字典与快照绑定 | requirement/selection 服务 | requirement、snapshot、selection 精确保存 approved dictionary version/hash。 |
-| 单平台执行单元 | requirement 服务 | 多平台输入生成同一 head 下的逐平台 child；物理唯一键拒绝重复版本。 |
-| snapshot/审计不可变 | 数据库与各 owner | snapshot、risk/feedback/promotion audit append-only，纠正只追加新版本。 |
-| late data 不改冻结结果 | supply/ranking 服务 | 迟到记录保留 lineage 并进入下一 snapshot/人工复核；旧 hash 不变。 |
-| offer promotion 版本化幂等 | supply 服务 | promotion 新增 offer revision 与 audit event；相同 source/scope 只晋升一次。 |
+| 达人身份使用 `(platform, kwUid)` | `development-observed` 快照 | 当前库的列、索引和跨表 join 样本 |
+| 机构权威来自 `core_supplier` | `development-observed` 快照 | 当前 FK/唯一键和真实 supplier 映射样本 |
+| 单达人预算不污染项目总预算 | 当前 MCP proxy 未强制 | validate 集成测试及历史数据核查 |
+| 11 个写 Tool 持久化幂等 | 真实 ledger 仍为 0 行；独立后端工作树已接入 10 个本地写入口和外部创建入口，覆盖同 key 重放、hash 冲突、回滚及 unknown 禁止重试 | 部署后真实 ledger 行、并发和断线对账测试 |
+| sync 读取发送方并维护 inquiry | `core_project/core_distribution/core_notificationlog` 查询已在真实库只读执行；本地源码按推荐项 `item_id + attempt_no` upsert inquiry，重复 sync 单测通过 | 部署后真实 project/supplier 首次 sync、回收再 sync 与跨 session 恢复 |
 
-此外，目标模型中的每个实体都必须有真实 primary/unique constraint、非空 scope 字段和对应并发/冲突测试。仓库 JSON Schema、loader 与本地测试只能证明契约可生成、可检查，不能替代这些外部证据。
+本次已保存等价的 `information_schema.COLUMNS/STATISTICS` 只读证据。当前最小实现没有改任何表：本地事务直接复用 ledger，外部创建转发稳定 `Idempotency-Key`，超时记为 unknown 且不盲重发。由于外部 API 文档未承诺持久化该键，完整外部 exactly-once 仍需其接受并按键查询；不修改已敲定的 `customer_demands` 或 `field_match_mapping`。
 
 ## 5. 凭据处置
 
@@ -112,13 +104,13 @@ npm run verify:provider:prod
 
 只有以下条件全部满足，生产结果才能从 `NO-GO` 改为 `GO`：
 
-1. **实现门禁**：后续 Change 按 Database → MCP → Hook/Skill → Integration 顺序实现 CHG-2026-007；contract-only 提交本身不放行生产。
+1. **实现门禁**：独立后端工作树的 ledger/11 个写入口、inquiry sync、workflow 聚合和向量融合先部署到指定开发机；当前本地源码不放行生产。
 2. **凭据门禁**：历史凭据已轮换、旧值已撤销，secret store 与审计记录可追溯。
-3. **provider 契约门禁**：生产 `tools/list` 包含 14 个必需工具，输入 schema 与 `mvp-v2` 一致，逐工具成功/失败输出通过 output contract 集成测试；`npm run verify:provider` 返回 0。
+3. **provider 契约门禁**：从实际部署环境保存当前 `tools/list`，包含验收所需的 15 个工具（原 14 个加 `get_workflow_state`），输入 schema 与 `mvp-v2` 一致；开发与生产检查分别返回 0，不能用 7 月 16 日快照代替。
 4. **需求门禁**：字典不含客户内容，requirement/snapshot/selection 的 version/hash 可复算；canonical raw 冲突、金额/deadline/constraint 错误均 fail closed。
-5. **状态门禁**：服务端持久化 `state_version + allowed_actions`，未列状态组合阻断；恢复严格执行 `refresh → request → finalize`，Hook session 不能授予动作。
-6. **发送安全门禁**：selection result 和 send operation 均持久化；provider 给出稳定 correlation key；未知结果只查询不重发。
-7. **数据库门禁**：上节 14 项不变量均有 migration/constraint/transaction 证据及对应集成或并发测试记录。
+5. **状态门禁**：`get_workflow_state` 从已提交业务事实和 ledger 推导 phase/allowed actions；断链、冲突和 unknown 均 fail closed，新 session 恢复不依赖旧聊天或 Hook 文件。
+6. **发送安全门禁**：未知结果当前已禁止重发；生产放行前外部 API 仍需明确接受并持久化唯一 key，或提供按 key 找回创建结果的只读接口。
+7. **数据库门禁**：上节六项当前不变量均有当日 `SHOW` 证据、可解析 schema fragment、必要 migration/constraint/transaction 记录及并发测试。
 8. **Algorithm 门禁**：`spec/algorithms.json` 从 `external-unverified` 进入单独批准并有独立验证；不得从当前代码或本 Requirements Spec 反推排名权重。
 9. **完整链路门禁**：隔离租户完成 `validate/split → snapshot → search → rank MCN → persist selection → send operation → refresh → request → finalize → rank → submit → feedback`，并验证 recovery owner、late data 和 offer promotion 冲突。
 10. **发布与灰度门禁**：最终提交重新运行 `npm run verify`、`npm run pack:yp` 和 tarball 密钥扫描；先受控灰度，观察重复发送、scope/join、状态冲突、迟到数据和晋升幂等指标。

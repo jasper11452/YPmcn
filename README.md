@@ -2,7 +2,7 @@
 
 这是 YPmcn 的唯一长期项目仓库。日常开发、Spec、验证与发布都从 Git 根目录开始；相邻的 `YPmcn-worktrees` 只用于单任务隔离，任务完成后清理，不是第二个项目。
 
-仓库把业务来源资料固化为可验证的 `mvp-v2` 契约、OpenClaw Skill/Python Hook、向量 MCP 和只读 provider 预检。
+仓库把业务来源资料固化为可验证的 `mvp-v2` 契约、OpenClaw Skill/Hook、服务端向量组件和只读 provider 预检。
 
 ## 人类阅读入口
 
@@ -26,10 +26,9 @@ project/
 ├── docs/          # 使用、设计和流程文档
 ├── fix-logs/      # 重要故障根因与预防经验
 ├── YPmcn/         # 可发布 OpenClaw 插件组件
-├── vector-mcp/    # 创作者向量检索 MCP
 ```
 
-`YPmcn/` 是 npm 发布组件，不是嵌套 Git 项目。当前生产代码分别归属 `YPmcn/` 与 `vector-mcp/`；根 `src/` 不维护重复实现。
+`YPmcn/` 是 npm 发布组件，不是嵌套 Git 项目。向量能力由远程业务服务负责；仓库不再保留或测试本地 `vector-mcp` 实现。
 
 `doc/` 只暂留 `spec/algorithms.json` 引用的算法来源 Alias，不是正式机器契约。完整客户 Brief、payload 和不可移植的本地资料不进入 Git。
 
@@ -61,11 +60,11 @@ npm run verify
 npm run pack:yp
 ```
 
-根 `package.json` 统一管理 `YPmcn` 与 `vector-mcp` 两个 npm workspace；一次根 `npm ci` 会安装全部构建和测试依赖，并自动启用仓库 hook，无需分别进入组件安装。`npm run docs:sync` 只在需要提交前即时预览或修复时使用。
+根 `package.json` 统一管理 `YPmcn` npm workspace；一次根 `npm ci` 会安装构建和测试依赖，并自动启用仓库 hook。`npm run docs:sync` 只在需要提交前即时预览或修复时使用。
 
-`npm run verify` 执行 Spec 漂移门禁、根安装图检查、密钥扫描、插件契约、Python Hook、provider comparator、文档、向量 MCP 和发布包验证。`npm run pack:yp` 在 `packages/.staging/` 组装，并把扫描后的包输出到 `packages/releases/`。
+`npm run verify` 执行 Spec 漂移门禁、根安装图检查、密钥扫描、插件/Native Node Hook 契约、provider comparator、文档和发布包验证。`npm run pack:yp` 在 `packages/.staging/` 组装，并把扫描后的包输出到 `packages/releases/`。
 
-日常联调不先打包：`npm run test:fast` 运行 Python Hook 并启动真实 vector MCP 子进程验证 JSON-RPC initialize、tools/list 与工具 schema；`npm run test:openclaw` 使用 YP Action 内置 OpenClaw、临时隔离配置和源码目录验证 Plugin/Skill 装载。`npm run test:headless` 串联两者。只有发布候选才打 tgz 并在 YP Action UI 验证安装器、配置同步、桌面交互和重启持久化。
+日常联调不先打包：`npm run test:fast` 运行 Native Node Hook/契约测试；`npm run test:openclaw` 使用 YP Action 内置 OpenClaw、临时隔离配置和源码目录验证 Plugin/Skill 装载。`npm run test:headless` 串联两者。旧 Python Hook 仅可用 `npm run test:legacy-hooks` 做历史回归，不属于当前执行面或交付证据。只有发布候选才打 tgz 并在 YP Action UI 验证安装器、配置同步、桌面交互和重启持久化。
 
 本项目采用 V2.3 极简 Agent 流程：默认一个写者；Fast 由 Claude Code 直接完成，Standard 才按需交给 Codex，Critical 才启用 OpenCode 独立只读验证。普通开发不使用 Workflow、跨 Session 状态机或任务证据目录。该规则由仓库根 `CLAUDE.md` 和项目级 `.claude/settings.json` 限定，只影响从本仓库启动的 Claude Code。
 
