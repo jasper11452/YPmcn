@@ -14,37 +14,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python",
+            "command": "/usr/bin/python3",
             "args": [
               "${CLAUDE_PROJECT_DIR}/YPmcn/hooks/pre_tool_guard.py"
-            ]
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "mcp__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/YPmcn/hooks/post_tool_update.py"
-            ]
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/YPmcn/hooks/session_cleanup.py"
             ]
           }
         ]
