@@ -5,6 +5,11 @@
   "handlerImplementation": "YPmcn/src/runtime-hooks.ts",
   "executionSurface": "YP Action/OpenClaw Node plugin",
   "events": {
+    "before_agent_reply": {
+      "responsibility": "short_circuit_unresolved_standard_briefs_with_deterministic_structured_reply",
+      "mayBlock": false,
+      "script": "YPmcn/src/index.ts"
+    },
     "before_prompt_build": {
       "responsibility": "inject_strict_brief_and_continuous_workflow_context",
       "mayBlock": false,

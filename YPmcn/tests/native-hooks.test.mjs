@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ const tempDir = mkdtempSync(join(tmpdir(), "ypmcn-native-hooks-"));
 const stateFile = join(tempDir, "state", "confirmation_guard.json");
 const templateFile = join(tempDir, "skills", "media-assistant", "assets", "wecom_inquiry_template.txt");
 const hooks = new Map();
+const UNRESOLVED_BRIEF = "品牌：阿里巴巴；项目：千问61儿童节；平台：小红书；档期：2026-07-30至2026-07-31；价格：4w以下；返点：30%以上；内容：类似于AI帮忙送儿童节礼物；账号类型：母婴类，亲子相关；数量：5个；提报截止：2026-07-20 11:00。";
 
 const distributionParams = (overrides = {}) => ({
   projectName: "测试项目",
@@ -167,7 +168,7 @@ async function recordWorkflowState(projectName, allowedActions = ["create_with_d
 
 describe("YP Action native hook guard", () => {
   it("registers tool hooks without relying on session lifecycle", () => {
-    assert.deepEqual([...hooks.keys()].sort(), ["after_tool_call", "before_prompt_build", "before_tool_call", "session_end"]);
+    assert.deepEqual([...hooks.keys()].sort(), ["after_tool_call", "before_agent_reply", "before_prompt_build", "before_tool_call", "session_end"]);
   });
 
   it("fails closed when the before-tool guard itself throws", async () => {
@@ -192,7 +193,7 @@ describe("YP Action native hook guard", () => {
   });
 
   it("injects the standard brief fast path before prompt construction", async () => {
-    const result = await hooks.get("before_prompt_build")({ prompt: "小红书达人需求", messages: [] }, {});
+    const result = await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     assert.equal(result.prependSystemContext, YPMCN_FAST_PATH);
     assert.match(result.prependContext, /YPmcn authoritative requirement clock/);
     assert.match(result.prependContext, /currentLocalDateTime: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
@@ -244,6 +245,57 @@ describe("YP Action native hook guard", () => {
     assert.match(result.prependSystemContext, /reinterpret one identifier as another lookup mode/);
     assert.match(result.prependSystemContext, /including timeout_seconds/);
     assert.match(result.prependSystemContext, /Do not read mcporter or another Skill/);
+  });
+
+  it("accepts complete requirement clarification answers from native host result shapes", async () => {
+    const questions = ["平台", "数量", "预算"].map((field) => ({
+      header: "需求确认",
+      question: `已确认：其余字段；需确认：${field}；影响：决定需求是否可写入。`,
+      options: [{ label: `${field}选项A` }, { label: `${field}选项B` }],
+    }));
+    const answerArray = questions.map((question) => ({ selected_labels: [question.options[0].label] }));
+    const answerMap = Object.fromEntries(questions.map((question) => [question.question, question.options[0].label]));
+    const resultShapes = [
+      { status: "submitted", answers: answerArray },
+      { status: "submitted", answers: answerMap },
+      { result: { status: "submitted", answers: answerMap } },
+      { structuredContent: { status: "submitted", answers: answerMap } },
+      { content: [{ text: JSON.stringify({ status: "submitted", answers: answerMap }) }] },
+    ];
+
+    for (const result of resultShapes) {
+      await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
+      const params = { questions };
+      assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
+      await hooks.get("after_tool_call")({ toolName: "AskUserQuestion", params, result }, {});
+      assert.equal(await hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__validate_requirement",
+        params: { payload: requirementPayload() },
+      }, {}), undefined);
+    }
+  });
+
+  it("keeps an incomplete clarification pending with a repeatable recovery path", async () => {
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
+    const params = {
+      questions: [{
+        header: "需求确认",
+        question: "已确认：平台；需确认：数量；影响：决定需求是否可写入。",
+        options: [{ label: "5位" }, { label: "10位" }],
+      }],
+    };
+    assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "AskUserQuestion",
+      params,
+      result: { status: "submitted", answers: {} },
+    }, {});
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload() },
+    }, {});
+    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
+    assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
   });
 
   it("formats a deterministic local requirement clock", () => {
@@ -678,8 +730,12 @@ describe("YP Action native hook guard", () => {
       await recordSearch(requirementId, supplyPlan(), shape);
       const persisted = JSON.parse(readFileSync(stateFile, "utf8"));
       const stored = persisted.supply_plans[requirementId];
-      assert.deepEqual(Object.keys(stored).sort(), [...Object.keys(supplyPlan()), "fingerprint"].sort());
+      assert.deepEqual(
+        Object.keys(stored).sort(),
+        [...Object.keys(supplyPlan()), "fingerprint", "observed_at_ms", "expires_at_ms"].sort(),
+      );
       assert.match(stored.fingerprint, /^[0-9a-f]{64}$/);
+      assert.ok(stored.expires_at_ms > stored.observed_at_ms);
       const blocked = await hooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__rank_mcns",
         params: { id: requirementId, platform: "xiaohongshu" },
@@ -856,7 +912,7 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-state-mismatch",
     }, {});
     assert.equal(mismatch.block, true);
-    assert.match(mismatch.blockReason, /WORKFLOW_STATE_REFRESH_REQUIRED/);
+    assert.match(mismatch.blockReason, /BLOCKED_WORKFLOW_ACTION/);
   });
 
   it("blocks forged external summary values and non-exact send options before AskUserQuestion", async () => {
@@ -978,6 +1034,88 @@ describe("YP Action native hook guard", () => {
     }, {});
     assert.equal(retry.block, true);
     assert.match(retry.blockReason, /WRITE_RESULT_UNKNOWN.*get_workflow_state/);
+  });
+
+  it("reconciles an unknown send outcome before an exact retry", async () => {
+    const params = distributionParams({ projectName: "未知结果恢复测试" });
+    const { id } = await requestConfirmation(params);
+    await answerConfirmation(id);
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-reconcile-send-1",
+    }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params,
+      toolCallId: "call-reconcile-send-1",
+      error: new Error("connection lost"),
+    }, {});
+
+    await recordWorkflowState(params.projectName, ["create_with_distributions"]);
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-reconcile-send-2",
+    }, {}), undefined);
+  });
+
+  it("reconciles an unknown rank outcome only for the same requirement", async () => {
+    const requirementId = "req-rank-reconcile";
+    const params = { id: requirementId, platform: "xiaohongshu" };
+    await recordSearch(requirementId);
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-reconcile-rank-1",
+    }, {});
+    await answerSupplyPlanConfirmation(confirmationId(blocked));
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-reconcile-rank-2",
+    }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params,
+      toolCallId: "call-reconcile-rank-2",
+      error: new Error("connection lost"),
+    }, {});
+
+    const stateParams = { demand_id: "demand-rank-reconcile", demand_version: 1 };
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__get_workflow_state", params: stateParams,
+    }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__get_workflow_state",
+      params: stateParams,
+      result: {
+        success: true,
+        data: {
+          workflow_state: {
+            project_name: "排名恢复测试",
+            requirement_id: requirementId,
+            allowed_actions: ["rank_mcns"],
+          },
+        },
+        error: null,
+      },
+    }, {});
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-reconcile-rank-3",
+    }, {}), undefined);
+  });
+
+  it("expires stale local blockers and supply plans instead of reusing them", async () => {
+    const requirementId = "req-expired-plan";
+    await recordSearch(requirementId);
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    state.supply_plans[requirementId].expires_at_ms = Date.now() - 1;
+    state.blocked_tool_turn = {
+      code: "INVALID_INPUT",
+      observed_at_ms: Date.now() - 10_000,
+      expires_at_ms: Date.now() - 1,
+    };
+    writeFileSync(stateFile, JSON.stringify(state), "utf8");
+
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params: { id: requirementId, platform: "xiaohongshu" },
+    }, {});
+    assert.match(blocked.blockReason, /INTEGRATION_REQUIRED.*successful search_creators/);
+    assert.doesNotMatch(blocked.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT/);
   });
 
   it("stores only confirmation metadata and safe summaries", async () => {

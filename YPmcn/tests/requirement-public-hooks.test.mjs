@@ -78,6 +78,10 @@ async function newTurn(prompt = QWEN_BRIEF) {
   return hooks.get("before_prompt_build")({ prompt, messages: [] }, {});
 }
 
+async function beforeAgentReply(cleanedBody) {
+  return hooks.get("before_agent_reply")({ cleanedBody }, { trigger: "user" });
+}
+
 async function guard(toolName, params) {
   return hooks.get("before_tool_call")({ toolName, params }, {});
 }
@@ -99,7 +103,7 @@ describe("requirement behavior through public plugin hooks", () => {
   it("publishes the exact semicolon Brief preview with the semantic-ambiguity gate", async () => {
     const result = await newTurn(EXACT_SEMICOLON_BRIEF);
     const marker = "YPmcn authoritative machine-readable requirement preview (do not recount, remap, or replace):\n";
-    const preview = JSON.parse(result.prependContext.slice(result.prependContext.indexOf(marker) + marker.length));
+    const preview = JSON.parse(result.prependContext.slice(result.prependContext.indexOf(marker) + marker.length).split("\n", 1)[0]);
 
     assert.equal(preview.gate, "semantic_ambiguity");
     assert.deepEqual(preview.missingRequired, []);
@@ -107,6 +111,22 @@ describe("requirement behavior through public plugin hooks", () => {
     assert.equal(preview.projection.quantityTotal, 5);
     assert.equal(preview.projection.rebate, "[0.3,1]");
     assert.deepEqual(preview.summary, { atomCount: 11, mappedCount: 9, preservedCount: 0, unresolvedCount: 2 });
+    assert.match(result.prependContext, /YPmcn mandatory unresolved-Brief response: do not call any Tool/);
+    assert.match(result.prependContext, /<YPmcnExactReply>[\s\S]*"brandName": "阿里巴巴"[\s\S]*"unresolvedCount": 2[\s\S]*<\/YPmcnExactReply>/);
+  });
+
+  it("short-circuits unresolved standard Briefs with one deterministic zero-Tool reply", async () => {
+    const result = await beforeAgentReply(`请按权威预览解析，确认前不要调用任何 Tool。${EXACT_SEMICOLON_BRIEF}`);
+    assert.equal(result.handled, true);
+    assert.equal(result.reason, "ypmcn_requirement_semantic_ambiguity");
+    assert.match(result.reply.text, /"gate": "semantic_ambiguity"/);
+    assert.match(result.reply.text, /"brandName": "阿里巴巴"/);
+    assert.match(result.reply.text, /"unresolvedCount": 2/);
+    assert.match(result.reply.text, /确认完成前不得调用任何 Tool/);
+    assert.doesNotMatch(result.reply.text, /请按权威预览解析/);
+
+    const blocked = await guard("ypmcn-mcp__prompts_get", { name: "AskUserQuestion" });
+    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
   });
 
   it("accepts the exact Alibaba/Qwen values with full datetimes and schema-native integer/range types", async () => {

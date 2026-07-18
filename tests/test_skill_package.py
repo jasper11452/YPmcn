@@ -1,5 +1,3 @@
-import csv
-import hashlib
 import json
 import re
 import unittest
@@ -13,7 +11,7 @@ WORKFLOW_PATH = ROOT / "spec" / "workflow.json"
 SKILL = PACKAGE / "skills" / "media-assistant" / "SKILL.md"
 REFERENCES = SKILL.parent / "references"
 TOOLS_DIR = REFERENCES / "tools"
-CSV_SCHEMA = REFERENCES / "reference_schema.csv"
+SCHEMA = REFERENCES / "reference_schema.json"
 REQUIREMENT_CASES = ROOT / "tests" / "goldens" / "requirement_cases.json"
 REQUIREMENT_REGRESSIONS = ROOT / "tests" / "goldens" / "requirement_regressions.json"
 
@@ -29,7 +27,6 @@ EXPECTED_REFERENCE_FILES = {
     "requirement-parsing.md",
     "validation-playbook.md",
 }
-EXPECTED_CSV_SHA256 = "4c43529eb289983d0f9adcd06312f57be465a0a74f9d03330e4a5b7bea69e883"
 
 
 def read(path: Path) -> str:
@@ -73,7 +70,7 @@ class SkillPackageContractTest(unittest.TestCase):
         frontmatter = re.search(r"^---\n.*?^description:\s*(.+?)\n---", text, re.MULTILINE | re.DOTALL)
         self.assertIsNotNone(frontmatter)
         self.assertLessEqual(len(frontmatter.group(1).strip().strip('"')), 180)
-        self.assertLessEqual(len(text.splitlines()), 180)
+        self.assertLessEqual(len(text.splitlines()), 50)
         for name in EXPECTED_REFERENCE_FILES:
             self.assertIn(f"references/{name}", text)
         for required in (
@@ -81,6 +78,9 @@ class SkillPackageContractTest(unittest.TestCase):
             "sync → ingest → sync",
         ):
             self.assertIn(required, text)
+        for path in SKILL.parent.rglob("*"):
+            if path.is_file():
+                self.assertLessEqual(len(path.read_bytes().splitlines()), 50, path)
 
     def test_skill_stops_after_hook_block_without_semantic_rewrite(self):
         text = read(SKILL)
@@ -269,13 +269,13 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertTrue(regressions)
         for case in cases:
             for field, value in case.get("expected_range_fields", {}).items():
-                self.assertIn(field, read(CSV_SCHEMA))
+                self.assertIn(field, read(SCHEMA))
                 self.assertIsInstance(value, str)
                 self.assertRegex(value, canonical_range)
                 lower, upper = json.loads(value)
                 self.assertLessEqual(lower, upper)
             for field in case.get("forbidden_fields", []):
-                self.assertNotIn(field, read(CSV_SCHEMA))
+                self.assertNotIn(field, read(SCHEMA))
 
         by_id = {item["id"]: item for item in regressions}
         self.assertEqual("allow", by_id["canonical-range-string"]["expected_guard"])
@@ -343,32 +343,26 @@ class SkillPackageContractTest(unittest.TestCase):
         for obsolete in ("quantity_total", "submission_deadline_at", "budget_min_cents", "budget_max_cents"):
             self.assertNotIn(obsolete, serialized)
 
-    def test_csv_authority_keeps_supplied_line_count_fields_and_hash(self):
-        raw = CSV_SCHEMA.read_bytes()
-        self.assertEqual(EXPECTED_CSV_SHA256, hashlib.sha256(raw).hexdigest())
-        with CSV_SCHEMA.open("r", encoding="utf-8-sig", newline="") as handle:
-            reader = csv.DictReader(handle)
-            self.assertEqual([
-                "Field", "Type", "InputShape", "Example", "FilterMode",
-                "Null", "Key", "Default", "Extra", "Comment",
-            ], reader.fieldnames)
-            rows = list(reader)
+    def test_compact_schema_keeps_all_verified_columns_and_shapes(self):
+        schema = json.loads(read(SCHEMA))
+        self.assertEqual(1, schema["schemaVersion"])
+        self.assertEqual("ypmcn.customer_demands", schema["table"])
+        self.assertEqual("2026-07-18", schema["verifiedAt"])
+        rows = schema["columns"]
         self.assertEqual(61, len(rows))
         fields = [row["Field"] for row in rows]
         self.assertEqual(len(fields), len(set(fields)))
         for field in (
-            "id",
-            "demandId",
-            "projectName",
-            "brandName",
-            "status",
-            "platform",
-            "rawMessagesJson",
-            "followercount",
+            "id", "demandId", "projectName", "brandName", "status",
+            "platform", "rawMessagesJson", "followercount",
         ):
             self.assertIn(field, fields)
         by_field = {row["Field"]: row for row in rows}
         for field, row in by_field.items():
+            self.assertEqual({
+                "Field", "Type", "InputShape", "Example", "FilterMode",
+                "Null", "Key", "Default", "Extra", "Comment",
+            }, set(row), field)
             shape = row["InputShape"].removesuffix(" (Provider-managed)")
             example = row["Example"]
             self.assertTrue(example, f"{field}: missing example")

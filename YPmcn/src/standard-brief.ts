@@ -35,6 +35,16 @@ type LocatedAtom = StandardBriefPreviewAtom & { start: number; end: number };
 const REQUIRED_FIELDS = ["platform", "quantityTotal", "submissionDeadlineAt", "creatorPriceTier"] as const;
 const FIELD_LABEL = "(?:品牌|产品|项目|(?:发布|传播)?平台|档期|价格|单价|预算|报价|返点(?:要求)?|返佣|内容|账号类型|达人类型|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?)";
 
+export function extractStandardBrief(input: string): string {
+  const firstField = new RegExp(`${FIELD_LABEL}\\s*[：:]`, "i").exec(input);
+  if (!firstField) return input.trim();
+  return input
+    .slice(firstField.index)
+    .trim()
+    .replace(/[。！？!?]+$/g, "")
+    .trim();
+}
+
 function labeledFieldPattern(label: string, flags = "g"): RegExp {
   return new RegExp(
     `(?:^|(?<=[\\n；;，,]))\\s*${label}\\s*[：:]\\s*([\\s\\S]*?)(?=\\s*(?:[；;\\n]|[，,](?=\\s*${FIELD_LABEL}\\s*[：:])|$))`,
@@ -138,6 +148,7 @@ export function parseStandardBrief(
   now = new Date(),
   timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai",
 ): StandardBriefPreview {
+  brief = extractStandardBrief(brief);
   const matches: LocatedAtom[] = [];
 
   for (const [label, field, targetField] of [
@@ -371,4 +382,40 @@ export function parseStandardBrief(
 
 export function renderStandardBriefPreview(preview: StandardBriefPreview): string {
   return `YPmcn authoritative machine-readable requirement preview (do not recount, remap, or replace):\n${JSON.stringify(preview)}`;
+}
+
+function ambiguityQuestion(field: string): string {
+  if (field === "creatorPriceTier") {
+    return "- 价格口径：4w以下是项目总预算，还是单达人官方报价？若为单达人报价，请确认 L1、L2 或 L3。";
+  }
+  if (field === "accountTaxonomy") {
+    return "- 账号类型：母婴类、亲子相关是内容主题，还是平台达人 taxonomy？若为 taxonomy，请提供平台正式分类值。";
+  }
+  return `- ${field}：请确认唯一业务含义。`;
+}
+
+export function renderStandardBriefReply(preview: StandardBriefPreview): string {
+  const confirmed = preview.atoms
+    .filter((atom) => atom.resolution === "mapped" && atom.targetField)
+    .map((atom) => `- ${atom.targetField}: ${JSON.stringify(atom.value)}`);
+  const unresolved = [
+    ...preview.missingRequired.map((field) => `- ${field}：请补充必填值。`),
+    ...preview.semanticAmbiguities.map(ambiguityQuestion),
+  ];
+  return [
+    "## 需求解析（权威结构化结果）",
+    "```json",
+    JSON.stringify(preview, null, 2),
+    "```",
+    "",
+    "## 需求确认",
+    "### 已确认",
+    ...(confirmed.length > 0 ? confirmed : ["- 无"]),
+    "### 需确认",
+    ...(unresolved.length > 0 ? unresolved : ["- 无"]),
+    "### 影响",
+    preview.gate === "ready"
+      ? "- 需求已满足校验条件；下一步首个业务 Tool 必须是 validate_requirement。"
+      : `- 当前 gate=${preview.gate}；确认完成前不得调用任何 Tool。`,
+  ].join("\n");
 }

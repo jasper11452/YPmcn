@@ -1,65 +1,36 @@
 # 数据库权威状态与 Tool 矩阵
 
-`workflow_state` 由现有业务表派生。`allowed_actions` 是下一步业务授权；Skill 和 Hook 不自行维护第二套 phase。
+`workflow_state` 由数据库事实派生，`allowed_actions` 是下一步授权；Skill/Hook 不维护第二套 phase。
 
-| Phase | 数据库事实 | 主要允许动作 |
-|---|---|---|
-| `requirement_draft` | 需求不是 ready | `validate_requirement` |
-| `requirement_ready` | ready 且没有候选 | `search_creators` |
-| `candidate_pool_ready` | 已有候选、供给方案尚未确认或没有 MCN 方案 | 弹框确认后 `rank_mcns`；可在外发前 `manual_source_creators` |
-| `mcn_planning` | 已有 MCN 方案、尚未形成真实分发 | `select_inquiry_form_fields`, `create_with_distributions`, `manual_source_creators` |
-| `waiting_mcn_return` | 企微外发成功，存在已发或待回收询价 | `sync_mcn_inquiry_status`, `ingest_mcn_submissions` |
-| `candidate_pool_enriched` | 企微外发成功且活动平台回收完成 | `rank_creators` |
-| `recommendation_ready` | 精排成功、尚未提报 | `audit_manual_adjustment`, `create_submission_batch` |
-| `submission_batch_ready` | 已创建提报批次 | `record_client_feedback` |
-| `feedback_routing` | 已记录反馈 | 按返回事实决定 |
-| `blocked` / `closed` | 冲突或终态 | 只读查询或明确修复动作 |
+| Phase | 事实与主要动作 |
+|---|---|
+| `requirement_draft` | 非 ready；`validate_requirement` |
+| `requirement_ready` | 无候选；`search_creators` |
+| `candidate_pool_ready` | 有候选；确认供给方案后 `rank_mcns` |
+| `mcn_planning` | 有 MCN 方案；选字段、补量、外发 |
+| `waiting_mcn_return` | 已真实外发；sync / ingest |
+| `candidate_pool_enriched` | 外发成功且回收完成；`rank_creators` |
+| `recommendation_ready` | 已精排；audit（可选）/ `create_submission_batch` |
+| `submission_batch_ready` | 已建批次；`record_client_feedback` |
+| `feedback_routing` | 已记录反馈；按返回事实继续 |
+| `blocked` / `closed` | 只读或返回的唯一修复动作 |
 
-## 查询时机
+## 查询与口径
 
-调用 `get_workflow_state`：
+仅在接手已有需求、上下文/证据丢失、状态冲突、写结果未知或不可逆外发前调用 `get_workflow_state`；其余连续步骤复用上一成功响应。
 
-1. 接手已有 `demand_id + demand_version`。
-2. 上下文压缩或无法证明当前状态。
-3. 写结果超时、断连、证据不足或 `WRITE_RESULT_UNKNOWN`。
-4. MCP 返回状态冲突或 identity ambiguous。
-5. 不可逆外发前。
-
-其他连续步骤复用上一响应中的完整状态，避免每步重复查询。
-
-## 候选数量口径
-
-- `workflow_state.candidate_count`：已经落入候选池的总行数。
-- `candidate_summary.<platform>.hard_filter_passed`：通过硬筛的候选行数。
-- `rank_mcns.data.inquiry_advice.initial_candidate_count`：去重并具备 MCN 关系、实际进入 MCN 供给计算的候选数。
-
-三个数字允许不同。回复时必须带口径名称，不得统称为“候选数量”或把差异解释为状态冲突。
-
-搜索完成后，必须从已校验需求和 MCP 实际 `supply_plan` 展示十个确认字段：`demand_count`、`database_candidate_count`、`supply_demand_ratio`、`target_submission_count`、`estimated_valid_return_count`、`estimated_gap_count`、`recommended_mcn_count`、`mcn_covered_creator_count`、`recommended_manual_creator_count`、`mcn_manual_creator_ratio`。比例两端都按达人账号数；Ask 确认是进入 `rank_mcns` 的人工门禁，不是新数据库 phase。
+候选数须带字段名：`workflow_state.candidate_count` 是池内总行数，`candidate_summary.<platform>.hard_filter_passed` 是硬筛通过数，`inquiry_advice.initial_candidate_count` 是去重且有 MCN 关系的供给计算数，三者可不同。供给确认展示 MCP `supply_plan` 的十个字段，机构/手扒比例两端都按达人账号数。
 
 ## 身份链
 
-- `validate_requirement(payload)` 返回需求身份。
-- `search_creators(id)` 与 `rank_mcns(id, platform)` 使用 `customer_demands.id`。
-- `rank_creators(requirement_id, limit)` 使用同一内部 requirement ID。
-- `customer_demands.id` 连接候选、MCN 方案和询价。
-- `demand_id + demand_version` 连接需求版本、推荐 run 和提报。
-- 外发使用 supplier 与 prefill 行反查唯一需求；零个或多个匹配都必须阻断。
-- `project_id + mcn_id + requirement_id` 必须能回查同一真实 distribution。
-- `inquiry_id` 必须已存在且归属明确后才能 ingest。
-- `run_id` 必须来自 `rank_creators` 或状态查询。
-- 证据不足 → `integration_required`，不得猜测或选择最近记录。
+- `validate_requirement(payload)` 返回需求身份；`search_creators(id)`、`rank_mcns(id, platform)`、`rank_creators(requirement_id, limit)` 使用同一 `customer_demands.id`。
+- `demand_id + demand_version` 连接需求版本、推荐 run 与提报；`project_id + mcn_id + requirement_id` 必须回查同一 distribution。
+- `inquiry_id` 必须已存在且归属明确；`run_id` 只能来自精排成功响应或状态查询。证据不足 → `integration_required`，不得猜测或取最近记录。
 
-## 写结果
+## 写入与恢复
 
-目标规则是所有写操作先写 Ledger `started`，完成后标记 `succeeded/failed/unknown`；相同幂等键和请求哈希返回已有摘要，不同哈希冲突，unknown 只能查询对账，不得盲目重试。待部署后端源码已接入 11 个写入口，但当前开发库 ledger 仍为 0 行，故 Agent 必须以远程 trace/重放证据判断是否生效；本地 Hook 的确认凭证只防误触，不构成数据库幂等。
+写操作目标 Ledger 状态为 `started → succeeded/failed/unknown`；unknown 只能查询对账，不得盲目重试。本地确认凭证不等于数据库幂等，是否生效以远程 trace/重放证据为准。
 
-`select_inquiry_form_fields` 和用户确认是外发准备，不形成持久 phase。`create_with_distributions` 只负责外部创建；只有 `sync_mcn_inquiry_status` 查询真实 project/distribution 并维护 inquiry 后，状态才进入 `waiting_mcn_return`。
+`select_inquiry_form_fields` 与用户确认不形成 phase；外部创建后，只有 `sync_mcn_inquiry_status` 查到真实 project/distribution 才进入等待。回收固定 `sync → ingest → sync`。
 
-## 状态迁移纪律
-
-- requirement preview 的 `missing_required/semantic_ambiguity/ready` 是调用前解析状态，不是 MCP `workflow_state`；只有实际成功 `validate_requirement` 响应才能建立 `requirement_ready`。
-- 每次写后只接受该次实际 MCP 响应或随后 `get_workflow_state` 返回的 `workflow_state + allowed_actions`；缺任一项不推进。Hook 凭证、Ask 答案、预期响应、示例 JSON 和 Agent 推断都不能推进 phase。
-- 连续成功链只按 `requirement_ready → candidate_pool_ready → mcn_planning → waiting_mcn_return → candidate_pool_enriched → recommendation_ready → submission_batch_ready → feedback_routing` 前进，并逐步满足正式 Tool/人工门禁；不得跨阶段调用。`blocked` 只按返回的唯一恢复动作处理，`closed` 以及询价 `recovered/closed` 终态不重复写入。
-- 写结果未知不回退也不前进，进入 `reconciliation_required` 执行一次权威状态查询；身份无法唯一证明时返回 `integration_required`。接手、压缩、冲突和外发前同理先查询，不选择“最近一次”。
-- Tool 结果来源按 provenance 判定：`details.deniedReason="plugin-before-tool-call"` 是本地 Hook 调用前拒绝且未到 MCP；只有实际远程 response/trace 证据才归因 MCP/Provider；两类证据都没有时标记来源未知。Hook 阻断不改变业务 phase，MCP 成功也只有返回权威状态时才改变业务 phase。
+每次写后只接受实际 MCP 返回或对账所得的 `workflow_state + allowed_actions`；Hook、Ask、示例和推断不推进 phase。写结果未知进入 `reconciliation_required`；身份不唯一报 `integration_required`。`details.deniedReason="plugin-before-tool-call"` 只说明本地 Hook 拒绝且未到 MCP。

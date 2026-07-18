@@ -1,10 +1,10 @@
-# YPmcn 3.0.9 集成与上线就绪报告
+# YPmcn 3.1.0 集成与上线就绪报告
 
 日期：2026-07-18
 
 目标契约：`mvp-v2`
 
-仓库版本：`3.0.9`
+仓库版本：`3.1.0`
 
 ## 当前开发数据库契约（2026-07-18）
 
@@ -27,7 +27,7 @@
 | 开发 provider 契约 | **READ-ONLY PASS** | 开发与生产现统一使用公开 SSE endpoint；2026-07-18 实时 `tools/list` 确认 15 个目标业务 Tool 齐全且输入 schema 无差异。 |
 | 生产 provider 契约 | **READ-ONLY PASS** | 同一统一 endpoint 的 2026-07-18 实时只读检查通过；这不等于写行为或 Live E2E 通过。 |
 | 数据库与后端不变量 | **DIRECTLY VERIFIED / SOURCE IMPLEMENTED / REMOTE UNVERIFIED** | 2026-07-18 已从当前机器只读直连 MySQL 8.0.36 核对真实表、列、索引和行数；`customer_demands` 与 `field_match_mapping` 作为权威保持不改。独立后端工作树已接入 ledger、真实 distribution/notification sync 与工作流派生测试，但远程进程尚未部署验收。 |
-| 生产总体就绪 | **NO-GO** | `3.0.9` 的本地证据不能代替当前 provider、数据库迁移、真实 Agent E2E、Algorithm 和凭据门禁。 |
+| 生产总体就绪 | **NO-GO** | `3.1.0` 的本地证据不能代替当前 provider、数据库迁移、真实 Agent E2E、Algorithm 和凭据门禁。 |
 
 这里的阻塞不是通过更多本地单测就能消除。仓库的开发与生产 Provider 均配置为 `https://mcp.eshypdata.com/sse`，不再存在开发机专线、SSH 隧道或本地端口转发路径。统一 endpoint 的只读 `tools/list` 只能证明当前广告契约，不证明写 Tool、远程后端部署或 Live E2E 已通过。Host 只以 `mcp__ypmcn__<contract-tool>` 识别业务工具；本地 `vector-mcp` 不进入插件包，向量能力应作为远程 `search_creators`/`rank_creators` 的内部组件。
 

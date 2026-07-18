@@ -12,6 +12,8 @@ const PREFIXES = ["ypmcn__", "mcp__ypmcn__", "ypmcn-mcp__", "ypmcn-provider__"];
 const SHELL_TOOLS = new Set(["bash", "exec", "shell", "powershell", "pwsh"]);
 const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 const WORKFLOW_STATE_TTL_MS = 10 * 60 * 1_000;
+const SUPPLY_PLAN_TTL_MS = 10 * 60 * 1_000;
+const BLOCKED_TOOL_TURN_TTL_MS = 2 * 60 * 1_000;
 const TRUSTED_ID_TTL_MS = 10 * 60 * 1_000;
 const WECOM_TEMPLATE_ID = "ypmcn-wecom-inquiry-v1";
 const WECOM_TEMPLATE_RELATIVE_PATH = join("skills", "media-assistant", "assets", "wecom_inquiry_template.txt");
@@ -106,6 +108,8 @@ type SupplyPlan = {
 type SupplyPlanBinding = {
   values: SupplyPlan;
   fingerprint: string;
+  observed_at_ms: number;
+  expires_at_ms: number;
 };
 
 type WorkflowStateBinding = {
@@ -113,6 +117,7 @@ type WorkflowStateBinding = {
   allowed_actions: string[];
   demand_id: string | null;
   demand_version: number | null;
+  requirement_id: string | null;
   trace_id: string | null;
   observed_at_ms: number;
   expires_at_ms: number;
@@ -171,7 +176,7 @@ function load(path: string): Json {
 
 function save(path: string, data: Json): void {
   mkdirSync(dirname(path), { recursive: true });
-  const temp = `${path}.tmp`;
+  const temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   writeFileSync(temp, JSON.stringify(data, null, 2), "utf8");
   renameSync(temp, path);
 }
@@ -200,7 +205,7 @@ function deny(code: string, message: string): Json {
 function store(rootDir: string): { path: string; data: Json } {
   const path = statePath(rootDir);
   const data = load(path);
-  data.schema_version = 7;
+  data.schema_version = 8;
   data.confirmations ??= {};
   if (!Array.isArray(data.trusted_ids)) data.trusted_ids = [];
   if (!data.blocked_requirement_semantics || typeof data.blocked_requirement_semantics !== "object" || Array.isArray(data.blocked_requirement_semantics)) {
@@ -225,6 +230,20 @@ function store(rootDir: string): { path: string; data: Json } {
       delete data.workflow_states[key];
       changed = true;
     }
+  }
+  for (const [key, plan] of Object.entries<Json>(data.supply_plans)) {
+    if (!plan || Number(plan.expires_at_ms ?? 0) <= now) {
+      delete data.supply_plans[key];
+      changed = true;
+    }
+  }
+  if (data.prompt_requirement_gate && Number(data.prompt_requirement_gate.expires_at_ms ?? 0) <= now) {
+    delete data.prompt_requirement_gate;
+    changed = true;
+  }
+  if (data.blocked_tool_turn && Number(data.blocked_tool_turn.expires_at_ms ?? 0) <= now) {
+    delete data.blocked_tool_turn;
+    changed = true;
   }
   const trustedIds = data.trusted_ids.filter((receipt: unknown) =>
     receipt && typeof receipt === "object" &&
@@ -253,6 +272,7 @@ export function beginPromptTurn(rootDir: string, preview?: Json): void {
       status: "pending",
       prompt_epoch: current.data.prompt_epoch,
       observed_at_ms: Date.now(),
+      expires_at_ms: Date.now() + CONFIRMATION_TTL_MS,
     };
   } else {
     delete current.data.prompt_requirement_gate;
@@ -272,7 +292,13 @@ export function recordBlockedToolResult(rootDir: string, result: Json | undefine
   const code = result.blockReason.split(":", 1)[0];
   if (code.startsWith("BLOCKED_") || CONTINUATION_BLOCK_CODES.has(code)) return;
   const current = store(rootDir);
-  current.data.blocked_tool_turn = { code, observed_at_ms: Date.now() };
+  const now = Date.now();
+  current.data.blocked_tool_turn = {
+    code,
+    prompt_epoch: Number(current.data.prompt_epoch ?? 0),
+    observed_at_ms: now,
+    expires_at_ms: now + BLOCKED_TOOL_TURN_TTL_MS,
+  };
   save(current.path, current.data);
 }
 
@@ -425,6 +451,7 @@ function workflowStateCore(binding: Omit<WorkflowStateBinding, "fingerprint">): 
     allowed_actions: binding.allowed_actions,
     demand_id: binding.demand_id,
     demand_version: binding.demand_version,
+    requirement_id: binding.requirement_id,
     trace_id: binding.trace_id,
     observed_at_ms: binding.observed_at_ms,
     expires_at_ms: binding.expires_at_ms,
@@ -448,12 +475,19 @@ function responseWorkflowState(result: unknown, input: Json): WorkflowStateBindi
     root.allowed_actions, root.allowedActions].find(Array.isArray);
   if (!projectName || !Array.isArray(actionsValue) || !actionsValue.every(text)) return undefined;
   const allowedActions = [...new Set(actionsValue.map((value) => actionName(value.trim())))].sort();
+  const requirementId = [
+    state.requirement_id, state.requirementId,
+    data.requirement_id, data.requirementId,
+    requirement?.requirement_id, requirement?.requirementId, requirement?.id,
+    root.requirement_id, root.requirementId,
+  ].find(text)?.trim() ?? null;
   const now = Date.now();
   const core = {
     project_name: projectName,
     allowed_actions: allowedActions,
     demand_id: text(input.demand_id) ? input.demand_id.trim() : null,
     demand_version: Number.isSafeInteger(input.demand_version) ? input.demand_version : null,
+    requirement_id: requirementId,
     trace_id: text(input.trace_id) ? input.trace_id.trim() : null,
     observed_at_ms: now,
     expires_at_ms: now + WORKFLOW_STATE_TTL_MS,
@@ -461,12 +495,44 @@ function responseWorkflowState(result: unknown, input: Json): WorkflowStateBindi
   return { ...core, fingerprint: fingerprint(workflowStateCore(core)) };
 }
 
+function reconcileUnknownConfirmations(data: Json, binding: WorkflowStateBinding): void {
+  for (const receipt of Object.values<Json>(data.confirmations)) {
+    if (!receipt || !["in_flight", "unknown"].includes(receipt.status)) continue;
+    const sameDemand = text(receipt.workflow_demand_id) && receipt.workflow_demand_id === binding.demand_id &&
+      receipt.workflow_demand_version === binding.demand_version;
+    const sameTrace = text(receipt.workflow_trace_id) && receipt.workflow_trace_id === binding.trace_id;
+    const isExternalSend = receipt.kind === "external_send" &&
+      receipt.safe_summary?.project_name === binding.project_name && Boolean(sameDemand || sameTrace);
+    const isSupplyPlan = receipt.kind === "supply_plan" && binding.requirement_id &&
+      receipt.requirement_id === binding.requirement_id;
+    if (!isExternalSend && !isSupplyPlan) continue;
+
+    const action = isExternalSend ? "create_with_distributions" : "rank_mcns";
+    receipt.status = binding.allowed_actions.includes(action) ? "approved" : "consumed";
+    receipt.workflow_state_fingerprint = binding.fingerprint;
+    receipt.workflow_demand_id = binding.demand_id;
+    receipt.workflow_demand_version = binding.demand_version;
+    receipt.workflow_trace_id = binding.trace_id;
+    receipt.reconciled_workflow_state_fingerprint = binding.fingerprint;
+    receipt.reconciled_at_ms = Date.now();
+    delete receipt.tool_call_id;
+  }
+}
+
 function recordWorkflowState(event: Json, input: Json, rootDir: string): void {
   const current = store(rootDir);
-  current.data.workflow_states = {};
   if (!event.error && successful(event.result)) {
     const binding = responseWorkflowState(event.result, input);
-    if (binding) current.data.workflow_states[workflowStateKey(binding.project_name)] = binding;
+    if (binding) {
+      for (const [key, previous] of Object.entries<Json>(current.data.workflow_states)) {
+        const sameDemand = binding.demand_id && previous.demand_id === binding.demand_id &&
+          previous.demand_version === binding.demand_version;
+        const sameTrace = binding.trace_id && previous.trace_id === binding.trace_id;
+        if (sameDemand || sameTrace) delete current.data.workflow_states[key];
+      }
+      current.data.workflow_states[workflowStateKey(binding.project_name)] = binding;
+      reconcileUnknownConfirmations(current.data, binding);
+    }
   }
   save(current.path, current.data);
 }
@@ -481,6 +547,7 @@ function storedWorkflowState(data: Json, projectName: string): WorkflowStateBind
     allowed_actions: [...value.allowed_actions],
     demand_id: text(value.demand_id) ? value.demand_id : null,
     demand_version: Number.isSafeInteger(value.demand_version) ? value.demand_version : null,
+    requirement_id: text(value.requirement_id) ? value.requirement_id : null,
     trace_id: text(value.trace_id) ? value.trace_id : null,
     observed_at_ms: value.observed_at_ms,
     expires_at_ms: value.expires_at_ms,
@@ -552,10 +619,16 @@ function responseSupplyPlan(result: unknown): SupplyPlan | undefined {
 function storedSupplyPlan(data: Json, requirementId: string): SupplyPlanBinding | undefined {
   const entry = data.supply_plans?.[requirementId];
   const values = validateSupplyPlan(entry);
-  if (!values) return undefined;
+  if (!values || !Number.isSafeInteger(entry.observed_at_ms) || !Number.isSafeInteger(entry.expires_at_ms) ||
+    entry.expires_at_ms <= Date.now()) return undefined;
   const planFingerprint = fingerprint(values);
   if (entry.fingerprint !== planFingerprint) return undefined;
-  return { values, fingerprint: planFingerprint };
+  return {
+    values,
+    fingerprint: planFingerprint,
+    observed_at_ms: entry.observed_at_ms,
+    expires_at_ms: entry.expires_at_ms,
+  };
 }
 
 function supplyPlanReceiptMatches(
@@ -588,9 +661,12 @@ function recordSupplyPlan(event: Json, input: Json, rootDir: string): void {
   if (!event.error && successful(event.result)) {
     const values = responseSupplyPlan(event.result);
     if (values) {
+      const now = Date.now();
       current.data.supply_plans[requirementId] = {
         ...values,
         fingerprint: fingerprint(values),
+        observed_at_ms: now,
+        expires_at_ms: now + SUPPLY_PLAN_TTL_MS,
       };
     }
   }
@@ -623,7 +699,8 @@ function selectedLabels(value: unknown): string[] | undefined {
   }
   for (const [key, item] of Object.entries(value as Json)) {
     if (/^selected_?labels?$/i.test(key) && Array.isArray(item)) {
-      return item.filter((label): label is string => typeof label === "string").map((label) => label.trim());
+      return item.filter((label): label is string => typeof label === "string")
+        .map((label) => label.trim());
     }
     const found = selectedLabels(item);
     if (found) return found;
@@ -631,14 +708,43 @@ function selectedLabels(value: unknown): string[] | undefined {
   return undefined;
 }
 
+function answerValues(value: unknown): string[] {
+  const root = unwrap(value);
+  if (typeof root === "string") return text(root) ? [root.trim()] : [];
+  if (!root || typeof root !== "object") return [];
+  const hasAnswers = Object.prototype.hasOwnProperty.call(root, "answers");
+  const hasAnswer = Object.prototype.hasOwnProperty.call(root, "answer");
+  const collect = (item: unknown): string[] => {
+    if (typeof item === "string") return text(item) ? [item.trim()] : [];
+    if (Array.isArray(item)) return item.flatMap(collect);
+    if (!item || typeof item !== "object") return [];
+    const labels = selectedLabels(item);
+    if (labels) return labels;
+    return Object.values(item as Json).flatMap(collect);
+  };
+  const answers = hasAnswers ? collect(root.answers) : [];
+  if (answers.length > 0) return answers;
+  if (hasAnswer) return collect(root.answer);
+  return collect(selectedLabels(root));
+}
+
+function rejectedOutcome(value: unknown): boolean {
+  return /(?:"status"\s*:\s*"(?:rejected|cancelled|canceled|timeout)"|拒绝|取消|超时|timeout|rejected|cancelled|canceled)/i
+    .test(answerText(value));
+}
+
+function clarificationAnswered(value: unknown, expectedAnswerCount: number): boolean {
+  if (rejectedOutcome(value)) return false;
+  const answers = answerValues(value);
+  return answers.length === expectedAnswerCount && answers.every(text);
+}
+
 function approvalOutcome(value: unknown, expectedLabel: string): "approved" | "denied" | "unknown" {
   const root = unwrap(value);
-  const answer = answerText(root);
-  if (/"status"\s*:\s*"(?:rejected|timeout)"/i.test(answer)) return "denied";
-  const labels = selectedLabels(root);
-  if (labels) return labels.length === 1 && labels[0] === expectedLabel ? "approved" : "denied";
-  if (/拒绝|超时|timeout|rejected|需要修改|调整方案|自定义/i.test(answer)) return "denied";
-  if (typeof root === "string" && root.trim() === expectedLabel) return "approved";
+  if (rejectedOutcome(root)) return "denied";
+  const answers = answerValues(root);
+  if (answers.length > 0) return answers.length === 1 && answers[0] === expectedLabel ? "approved" : "denied";
+  if (/需要修改|调整方案|自定义/i.test(answerText(root))) return "denied";
   return "unknown";
 }
 
@@ -1155,7 +1261,7 @@ function supplyPlanText(values: SupplyPlan): string {
   return SUPPLY_PLAN_FIELDS.map((field) => `${field}=${values[field]}`).join("; ");
 }
 
-function authorizeExternalSend(input: Json, rootDir: string): Json | undefined {
+function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
   const basicFailure = validateExternalSend(input);
   if (basicFailure) return basicFailure;
 
@@ -1165,15 +1271,16 @@ function authorizeExternalSend(input: Json, rootDir: string): Json | undefined {
   }
   const requestFingerprint = fingerprint({ input, template });
   const current = store(rootDir);
-  const existing = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.kind === "external_send" && receipt.request_fingerprint === requestFingerprint && ["pending", "approved", "in_flight", "unknown"].includes(receipt.status)
-  );
-  if (existing && ["unknown", "in_flight"].includes(existing[1].status)) {
-    return deny("WRITE_RESULT_UNKNOWN", `confirmation_id=${existing[0]}; call get_workflow_state to reconcile before any retry.`);
-  }
 
   const workflowState = storedWorkflowState(current.data, input.projectName);
+  const unresolved = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
+    receipt.kind === "external_send" && receipt.request_fingerprint === requestFingerprint &&
+    ["in_flight", "unknown"].includes(receipt.status)
+  );
   if (!workflowState) {
+    if (unresolved) {
+      return deny("WRITE_RESULT_UNKNOWN", `confirmation_id=${unresolved[0]}; call get_workflow_state to reconcile before any retry.`);
+    }
     return deny(
       "WORKFLOW_STATE_REFRESH_REQUIRED",
       "Call get_workflow_state immediately before external distribution; its successful result must identify the same project_name and include allowed_actions.",
@@ -1183,10 +1290,20 @@ function authorizeExternalSend(input: Json, rootDir: string): Json | undefined {
     return deny("BLOCKED_WORKFLOW_ACTION", "The latest authoritative workflow state does not allow create_with_distributions.");
   }
 
+  const existing = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
+    receipt.kind === "external_send" && receipt.request_fingerprint === requestFingerprint &&
+    receipt.workflow_state_fingerprint === workflowState.fingerprint &&
+    ["pending", "approved", "in_flight", "unknown"].includes(receipt.status)
+  );
+  if (existing && ["unknown", "in_flight"].includes(existing[1].status)) {
+    return deny("WRITE_RESULT_UNKNOWN", `confirmation_id=${existing[0]}; call get_workflow_state to reconcile before any retry.`);
+  }
+
   if (existing) {
     const [id, receipt] = existing;
     if (receipt.status === "approved") {
       receipt.status = "in_flight" satisfies ConfirmationStatus;
+      receipt.tool_call_id = toolCallId ?? null;
       receipt.updated_at_ms = Date.now();
       current.data.confirmations[id] = receipt;
       save(current.path, current.data);
@@ -1205,6 +1322,9 @@ function authorizeExternalSend(input: Json, rootDir: string): Json | undefined {
     request_fingerprint: requestFingerprint,
     input_fingerprint: fingerprint(input),
     workflow_state_fingerprint: workflowState.fingerprint,
+    workflow_demand_id: workflowState.demand_id,
+    workflow_demand_version: workflowState.demand_version,
+    workflow_trace_id: workflowState.trace_id,
     safe_summary: createSummary(input, template),
     status: "pending" satisfies ConfirmationStatus,
     created_at_ms: now,
@@ -1218,7 +1338,7 @@ function authorizeExternalSend(input: Json, rootDir: string): Json | undefined {
   );
 }
 
-function authorizeSupplyPlan(input: Json, rootDir: string): Json | undefined {
+function authorizeSupplyPlan(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
   const requirementId = text(input.id) ? input.id : "";
   const requestFingerprint = fingerprint(input);
   const current = store(rootDir);
@@ -1235,6 +1355,7 @@ function authorizeSupplyPlan(input: Json, rootDir: string): Json | undefined {
   if (approved) {
     const [id, receipt] = approved;
     receipt.status = "in_flight" satisfies ConfirmationStatus;
+    receipt.tool_call_id = toolCallId ?? null;
     receipt.updated_at_ms = Date.now();
     current.data.confirmations[id] = receipt;
     save(current.path, current.data);
@@ -1358,8 +1479,10 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
       return blockRequirement(deny("BLOCKED_REQUIREMENT_INCOMPLETE", `payload.${emptyField[0]} is empty; omit optional fields and clarify required fields before validation.`));
     }
   }
-  if (tool === "rank_mcns") return authorizeSupplyPlan(input, rootDir);
-  if (tool === "create_with_distributions") return authorizeExternalSend(input, rootDir);
+  if (tool === "rank_mcns") return authorizeSupplyPlan(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined);
+  if (tool === "create_with_distributions") {
+    return authorizeExternalSend(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined);
+  }
   return undefined;
 }
 
@@ -1383,15 +1506,20 @@ export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
     const promptGate = current.data.prompt_requirement_gate;
     if (promptGate && typeof promptGate === "object" && promptGate.status === "pending" &&
       promptGate.clarification_in_flight === true && promptGate.clarification_fingerprint === fingerprint(input)) {
-      const outcome = event.error ? "denied" : approvalOutcome(event.result ?? event.message, "");
-      const hasAnswers = Array.isArray(event.result?.answers) && event.result.answers.length > 0;
-      if (outcome !== "denied" && hasAnswers) {
+      const result = event.result ?? event.message;
+      const expectedAnswerCount = Array.isArray(input.questions) ? input.questions.length : 0;
+      if (!event.error && clarificationAnswered(result, expectedAnswerCount)) {
         promptGate.status = "clarified";
-        promptGate.updated_at_ms = Date.now();
-        delete promptGate.clarification_in_flight;
-        current.data.prompt_requirement_gate = promptGate;
-        save(current.path, current.data);
+        promptGate.answer_fingerprint = fingerprint(answerValues(result));
+        delete promptGate.last_result_error;
+      } else {
+        promptGate.last_result_error = event.error ? "ask_user_question_failed" :
+          rejectedOutcome(result) ? "clarification_cancelled" : "clarification_result_unrecognized";
       }
+      promptGate.updated_at_ms = Date.now();
+      delete promptGate.clarification_in_flight;
+      current.data.prompt_requirement_gate = promptGate;
+      save(current.path, current.data);
     }
     const marker = findMarker(input);
     if (!marker || !current.data.confirmations[marker.id]) return;
@@ -1410,6 +1538,8 @@ export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
     const expectedLabel = marker.kind === "external_send" ? CONFIRM_SEND_LABEL : CONFIRM_SUPPLY_PLAN_LABEL;
     const outcome = approvalOutcome(event.error ? { status: "rejected" } : event.result ?? event.message, expectedLabel);
     receipt.status = outcome === "approved" ? "approved" : outcome === "denied" ? "denied" : "pending";
+    if (outcome === "unknown") receipt.last_result_error = "confirmation_result_unrecognized";
+    else delete receipt.last_result_error;
     receipt.updated_at_ms = Date.now();
     current.data.confirmations[marker.id] = receipt;
     save(current.path, current.data);
@@ -1419,15 +1549,17 @@ export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
   if (tool !== "create_with_distributions" && tool !== "rank_mcns") return;
   const kind = tool === "create_with_distributions" ? "external_send" : "supply_plan";
   const requestFingerprint = fingerprint(input);
-  const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.kind === kind &&
-    (tool === "create_with_distributions" ? receipt.input_fingerprint : receipt.request_fingerprint) === requestFingerprint &&
-    receipt.status === "in_flight"
-  );
+  const afterToolCallId = text(event.toolCallId) ? event.toolCallId.trim() : undefined;
+  const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) => {
+    if (receipt.kind !== kind || receipt.status !== "in_flight") return false;
+    if (afterToolCallId && text(receipt.tool_call_id)) return receipt.tool_call_id === afterToolCallId;
+    return (tool === "create_with_distributions" ? receipt.input_fingerprint : receipt.request_fingerprint) === requestFingerprint;
+  });
   if (!inFlight) return;
   const [id, receipt] = inFlight;
   receipt.status = successful(event.error ? { isError: true } : event.result) ? "consumed" : "unknown";
   receipt.updated_at_ms = Date.now();
+  delete receipt.tool_call_id;
   current.data.confirmations[id] = receipt;
   if (tool === "create_with_distributions" && text(input.projectName)) {
     delete current.data.workflow_states[workflowStateKey(input.projectName)];

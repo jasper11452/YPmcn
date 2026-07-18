@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { parseStandardBrief } from "../dist/standard-brief.js";
+import { parseStandardBrief, renderStandardBriefReply } from "../dist/standard-brief.js";
 
 const EXACT_BRIEF = "品牌：阿里巴巴；项目：千问61儿童节；平台：小红书；档期：2026-07-30至2026-07-31；价格：4w以下；返点：30%以上；内容：类似于AI帮忙送儿童节礼物；账号类型：母婴类，亲子相关；数量：5个；提报截止：2026-07-20 11:00。";
 
@@ -57,5 +57,17 @@ describe("deterministic standard Brief parser", () => {
       assert.match(preview.atoms.find((atom) => atom.field === "accountTaxonomy")?.sourceText ?? "", /母婴类，亲子相关/);
       assert.equal(preview.gate, "semantic_ambiguity");
     }
+  });
+
+  it("extracts the labeled Brief from operator instructions and renders one exact reply", () => {
+    const preview = parseStandardBrief(`请输出权威预览并且确认前不要调用任何 Tool。${EXACT_BRIEF}`);
+    assertExactPreview(preview);
+    const reply = renderStandardBriefReply(preview);
+    assert.match(reply, /"gate": "semantic_ambiguity"/);
+    assert.match(reply, /"unresolvedCount": 2/);
+    assert.match(reply, /价格口径/);
+    assert.match(reply, /账号类型/);
+    assert.match(reply, /确认完成前不得调用任何 Tool/);
+    assert.doesNotMatch(reply, /请输出权威预览/);
   });
 });

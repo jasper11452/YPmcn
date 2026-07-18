@@ -11,9 +11,16 @@ import {
   isStandardBrief,
   parseStandardBrief,
   renderStandardBriefPreview,
+  renderStandardBriefReply,
 } from "./standard-brief.js";
 
-export { isStandardBrief, parseStandardBrief, renderStandardBriefPreview } from "./standard-brief.js";
+export {
+  extractStandardBrief,
+  isStandardBrief,
+  parseStandardBrief,
+  renderStandardBriefPreview,
+  renderStandardBriefReply,
+} from "./standard-brief.js";
 
 function localTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
@@ -93,6 +100,19 @@ export function createYpmcnPlugin(
     description: "按 mvp-v2 契约执行语义 ID 链路、人工门禁和可恢复回收状态机。",
     register(api) {
     const rootDir = api.rootDir ?? process.cwd();
+    api.on("before_agent_reply", async (event) => {
+      const prompt = typeof event?.cleanedBody === "string" ? event.cleanedBody : "";
+      if (!isStandardBrief(prompt)) return;
+      const preview = parseStandardBrief(prompt, new Date(), localTimeZone());
+      if (preview.gate === "ready") return;
+      beginPromptTurn(rootDir, preview);
+      return {
+        handled: true,
+        reply: { text: renderStandardBriefReply(preview) },
+        reason: `ypmcn_requirement_${preview.gate}`,
+      };
+    });
+
     api.on("before_prompt_build", async (event) => {
       const prompt = typeof event?.prompt === "string" ? event.prompt : "";
       const now = new Date();
@@ -104,6 +124,9 @@ export function createYpmcnPlugin(
         prependContext: [
           buildRequirementRuntimeClock(now, timeZone),
           preview ? renderStandardBriefPreview(preview) : "",
+          preview && preview.gate !== "ready"
+            ? `YPmcn mandatory unresolved-Brief response: do not call any Tool. Return the following response exactly, without recounting, paraphrasing, or adding text:\n<YPmcnExactReply>\n${renderStandardBriefReply(preview)}\n</YPmcnExactReply>`
+            : "",
         ].filter(Boolean).join("\n\n"),
       };
     });
