@@ -26,7 +26,7 @@
     },
     "requirementRecord": {
       "path": "schemas/requirement-record.schema.json",
-      "hash": "7050a7bbb97c8b884dd37584d0ebf5ecf63e2323446edc99f023fba0e76d9633"
+      "hash": "2ddef5430cd6499ad4b3b9ebb7bce516fc26bad71e4cdf2bbb905d813ec7e22c"
     },
     "requirementSnapshot": {
       "path": "schemas/requirement-snapshot.schema.json",
@@ -42,85 +42,70 @@
     }
   },
   "canonicalInput": {
-    "field": "raw_messages_json",
-    "transportType": "canonical-json-text",
-    "storedType": "json-array",
+    "field": "rawMessagesJson",
+    "transportType": "json-object",
+    "storedType": "json-object",
+    "schemaVersion": "ypmcn-brief-v1",
     "canonicalization": "recursive-key-sort-json-v1-preserve-array-order",
-    "compatibilityAliases": [
-      "raw_messages"
-    ],
-    "whenCanonicalAndAliasPresent": "parse-normalize-and-require-deep-equality",
-    "onConflict": "fail-closed",
-    "conflictError": "CANONICAL_INPUT_CONFLICT",
+    "requiredMembers": ["originalBrief", "atoms", "coverageCheck"],
+    "compatibilityAliases": [],
     "dictionaryMayContainValues": false
   },
   "valuePolicies": {
-    "budget": {
-      "lowerBoundField": "budget_min_cents",
-      "upperBoundField": "budget_max_cents",
-      "rawAuditField": "budget_raw",
-      "type": "integer",
-      "unit": "CNY-cent",
+    "mappedRanges": {
+      "storageType": "varchar(255)",
+      "format": "[min,max] JSON-array text without spaces",
       "minimum": 0,
-      "boundsRequired": true,
-      "ordering": "lower <= upper",
-      "exactValueRepresentation": "lower === upper",
+      "boundsRequired": 2,
+      "ordering": "min <= max",
+      "exactValueRepresentation": "min === max",
+      "upperBoundRepresentation": "min === 0",
+      "lowerOnlyBehavior": "clarification-required-unless-a-finite-upper-bound-is-confirmed",
+      "rateFields": ["photoInteract", "femaleRate", "age1Rate", "age2Rate", "age3Rate", "age4Rate", "age5Rate", "age6Rate"],
+      "rateMaximum": 1,
+      "mappingAuthority": "field_match_mapping",
       "onViolation": "VALUE_RANGE_INVALID"
+    },
+    "creatorUnitPrice": {
+      "fields": ["kolOfficialPriceL1", "kolOfficialPriceL2", "kolOfficialPriceL3"],
+      "businessRequiredOneOf": true,
+      "unit": "CNY-yuan",
+      "storage": "mappedRanges",
+      "tierAmbiguityBehavior": "clarification-required"
+    },
+    "projectTotalBudget": {
+      "dedicatedField": null,
+      "behavior": "preserve-verbatim-in-rawMessagesJson"
     },
     "rebate": {
-      "lowerBoundField": "rebate_min_rate",
-      "upperBoundField": "rebate_max_rate",
-      "rawAuditField": "rebate_raw",
-      "type": "number",
-      "unit": "fraction",
-      "minimum": 0,
-      "maximum": 1,
-      "boundsRequired": true,
-      "ordering": "lower <= upper",
-      "percentInputNormalization": "divide-by-100-before-persist",
-      "onViolation": "VALUE_RANGE_INVALID"
+      "field": "rebate",
+      "type": "string",
+      "businessRequired": false,
+      "behaviorWhenAbsent": "Agent must not invent; Provider owns physical non-null handling"
     },
     "deadlines": {
-      "timezoneRequired": true,
-      "format": "RFC3339-date-time",
+      "format": "YYYY-MM-DD HH:mm:ss",
       "missingBehavior": "clarification-required",
       "types": [
         {
-          "name": "supplier_response_deadline_at",
-          "owner": "supplier-response",
-          "required": true
-        },
-        {
-          "name": "client_submission_deadline_at",
+          "name": "submissionDeadlineAt",
           "owner": "client-plan-submission",
           "required": true
         },
         {
-          "name": "content_publish_deadline_at",
-          "owner": "content-publication",
-          "required": true
-        }
-      ],
-      "compatibilityInputs": [
-        {
-          "field": "submission_deadline_at",
-          "mapsTo": "client_submission_deadline_at",
-          "normalization": "RFC3339-instant",
-          "whenBothPresent": "require-equal-after-normalization"
+          "name": "projectStartStart",
+          "owner": "project-window-start",
+          "required": false
         },
         {
-          "field": "submission_deadline_raw",
-          "mapsTo": "client_submission_deadline_at",
-          "normalization": "parse-to-RFC3339-instant",
-          "whenBothPresent": "require-equal-after-normalization"
+          "name": "projectStartEnd",
+          "owner": "project-window-end",
+          "required": false
         }
       ],
-      "compatibilityConflictBehavior": "fail-closed",
-      "compatibilityConflictError": "DEADLINE_ORDER_INVALID",
-      "ordering": [
-        "supplier_response_deadline_at <= client_submission_deadline_at",
-        "client_submission_deadline_at <= content_publish_deadline_at"
-      ],
+      "rawWordingStorage": "matching rawMessagesJson atom",
+      "prohibitedLegacyField": "submissionDeadlineRaw",
+      "ordering": ["projectStartStart <= projectStartEnd when both are present"],
       "onViolation": "DEADLINE_ORDER_INVALID"
     },
     "platformSplit": {
@@ -128,11 +113,9 @@
         "xiaohongshu",
         "douyin"
       ],
-      "headEntity": "requirement_headers",
       "executionEntity": "customer_demands",
       "executionUnitPlatformCardinality": 1,
-      "multiPlatformBehavior": "one-child-requirement-per-platform-under-one-head",
-      "sharedCanonicalInputAtHead": true,
+      "multiPlatformBehavior": "one independently validated customer_demands record per platform",
       "crossPlatformExecutionAllowed": false,
       "onUnsplittableInput": "INVALID_INPUT"
     }
@@ -281,7 +264,7 @@
     ],
     "algorithmContract": "algorithms.json",
     "algorithmReadinessRequiredForProduction": true,
-    "databaseDeploymentStatus": "external-unverified",
+    "databaseDeploymentStatus": "development-read-only-verified-2026-07-18",
     "legacyProfileCapability": "detection-only",
     "productionReadiness": "NO-GO"
   }

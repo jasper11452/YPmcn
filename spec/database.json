@@ -2,15 +2,15 @@
   "schemaVersion": 2,
   "profile": "mvp-v2",
   "readinessStatus": "development-observed",
-  "verifiedAt": "2026-07-16",
+  "verifiedAt": "2026-07-18",
   "database": {
     "engine": "mysql",
     "name": "ypmcn",
     "environment": "development",
     "evidence": [
-      "D:\\data_creator_profiles_api SQLAlchemy models",
-      "read-only SQLAlchemy inspection against development MySQL",
-      "development Provider tools/list"
+      "direct read-only information_schema inspection against ypmcn MySQL 8.0.36",
+      "exact COUNT(*) and index inspection on customer_demands, field_match_mapping, idempotency, distribution, inquiry, candidate and recommendation tables",
+      "D:\\data_creator_profiles_api SQLAlchemy models"
     ]
   },
   "businessDataAuthority": {
@@ -30,6 +30,7 @@
   "mvpEntityBaseline": {
     "entities": [
       "customer_demands",
+      "field_match_mapping",
       "xhs_creator_accounts",
       "dy_creator_accounts",
       "creator_supply_offers",
@@ -43,7 +44,9 @@
       "creator_recommendation_items",
       "submission_batches",
       "creator_submissions",
-      "mcp_tool_call_ledger"
+      "mcp_tool_call_ledger",
+      "core_project",
+      "core_distribution"
     ],
     "creatorBusinessIdentity": [
       "platform",
@@ -54,7 +57,8 @@
       "businessKey": [
         "customer_demands.demandId",
         "customer_demands.demandVersion"
-      ]
+      ],
+      "businessKeyUniqueInDatabase": false
     },
     "supplierAuthority": {
       "table": "core_supplier",
@@ -86,6 +90,9 @@
       ],
       "mcn_recommendation_items": [
         "rank_mcns"
+      ],
+      "mcn_inquiries": [
+        "sync_mcn_inquiry_status"
       ],
       "mcn_inquiry_status_syncs": [
         "sync_mcn_inquiry_status"
@@ -188,36 +195,60 @@
       "rebateSource": {
         "authority": "core_supplier.default_rebate_rate",
         "relationship": "creator_supply_offers.supplier_id -> core_supplier.id",
-        "rule": "The current creator_supply_offers table has no persisted rebate_min_rate or rebate_max_rate columns. Demand rebate fields are thresholds and must never be reported as an actual supplier rebate."
+        "rule": "The current creator_supply_offers table has no persisted rebate_min_rate or rebate_max_rate columns. customer_demands.rebate is original customer wording and must never be reported as an actual supplier rebate."
       }
     },
-    "budgetSemantics": {
-      "budgetMinCents": "project total budget lower bound only",
-      "budgetMaxCents": "project total budget upper bound only",
-      "budgetRaw": "original project total budget wording only",
+    "requirementRangeSemantics": {
+      "storageType": "varchar(255)",
+      "canonicalFormat": "[min,max] JSON-array text without spaces",
+      "bounds": "finite non-negative numbers with min <= max",
+      "rateBounds": "0 <= min <= max <= 1",
       "creatorUnitPriceFields": [
         "kolOfficialPriceL1",
         "kolOfficialPriceL2",
         "kolOfficialPriceL3"
       ],
-      "rule": "A creator unit-price request must not be copied into budgetMinCents, budgetMaxCents or budgetRaw. If the L1/L2/L3 tier is ambiguous, ask the user to choose the tier before calling validate_requirement."
+      "businessRequiredOneOf": [
+        "kolOfficialPriceL1",
+        "kolOfficialPriceL2",
+        "kolOfficialPriceL3"
+      ],
+      "databaseNullableBusinessRequired": true,
+      "mappingTable": "field_match_mapping",
+      "mappingLookup": ["platform", "source_field_name", "match_status=已匹配"],
+      "agentBoundary": "Agent persists only customer_demands source fields; backend splits the canonical range into the confirmed target Min/Max parameters.",
+      "projectTotalBudgetPolicy": "No current dedicated customer_demands column; preserve verbatim in rawMessagesJson.",
+      "rebatePolicy": "customer_demands.rebate stores original wording when supplied; rebate remains business-optional and must not be invented."
     }
   },
   "observedTables": {
     "customer_demands": {
       "recordSchema": "schemas/requirement-record.schema.json",
-      "rowCountObserved": 14,
+      "rowCountObserved": 0,
+      "columnCountObserved": 61,
       "primaryKey": [
         "id"
       ],
-      "businessKey": [
+      "businessKeyCandidate": [
         "demandId",
         "demandVersion"
-      ]
+      ],
+      "uniqueIndexes": ["PRIMARY(id)"],
+      "nonUniqueIndexes": ["demandId", "status"]
+    },
+    "field_match_mapping": {
+      "rowCountObserved": 110,
+      "matchedRowCountObserved": 110,
+      "platformCounts": {
+        "xiaohongshu": 55,
+        "douyin": 55
+      },
+      "exactDuplicateTriplesObserved": 0,
+      "lookup": ["platform", "source_field_name", "match_status=已匹配"],
+      "authority": "confirmed-runtime-range-to-target-parameter-mapping"
     },
     "xhs_creator_accounts": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_profile",
-      "rowCountObserved": 617,
+      "rowCountObserved": 619,
       "primaryKey": [
         "id"
       ],
@@ -226,7 +257,6 @@
       ]
     },
     "dy_creator_accounts": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_profile",
       "rowCountObserved": 2373,
       "primaryKey": [
         "id"
@@ -255,14 +285,12 @@
       ]
     },
     "creator_candidate_pool": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/candidate_record",
-      "rowCountObserved": 9653,
+      "rowCountObserved": 17291,
       "primaryKey": [
         "candidate_id"
       ]
     },
     "core_supplier": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/supplier",
       "rowCountObserved": 280,
       "primaryKey": [
         "id"
@@ -276,64 +304,60 @@
       ]
     },
     "mcn_recommendation_items": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/mcn_recommendation_item",
-      "rowCountObserved": 53,
+      "rowCountObserved": 116,
       "primaryKey": [
         "item_id"
       ]
     },
     "mcn_inquiries": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/mcn_inquiry",
       "rowCountObserved": 0,
       "status": "schema-present-no-development-evidence"
     },
     "mcn_inquiry_status_syncs": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/mcn_inquiry",
       "rowCountObserved": 0,
-      "status": "metadata-only-current-sync-tool"
+      "status": "schema-present-local-source-integrated-remote-runtime-unverified"
     },
     "mcn_submission_items": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/mcn_submission_item",
       "rowCountObserved": 0,
       "status": "schema-present-no-development-evidence"
     },
     "recommendation_runs": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/recommendation_run",
-      "rowCountObserved": 2
+      "rowCountObserved": 4
     },
     "creator_recommendation_items": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_recommendation_item",
-      "rowCountObserved": 30
+      "rowCountObserved": 43
     },
     "submission_batches": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/submission_batch",
       "rowCountObserved": 1
     },
     "creator_submissions": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_submission",
       "rowCountObserved": 3
     },
     "mcp_tool_call_ledger": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/tool_call_ledger",
       "rowCountObserved": 0,
-      "status": "schema-present-not-used-by-current-tools"
+      "status": "schema-present-local-source-integrated-remote-runtime-unverified",
+      "uniqueIndexes": ["trace_id", "idempotency_key"],
+      "requestHashStorage": "request_summary_json.request_hash",
+      "resourceStorage": "response_summary_json.resources"
+    },
+    "core_project": {
+      "rowCountObserved": 50,
+      "primaryKey": ["id"],
+      "clientRequestIdPresent": false
+    },
+    "core_distribution": {
+      "rowCountObserved": 61,
+      "primaryKey": ["id"],
+      "uniqueIdentity": ["project_id", "supplier_id"],
+      "authoritativeStateFields": ["status", "row_count", "last_saved_at", "submitted_at", "distributed_at"]
     }
   },
   "entities": {
     "customer_demands": {
       "recordSchema": "schemas/requirement-record.schema.json"
     },
-    "creator_profiles": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_profile"
-    },
     "supply_offers": {
       "recordSchema": "schemas/domain-records.schema.json#/$defs/supply_offer"
-    },
-    "candidate_records": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/candidate_record"
-    },
-    "recommendation_records": {
-      "recordSchema": "schemas/domain-records.schema.json#/$defs/creator_recommendation_item"
     }
   },
   "toolDatabaseEffects": {
@@ -348,6 +372,7 @@
     "search_creators": {
       "reads": [
         "customer_demands",
+        "field_match_mapping",
         "xhs_creator_accounts",
         "dy_creator_accounts",
         "creator_supply_offers",
@@ -382,20 +407,32 @@
     "create_with_distributions": {
       "reads": [],
       "writes": [],
+      "authoritativeExternalWrites": [
+        "core_project",
+        "core_distribution"
+      ],
       "externalDependencies": [
         "https://ypmcn.eshypdata.com/api/suppliers/",
         "https://ypmcn.eshypdata.com/api/projects/create-with-distributions/"
       ],
-      "localDatabaseProof": "not-applicable"
+      "currentIdempotencyLimitation": "core_project has no client_request_id; a lost response cannot be reconciled to one unique project"
     },
     "sync_mcn_inquiry_status": {
       "reads": [
+        "customer_demands",
+        "mcn_recommendation_items",
+        "core_project",
+        "core_distribution",
+        "core_notificationlog",
+        "mcn_inquiries",
         "mcn_inquiry_status_syncs"
       ],
       "writes": [
+        "mcn_inquiries",
         "mcn_inquiry_status_syncs"
       ],
-      "currentLimitation": "Does not query provider project status and does not create or update mcn_inquiries."
+      "localSourceBehavior": "Reads the unique project_id + supplier_id distribution and latest notification, updates the same inquiry attempt for the same project, creates the next attempt for a new project, and returns explicit recovery context.",
+      "currentLimitation": "Implemented and locally verified in the independent backend worktree, but not yet deployed and write-verified on the remote development runtime."
     },
     "ingest_mcn_submissions": {
       "reads": [
@@ -493,8 +530,14 @@
         "customer_demands",
         "creator_candidate_pool",
         "mcn_recommendation_items",
+        "mcp_tool_call_ledger",
+        "core_project",
+        "core_distribution",
         "mcn_inquiries",
+        "mcn_submission_items",
         "recommendation_runs",
+        "creator_recommendation_items",
+        "submission_batches",
         "creator_submissions"
       ],
       "writes": []
@@ -510,6 +553,11 @@
       "id": "ledger-unused",
       "severity": "high",
       "effect": "Write calls do not have a shared persistent idempotency and reconciliation record."
+    },
+    {
+      "id": "external-create-missing-client-request-id",
+      "severity": "high",
+      "effect": "core_project has no stable client request key, so an external create response lost after commit cannot be uniquely reconciled without one minimal column and unique index."
     },
     {
       "id": "audit-json-only",
@@ -534,9 +582,9 @@
       "status": "development-observed"
     },
     {
-      "id": "project-budget-separation",
-      "requirement": "Project total budget fields are not populated from creator unit-price requirements.",
-      "status": "required-not-enforced-by-current-mcp-proxy"
+      "id": "requirement-range-format",
+      "requirement": "Mapped customer demand ranges use canonical [min,max] text and are split only by the authoritative field_match_mapping backend path.",
+      "status": "hook-and-skill-enforced"
     },
     {
       "id": "write-idempotency",

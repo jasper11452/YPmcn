@@ -57,7 +57,13 @@ describe("current Endpoint contract loader", () => {
     assert.equal(workflow.stateAuthority.sessionLifecycleRequired, false);
     assert.equal(workflow.stateAuthority.providerOutputSchemaAdvertised, false);
     assert.equal(workflow.stateAuthority.missingEvidenceBehavior, "no-phase-advance");
+    assert.equal(workflow.stateAuthority.ledger.status, "schema-present-not-used-by-current-tools");
+    assert.match(workflow.stateAuthority.currentProviderGaps.sync_mcn_inquiry_status, /does not query provider state or upsert mcn_inquiries/);
     assert.match(workflow.policies.rankCreatorsPrerequisite, /distribution.*recovery/i);
+    const distributionTransitions = workflow.transitions.filter((item) =>
+      ["create_with_distributions", "sync_mcn_inquiry_status"].includes(item.trigger?.name)
+    );
+    assert.ok(distributionTransitions.some((item) => item.implementationStatus === "target-blocked"));
     const rankTransition = workflow.transitions.find((item) => item.trigger?.name === "rank_creators");
     assert.ok(rankTransition.guards.some((guard) => /distribution/.test(guard)));
     assert.ok(rankTransition.guards.some((guard) => /recovery/.test(guard)));
@@ -108,7 +114,7 @@ describe("current Endpoint input validation", () => {
         cron_job_id: null, scheduled_recover_at: null,
       }],
       ["ingest_mcn_submissions", { inquiry_id: "inquiry-1", items: [{ kwUid: "creator-1" }] }],
-      ["manual_source_creators", { demand_id: "demand-1", demand_version: 1 }],
+      ["manual_source_creators", { requirement_id: "req-1" }],
       ["rank_creators", { requirement_id: "req-1", limit: 20 }],
       ["create_submission_batch", { run_id: "1", risk_confirmation: null }],
       ["record_client_feedback", { run_id: "1", feedback_items: [{ status: "accepted" }] }],

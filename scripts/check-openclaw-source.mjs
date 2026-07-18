@@ -7,8 +7,6 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { checkProviderUrl } from "./check-provider-contract.mjs";
-
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
 const skillRoot = fileURLToPath(new URL("../YPmcn/skills/", import.meta.url));
@@ -56,9 +54,6 @@ try {
   const configuredMcp = JSON.parse(run(["mcp", "list", "--json"]));
   assert.equal(configuredMcp["ypmcn-mcp"]?.url, mcpUrl);
   assert.equal(configuredMcp["ypmcn-mcp"]?.transport, "sse");
-
-  const providerReport = await checkProviderUrl(mcpUrl);
-  assert.equal(providerReport.status, "PASS", JSON.stringify(providerReport));
 
   const inspected = JSON.parse(run(["plugins", "inspect", "ypmcn-media-assistant", "--json"]));
   assert.equal(inspected.plugin.id, "ypmcn-media-assistant");

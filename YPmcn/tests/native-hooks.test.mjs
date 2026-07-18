@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { after, before, describe, it } from "node:test";
 
-import plugin, { YPMCN_FAST_PATH } from "../dist/index.js";
+import plugin, { buildRequirementRuntimeClock, createYpmcnPlugin, YPMCN_FAST_PATH } from "../dist/index.js";
 
 const tempDir = mkdtempSync(join(tmpdir(), "ypmcn-native-hooks-"));
 const stateFile = join(tempDir, "state", "confirmation_guard.json");
+const templateFile = join(tempDir, "skills", "media-assistant", "assets", "wecom_inquiry_template.txt");
 const hooks = new Map();
 
 const distributionParams = (overrides = {}) => ({
@@ -20,7 +22,43 @@ const distributionParams = (overrides = {}) => ({
   ...overrides,
 });
 
+const requirementPayload = (overrides = {}) => ({
+  status: "ready",
+  platform: "xiaohongshu",
+  quantityTotal: 10,
+  submissionDeadlineAt: "2099-07-17 12:00:00",
+  rawMessagesJson: {
+    schemaVersion: "ypmcn-brief-v1",
+    originalBrief: "小红书，10位达人，单达人L1预算5000元，2099年7月17日12点前",
+    atoms: [
+      { sourceText: "小红书", disposition: "mapped", targetField: "platform", confidence: 1, inferred: false },
+      { sourceText: "10位达人", disposition: "mapped", targetField: "quantityTotal", confidence: 1, inferred: false },
+      { sourceText: "单达人L1预算5000元", disposition: "mapped", targetField: "kolOfficialPriceL1", confidence: 1, inferred: false },
+      { sourceText: "2099年7月17日12点前", disposition: "mapped", targetField: "submissionDeadlineAt", confidence: 1, inferred: false },
+    ],
+    coverageCheck: { atomCount: 4, mappedCount: 4, preservedCount: 0, unresolvedCount: 0 },
+  },
+  kolOfficialPriceL1: "[5000,5000]",
+  ...overrides,
+});
+
+const supplyPlan = (overrides = {}) => ({
+  demand_count: 10,
+  database_candidate_count: 20,
+  supply_demand_ratio: 2,
+  target_submission_count: 20,
+  estimated_valid_return_count: 18,
+  estimated_gap_count: 2,
+  recommended_mcn_count: 8,
+  mcn_covered_creator_count: 18,
+  recommended_manual_creator_count: 2,
+  mcn_manual_creator_ratio: "18:2",
+  ...overrides,
+});
+
 before(() => {
+  mkdirSync(dirname(templateFile), { recursive: true });
+  copyFileSync(fileURLToPath(new URL("../skills/media-assistant/assets/wecom_inquiry_template.txt", import.meta.url)), templateFile);
   plugin.register({
     rootDir: tempDir,
     logger: { error() {} },
@@ -37,6 +75,7 @@ function confirmationId(result) {
 }
 
 async function requestConfirmation(params = distributionParams()) {
+  await recordWorkflowState(params.projectName);
   const blocked = await hooks.get("before_tool_call")({
     toolName: "mcp__ypmcn__create_with_distributions",
     params,
@@ -48,28 +87,77 @@ async function requestConfirmation(params = distributionParams()) {
 }
 
 async function answerConfirmation(id, answer = "确认发送") {
+  const state = JSON.parse(readFileSync(stateFile, "utf8"));
+  const summary = state.confirmations[id].safe_summary;
+  const params = {
+    questions: [{
+      question: [
+        `外发确认。[YP_CONFIRMATION:${id}]`,
+        `project_name=${summary.project_name}`,
+        `supplier_count=${summary.supplier_count}`,
+        `deadline=${summary.deadline}`,
+        `column_names=${JSON.stringify(summary.column_names)}`,
+        `message_template_id=${summary.message_template_id}`,
+        `message_template_sha256=${summary.message_template_sha256}`,
+      ].join("；"),
+      options: [{ label: "确认发送" }, { label: "需要修改" }],
+    }],
+  };
+  assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
   await hooks.get("after_tool_call")({
     toolName: "AskUserQuestion",
-    params: {
-      questions: [{
-        question: `即将向 1 家机构发送询价。[YP_CONFIRMATION:${id}]`,
-        options: [{ label: "确认发送" }, { label: "需要修改" }],
-      }],
-    },
+    params,
     result: { status: "submitted", answers: [{ selected_labels: [answer] }] },
   }, {});
 }
 
 async function answerSupplyPlanConfirmation(id, answer = "确认供给方案") {
+  const state = JSON.parse(readFileSync(stateFile, "utf8"));
+  const plan = state.confirmations[id].safe_summary;
+  const params = {
+    questions: [{
+      question: [
+        `供给方案。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
+        ...Object.entries(plan).map(([field, value]) => `${field}=${value}`),
+      ].join("；"),
+      options: [{ label: "确认供给方案" }, { label: "调整方案" }],
+    }],
+  };
+  assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
   await hooks.get("after_tool_call")({
     toolName: "AskUserQuestion",
-    params: {
-      questions: [{
-        question: `供需比 2:1，建议机构 8 家、手扒 2 人。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
-        options: [{ label: "确认供给方案" }, { label: "调整方案" }],
-      }],
-    },
+    params,
     result: { status: "submitted", answers: [{ selected_labels: [answer] }] },
+  }, {});
+}
+
+async function recordSearch(requirementId, plan = supplyPlan(), shape = "nested") {
+  const result = shape === "root"
+    ? { success: true, ...plan, error: null }
+    : shape === "data"
+      ? { success: true, data: { ...plan }, error: null }
+      : { success: true, data: { supply_plan: plan }, error: null };
+  await hooks.get("after_tool_call")({
+    toolName: "mcp__ypmcn__search_creators",
+    params: { id: requirementId },
+    result,
+  }, {});
+}
+
+async function recordWorkflowState(projectName, allowedActions = ["create_with_distributions"]) {
+  const params = { demand_id: `demand-${projectName}`, demand_version: 1 };
+  assert.equal(await hooks.get("before_tool_call")({
+    toolName: "mcp__ypmcn__get_workflow_state",
+    params,
+  }, {}), undefined);
+  await hooks.get("after_tool_call")({
+    toolName: "mcp__ypmcn__get_workflow_state",
+    params,
+    result: {
+      success: true,
+      data: { workflow_state: { project_name: projectName, allowed_actions: allowedActions } },
+      error: null,
+    },
   }, {});
 }
 
@@ -78,15 +166,61 @@ describe("YP Action native hook guard", () => {
     assert.deepEqual([...hooks.keys()].sort(), ["after_tool_call", "before_prompt_build", "before_tool_call", "session_end"]);
   });
 
+  it("fails closed when the before-tool guard itself throws", async () => {
+    const failingHooks = new Map();
+    const errors = [];
+    createYpmcnPlugin({
+      beforeTool() { throw new Error("guard exploded"); },
+    }).register({
+      rootDir: tempDir,
+      logger: { error(message) { errors.push(message); } },
+      on(name, handler) { failingHooks.set(name, handler); },
+    });
+    const result = await failingHooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload() },
+    }, {});
+    assert.deepEqual(result, {
+      block: true,
+      blockReason: "YPmcn guard unavailable: guard exploded",
+    });
+    assert.deepEqual(errors, ["before_tool_call guard failed: guard exploded"]);
+  });
+
   it("injects the standard brief fast path before prompt construction", async () => {
     const result = await hooks.get("before_prompt_build")({ prompt: "小红书达人需求", messages: [] }, {});
     assert.equal(result.prependSystemContext, YPMCN_FAST_PATH);
+    assert.match(result.prependContext, /YPmcn authoritative requirement clock/);
+    assert.match(result.prependContext, /currentLocalDateTime: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    assert.match(result.prependContext, /timeZone: \S+/);
     assert.match(result.prependSystemContext, /first business call is validate_requirement/);
-    assert.match(result.prependSystemContext, /divided by 100/);
+    assert.match(result.prependSystemContext, /50% becomes 0\.5/);
+    assert.match(result.prependSystemContext, /"\[min,max\]"/);
     assert.match(result.prependSystemContext, /YYYY-MM-DD HH:mm:ss/);
+    assert.match(result.prependSystemContext, /missing_required/);
+    assert.match(result.prependSystemContext, /semantic_ambiguity/);
+    assert.match(result.prependSystemContext, /Missing optional fields never block/);
+    assert.match(result.prependSystemContext, /one valid kolOfficialPriceL1\/L2\/L3/);
+    assert.match(result.prependSystemContext, /no concrete candidate value usable for that field/);
+    assert.match(result.prependSystemContext, /bare clock time such as 15:00.*does not mean today/);
+    assert.match(result.prependSystemContext, /一批\/some\/尽量多 without a number are missing quantity/);
+    assert.match(result.prependSystemContext, /never short-circuits diagnostics/);
+    assert.match(result.prependSystemContext, /one compact, self-contained question/);
+    assert.match(result.prependSystemContext, /projectName, brandName, product, project total budget, and rebate are optional/);
+    assert.match(result.prependSystemContext, /free-text constraint.*is not semantic ambiguity/);
+    assert.match(result.prependSystemContext, /must not be moved only to rawMessagesJson to bypass ambiguity/);
+    assert.match(result.prependSystemContext, /official price lacks an L1\/L2\/L3 tier/);
+    assert.match(result.prependSystemContext, /__UNRESOLVED__/);
+    assert.match(result.prependSystemContext, /schemaVersion="ypmcn-brief-v1"/);
+    assert.match(result.prependSystemContext, /sourceText copied as an exact originalBrief substring/);
+    assert.match(result.prependSystemContext, /coverageCheck uses atomCount, mappedCount, preservedCount, and unresolvedCount/);
     assert.match(result.prependSystemContext, /requirement_ready.*search_creators/);
     assert.match(result.prependSystemContext, /candidate_pool_ready.*rank_mcns/);
     assert.match(result.prependSystemContext, /supply_demand_ratio/);
+    assert.match(result.prependSystemContext, /recommended_manual_creator_count=max/);
+    assert.match(result.prependSystemContext, /Institution count and creator count must never be divided/);
+    assert.match(result.prependSystemContext, /notification_template/);
+    assert.match(result.prependSystemContext, /export_csv/);
     assert.match(result.prependSystemContext, /successful WeCom distribution plus completed recovery/);
     assert.match(result.prependSystemContext, /sync -> ingest_mcn_submissions.*-> sync/);
     assert.match(result.prependSystemContext, /create_submission_batch\(\{run_id\}\)/);
@@ -94,6 +228,13 @@ describe("YP Action native hook guard", () => {
     assert.match(result.prependSystemContext, /generic tool failure gets no automatic retry/);
     assert.match(result.prependSystemContext, /including timeout_seconds/);
     assert.match(result.prependSystemContext, /Do not read mcporter or another Skill/);
+  });
+
+  it("formats a deterministic local requirement clock", () => {
+    const context = buildRequirementRuntimeClock(new Date("2026-07-17T06:30:45Z"), "Asia/Shanghai");
+    assert.match(context, /currentLocalDateTime: 2026-07-17 14:30:45/);
+    assert.match(context, /timeZone: Asia\/Shanghai/);
+    assert.match(context, /明天\/tomorrow/);
   });
 
   it("keeps tool references aligned with fail-closed requirement and recovery gates", () => {
@@ -163,11 +304,15 @@ describe("YP Action native hook guard", () => {
     assert.match(blocked.blockReason, /BLOCKED_NO_DRY_RUN/);
   });
 
-  it("blocks incomplete or ambiguous requirement writes", async () => {
-    for (const payload of [
-      { projectName: "", status: "ready" },
-      { projectName: "测试", status: "draft" },
+  it("blocks missing required requirement fields", async () => {
+    for (const field of [
+      "platform",
+      "quantityTotal",
+      "submissionDeadlineAt",
+      "rawMessagesJson",
     ]) {
+      const payload = requirementPayload();
+      delete payload[field];
       const blocked = await hooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__validate_requirement",
         params: { payload },
@@ -175,11 +320,233 @@ describe("YP Action native hook guard", () => {
       }, {});
       assert.equal(blocked.block, true);
       assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_INCOMPLETE/);
+      assert.match(blocked.blockReason, new RegExp(field));
     }
+  });
+
+  it("blocks draft, serialized JSON, and unresolved placeholders", async () => {
+    for (const payload of [
+      requirementPayload({ status: "draft" }),
+      requirementPayload({ rawMessagesJson: "{\"role\":\"client\"}" }),
+      requirementPayload({ note: "__UNRESOLVED__" }),
+    ]) {
+      const blocked = await hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__validate_requirement",
+        params: { payload },
+        toolCallId: "call-ambiguous-requirement",
+      }, {});
+      assert.equal(blocked.block, true);
+      assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_INCOMPLETE/);
+    }
+  });
+
+  it("requires complete auditable brief atoms and matching zero-unresolved coverage", async () => {
+    const validAudit = requirementPayload().rawMessagesJson;
+    const invalidAudits = [
+      { ...validAudit, schemaVersion: "legacy" },
+      { ...validAudit, atoms: [{ ...validAudit.atoms[0], sourceText: "原文中不存在" }] },
+      { ...validAudit, atoms: [{ ...validAudit.atoms[0], targetField: "inventedField" }], coverageCheck: { atomCount: 1, mappedCount: 1, preservedCount: 0, unresolvedCount: 0 } },
+      { ...validAudit, atoms: [{ sourceText: "小红书", disposition: "preserved", confidence: 1, inferred: false }], coverageCheck: { atomCount: 1, mappedCount: 0, preservedCount: 1, unresolvedCount: 0 } },
+      { ...validAudit, atoms: [{ sourceText: "小红书", preservedText: "抖音", disposition: "preserved", confidence: 1, inferred: false }], coverageCheck: { atomCount: 1, mappedCount: 0, preservedCount: 1, unresolvedCount: 0 } },
+      { ...validAudit, coverageCheck: { ...validAudit.coverageCheck, unresolvedCount: 1 } },
+    ];
+    for (const rawMessagesJson of invalidAudits) {
+      const blocked = await hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__validate_requirement",
+        params: { payload: requirementPayload({ rawMessagesJson }) },
+      }, {});
+      assert.equal(blocked.block, true);
+      assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_INCOMPLETE/);
+    }
+  });
+
+  it("requires one canonical positive-upper-bound single-creator budget range", async () => {
+    const missing = requirementPayload();
+    delete missing.kolOfficialPriceL1;
+    const blockedMissing = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: missing },
+      toolCallId: "call-missing-unit-budget",
+    }, {});
+    assert.equal(blockedMissing.block, true);
+    assert.match(blockedMissing.blockReason, /kolOfficialPriceL1\/L2\/L3 is business-required/);
+
+    const blockedInvalid = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload({ kolOfficialPriceL1: "5000" }) },
+      toolCallId: "call-invalid-unit-budget",
+    }, {});
+    assert.equal(blockedInvalid.block, true);
+    assert.match(blockedInvalid.blockReason, /canonical non-negative range string/);
+
+    for (const kolOfficialPriceL1 of ["[0,0]", "[5000,3000]", "[0, 5000]", [0, 5000]]) {
+      const blockedRange = await hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__validate_requirement",
+        params: { payload: requirementPayload({ kolOfficialPriceL1 }) },
+      }, {});
+      assert.equal(blockedRange.block, true);
+      assert.match(blockedRange.blockReason, /range|positive upper bound/);
+    }
+  });
+
+  it("validates all mapped range fields and unit-interval rates", async () => {
+    const allowed = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload({ followercount: "[10000,30000]", femaleRate: "[0,0.5]" }) },
+    }, {});
+    assert.equal(allowed, undefined);
+
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload({ femaleRate: "[0,50]" }) },
+    }, {});
+    assert.equal(blocked.block, true);
+    assert.match(blocked.blockReason, /between 0 and 1/);
+  });
+
+  it("keeps range serialization on customer_demands fields until backend mapping", async () => {
+    for (const overrides of [
+      { femaleRate: [0, 0.5] },
+      { femaleRate: "0-0.5" },
+      { femaleRate: "[0, 0.5]" },
+      { femaleRateMin: 0, femaleRateMax: 0.5 },
+    ]) {
+      const blocked = await hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__validate_requirement",
+        params: { payload: requirementPayload(overrides) },
+      }, {});
+      assert.equal(blocked.block, true);
+      assert.match(blocked.blockReason, /canonical non-negative range string|real customer_demands field/);
+    }
+  });
+
+  it("rejects invented, Provider-managed, and wrongly typed customer_demands fields", async () => {
+    for (const payload of [
+      requirementPayload({ businessIndustry: "美妆" }),
+      requirementPayload({ id: "a".repeat(32) }),
+      requirementPayload({ hasOrganization: true }),
+      requirementPayload({ clickMedium: 1.5 }),
+      requirementPayload({ contentFeatureLabel: "种草" }),
+      requirementPayload({ projectStartStart: "2099/07/01" }),
+    ]) {
+      const blocked = await hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__validate_requirement",
+        params: { payload },
+      }, {});
+      assert.equal(blocked.block, true);
+      assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_INCOMPLETE/);
+    }
+  });
+
+  it("requires a valid provider supply plan for the same requirement", async () => {
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params: { id: "req-without-provider-plan", platform: "xiaohongshu" },
+    }, {});
+    assert.equal(blocked.block, true);
+    assert.match(blocked.blockReason, /INTEGRATION_REQUIRED.*successful search_creators/);
+  });
+
+  it("records only validated supply values and their fingerprint from supported response shapes", async () => {
+    for (const shape of ["nested", "data", "root"]) {
+      const requirementId = `req-plan-shape-${shape}`;
+      await recordSearch(requirementId, supplyPlan(), shape);
+      const persisted = JSON.parse(readFileSync(stateFile, "utf8"));
+      const stored = persisted.supply_plans[requirementId];
+      assert.deepEqual(Object.keys(stored).sort(), [...Object.keys(supplyPlan()), "fingerprint"].sort());
+      assert.match(stored.fingerprint, /^[0-9a-f]{64}$/);
+      const blocked = await hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__rank_mcns",
+        params: { id: requirementId, platform: "xiaohongshu" },
+      }, {});
+      assert.match(blocked.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
+    }
+  });
+
+  it("rejects invalid provider formulas and invalidates an older plan for the requirement", async () => {
+    const invalidPlans = [
+      supplyPlan({ supply_demand_ratio: 999 }),
+      supplyPlan({ estimated_gap_count: 3 }),
+      supplyPlan({ recommended_manual_creator_count: 3, mcn_manual_creator_ratio: "18:3" }),
+      supplyPlan({ mcn_manual_creator_ratio: "9:1" }),
+    ];
+    for (let index = 0; index < invalidPlans.length; index += 1) {
+      const requirementId = `req-invalid-plan-${index}`;
+      await recordSearch(requirementId);
+      await recordSearch(requirementId, invalidPlans[index]);
+      const blocked = await hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__rank_mcns",
+        params: { id: requirementId, platform: "xiaohongshu" },
+      }, {});
+      assert.match(blocked.blockReason, /INTEGRATION_REQUIRED/);
+    }
+  });
+
+  it("blocks a forged supply value or non-exact options before AskUserQuestion", async () => {
+    const params = { id: "req-forged-plan-popup", platform: "xiaohongshu" };
+    await recordSearch(params.id);
+    const blocked = await hooks.get("before_tool_call")({ toolName: "mcp__ypmcn__rank_mcns", params }, {});
+    const id = confirmationId(blocked);
+    const plan = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
+    const question = [
+      `供给方案。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
+      ...Object.entries({ ...plan, demand_count: 999 }).map(([field, value]) => `${field}=${value}`),
+    ].join("；");
+    const forged = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: { questions: [{ question, options: [{ label: "确认供给方案" }, { label: "调整方案" }] }] },
+    }, {});
+    assert.equal(forged.block, true);
+    assert.match(forged.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+
+    const extraOption = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: {
+        questions: [{
+          question: question.replace("demand_count=999", "demand_count=10"),
+          options: [{ label: "确认供给方案" }, { label: "调整方案" }, { label: "稍后" }],
+        }],
+      },
+    }, {});
+    assert.equal(extraOption.block, true);
+    assert.match(extraOption.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+  });
+
+  it("does not accept a supply confirmation that omits fixed calculation fields", async () => {
+    const params = { id: "req-supply-incomplete", platform: "xiaohongshu" };
+    await recordSearch(params.id);
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-incomplete-1",
+    }, {});
+    const id = confirmationId(blocked);
+    await hooks.get("after_tool_call")({
+      toolName: "AskUserQuestion",
+      params: {
+        questions: [{
+          question: `供需比 2:1。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
+          options: [{ label: "确认供给方案" }, { label: "调整方案" }],
+        }],
+      },
+      result: { status: "submitted", answers: [{ selected_labels: ["确认供给方案"] }] },
+    }, {});
+    const retried = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-incomplete-2",
+    }, {});
+    assert.equal(retried.block, true);
+    assert.match(retried.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
+  });
+
+  it("allows a ready requirement without optional project or industry fields", async () => {
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload() },
+      toolCallId: "call-ready-requirement",
+    }, {}), undefined);
   });
 
   it("requires a popup supply-plan confirmation before rank_mcns", async () => {
     const params = { id: "req-supply-1", platform: "xiaohongshu" };
+    await recordSearch(params.id);
     const blocked = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-1",
     }, {});
@@ -203,6 +570,7 @@ describe("YP Action native hook guard", () => {
 
   it("invalidates supply-plan confirmation when rank parameters change", async () => {
     const params = { id: "req-supply-change", platform: "xiaohongshu", minimum_mcn_count: 8 };
+    await recordSearch(params.id);
     const blocked = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-change-1",
     }, {});
@@ -240,7 +608,62 @@ describe("YP Action native hook guard", () => {
       toolCallId: "call-send-3",
     }, {});
     assert.equal(replay.block, true);
-    assert.match(replay.blockReason, /YP_CONFIRMATION_REQUIRED/);
+    assert.match(replay.blockReason, /WORKFLOW_STATE_REFRESH_REQUIRED/);
+  });
+
+  it("requires a fresh authoritative workflow state for the same project before external send", async () => {
+    const params = distributionParams({ projectName: "状态门禁项目" });
+    const missing = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-state-missing",
+    }, {});
+    assert.equal(missing.block, true);
+    assert.match(missing.blockReason, /WORKFLOW_STATE_REFRESH_REQUIRED/);
+
+    await recordWorkflowState(params.projectName, ["rank_creators"]);
+    const disallowed = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-state-disallowed",
+    }, {});
+    assert.equal(disallowed.block, true);
+    assert.match(disallowed.blockReason, /BLOCKED_WORKFLOW_ACTION/);
+
+    await recordWorkflowState("另一个项目");
+    const mismatch = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-state-mismatch",
+    }, {});
+    assert.equal(mismatch.block, true);
+    assert.match(mismatch.blockReason, /WORKFLOW_STATE_REFRESH_REQUIRED/);
+  });
+
+  it("blocks forged external summary values and non-exact send options before AskUserQuestion", async () => {
+    const { id } = await requestConfirmation(distributionParams({ projectName: "真实外发项目" }));
+    const summary = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
+    const question = [
+      `外发确认。[YP_CONFIRMATION:${id}]`,
+      "project_name=伪造项目",
+      `supplier_count=${summary.supplier_count}`,
+      `deadline=${summary.deadline}`,
+      `column_names=${JSON.stringify(summary.column_names)}`,
+      `message_template_id=${summary.message_template_id}`,
+      `message_template_sha256=${summary.message_template_sha256}`,
+    ].join("；");
+    const forged = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: { questions: [{ question, options: [{ label: "确认发送" }, { label: "需要修改" }] }] },
+    }, {});
+    assert.equal(forged.block, true);
+    assert.match(forged.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+
+    const extraOption = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: {
+        questions: [{
+          question: question.replace("project_name=伪造项目", "project_name=真实外发项目"),
+          options: [{ label: "确认发送" }, { label: "需要修改" }, { label: "取消" }],
+        }],
+      },
+    }, {});
+    assert.equal(extraOption.block, true);
+    assert.match(extraOption.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
   });
 
   it("invalidates confirmation when request parameters change", async () => {
@@ -248,7 +671,11 @@ describe("YP Action native hook guard", () => {
     await answerConfirmation(id);
     const changed = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__create_with_distributions",
-      params: { ...params, supplierIds: ["supplier-1", "supplier-2"] },
+      params: {
+        ...params,
+        supplierIds: ["supplier-1", "supplier-2"],
+        prefillRowsBySupplier: { "supplier-1": [], "supplier-2": [] },
+      },
       toolCallId: "call-changed",
     }, {});
     assert.equal(changed.block, true);
@@ -282,6 +709,21 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-echoed",
     }, {});
     assert.match(blocked.blockReason, /YP_CONFIRMATION_REQUIRED/);
+  });
+
+  it("binds external distribution to confirmed columns and every supplier", async () => {
+    for (const params of [
+      distributionParams({ columns: [] }),
+      distributionParams({ prefillRowsBySupplier: {} }),
+    ]) {
+      const blocked = await hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__create_with_distributions",
+        params,
+        toolCallId: "call-invalid-field-binding",
+      }, {});
+      assert.equal(blocked.block, true);
+      assert.match(blocked.blockReason, /BLOCKED_EMPTY_COLUMNS|BLOCKED_INVALID_PREFILL_BINDING/);
+    }
   });
 
   it("requires an explicit timezone on the external deadline", async () => {

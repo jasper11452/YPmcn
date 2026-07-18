@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_hooks.py - Comprehensive tests for pre_tool_guard and post_tool_update hooks."""
+"""Historical advisory Python Hook regression; not the current YP Action execution surface."""
 import json
 import os
 import subprocess
@@ -39,32 +39,31 @@ def run_hook(script, payload):
         return {"raw_stdout": result.stdout, "raw_stderr": result.stderr, "rc": result.returncode}
 
 
-def assert_allow(label, output):
+def assert_non_blocking(label, output):
     global PASS, FAIL
     decision = output.get("hookSpecificOutput", {}).get("permissionDecision")
-    if decision == "allow":
+    if decision is None:
         PASS += 1
         print(f"  PASS: {label}")
     else:
         FAIL += 1
-        reason = output.get("hookSpecificOutput", {}).get("permissionDecisionReason", "?")
-        print(f"  FAIL: {label} -> expected allow, got deny: {reason}")
+        print(f"  FAIL: {label} -> hook must not decide permissions, got: {decision}")
 
 
-def assert_deny(label, output, expected_code=None):
+def assert_advisory(label, output, expected_code=None):
     global PASS, FAIL
     decision = output.get("hookSpecificOutput", {}).get("permissionDecision")
-    reason = output.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
-    if decision == "deny":
-        if expected_code and expected_code not in reason:
+    context = output.get("hookSpecificOutput", {}).get("additionalContext", "")
+    if decision is None:
+        if expected_code and expected_code not in context:
             FAIL += 1
-            print(f"  FAIL: {label} -> expected code {expected_code}, got: {reason}")
+            print(f"  FAIL: {label} -> expected advisory {expected_code}, got: {context}")
         else:
             PASS += 1
-            print(f"  PASS: {label} -> {reason[:80]}")
+            print(f"  PASS: {label} -> {context[:80]}")
     else:
         FAIL += 1
-        print(f"  FAIL: {label} -> expected deny, got allow")
+        print(f"  FAIL: {label} -> hook must not decide permissions, got: {decision}")
 
 
 def assert_reference_context(label, output, tool, expected_references):
@@ -97,7 +96,7 @@ def clear_state():
 
 
 # ============================================================================
-# TEST 1: pre_tool_guard - Bash bypass detection
+# TEST 1: pre_tool_guard - Bash bypass advisory
 # ============================================================================
 print("\n=== TEST 1: Bash bypass detection ===")
 
@@ -107,7 +106,7 @@ output = run_hook(PRE_TOOL, {
     "tool_name": "Bash",
     "tool_input": {"command": "curl -X POST https://api/create-with-distributions"}
 })
-assert_deny("Bash curl to provider API", output, "INTEGRATION_REQUIRED")
+assert_advisory("Bash curl to provider API", output, "INTEGRATION_REQUIRED")
 
 output = run_hook(PRE_TOOL, {
     "tool_name": "Bash",
@@ -118,7 +117,7 @@ print("  SKIP: Bash echo (not a provider write pattern) passed to matcher")
 
 
 # ============================================================================
-# TEST 2: pre_tool_guard - Phase mismatch
+# TEST 2: pre_tool_guard - Phase mismatch advisory
 # ============================================================================
 print("\n=== TEST 2: Phase mismatch ===")
 
@@ -136,7 +135,7 @@ output = run_hook(PRE_TOOL, {
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
-assert_deny("search_creators from requirement_draft", output, "BLOCKED_PHASE_MISMATCH")
+assert_advisory("search_creators from requirement_draft", output, "BLOCKED_PHASE_MISMATCH")
 
 output = run_hook(PRE_TOOL, {
     "tool_name": "mcp__ypmcn__validate_requirement",
@@ -144,7 +143,7 @@ output = run_hook(PRE_TOOL, {
     "session_id": SESSION_KEY,
     "tool_use_id": "tc_001",
 })
-assert_allow("validate_requirement accepts Claude Code session_id", output)
+assert_non_blocking("validate_requirement accepts Claude Code session_id", output)
 assert_reference_context(
     "validate_requirement receives soft reference gate",
     output,
@@ -157,9 +156,18 @@ assert_reference_context(
     ],
 )
 
+clear_state()
+output = run_hook(PRE_TOOL, {
+    "tool_name": "mcp__ypmcn__search_creators",
+    "tool_input": {"id": "req_123"},
+    "sessionKey": "missing-session",
+    "toolCallId": "tc_missing",
+})
+assert_non_blocking("missing advisory state fails open", output)
+
 
 # ============================================================================
-# TEST 3: pre_tool_guard - Distribution send guard (missing confirmation)
+# TEST 3: pre_tool_guard - Distribution send advisories
 # ============================================================================
 print("\n=== TEST 3: Distribution send guard ===")
 
@@ -182,7 +190,7 @@ output = run_hook(PRE_TOOL, {
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
-assert_deny("send without confirmations", output, "BLOCKED_CONFIRMATION_REQUIRED")
+assert_advisory("send without confirmations", output, "BLOCKED_CONFIRMATION_REQUIRED")
 
 # With confirmations but missing deadline timezone
 set_state(SESSION_KEY, {
@@ -204,7 +212,7 @@ output = run_hook(PRE_TOOL, {
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
-assert_deny("send with bad deadline format", output, "BLOCKED_INVALID_DEADLINE")
+assert_advisory("send with bad deadline format", output, "BLOCKED_INVALID_DEADLINE")
 
 # With past deadline
 output = run_hook(PRE_TOOL, {
@@ -218,7 +226,7 @@ output = run_hook(PRE_TOOL, {
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
-assert_deny("send with past deadline", output, "BLOCKED_PAST_TIME")
+assert_advisory("send with past deadline", output, "BLOCKED_PAST_TIME")
 
 # All valid
 output = run_hook(PRE_TOOL, {
@@ -232,11 +240,11 @@ output = run_hook(PRE_TOOL, {
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
-assert_allow("send with all guards passed", output)
+assert_non_blocking("send with all guidance checks passed", output)
 
 
 # ============================================================================
-# TEST 4: pre_tool_guard - Terminal phase lock
+# TEST 4: pre_tool_guard - Terminal phase advisory
 # ============================================================================
 print("\n=== TEST 4: Terminal phase lock ===")
 
@@ -254,7 +262,7 @@ output = run_hook(PRE_TOOL, {
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
-assert_deny("sync from recovered phase", output, "RECOVERY_ALREADY_TERMINAL")
+assert_advisory("sync from recovered phase", output, "RECOVERY_ALREADY_TERMINAL")
 
 output = run_hook(PRE_TOOL, {
     "tool_name": "mcp__ypmcn__rank_creators",
@@ -262,11 +270,11 @@ output = run_hook(PRE_TOOL, {
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
-assert_allow("rank_creators from recovered phase", output)
+assert_non_blocking("rank_creators from recovered phase", output)
 
 
 # ============================================================================
-# TEST 5: pre_tool_guard - Semantic ID mismatch
+# TEST 5: pre_tool_guard - Semantic ID advisory
 # ============================================================================
 print("\n=== TEST 5: Semantic ID mismatch ===")
 
@@ -284,7 +292,7 @@ output = run_hook(PRE_TOOL, {
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
-assert_deny("rank_creators with wrong requirement_id", output, "BLOCKED_SEMANTIC_ID_MISMATCH")
+assert_advisory("rank_creators with wrong requirement_id", output, "BLOCKED_SEMANTIC_ID_MISMATCH")
 
 
 # ============================================================================

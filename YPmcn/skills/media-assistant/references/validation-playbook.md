@@ -8,7 +8,7 @@ node --test tests/reference_mcp.test.mjs tests/provider_contract.test.mjs
 PYTHONDONTWRITEBYTECODE=1 uv run --no-project python -B -m unittest -v tests/test_skill_package.py
 ```
 
-检查内容：machine specs、参数校验、Hook 阶段、manual/scheduled 恢复、reference MCP 幂等、文档和 153 字段 CSV 权威。
+检查内容：machine specs、参数校验、Hook 阶段、manual/scheduled 恢复、reference MCP 幂等、文档和 61 字段 CSV 权威。
 
 ## Provider 预检
 

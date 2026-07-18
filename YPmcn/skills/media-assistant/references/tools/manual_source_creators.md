@@ -2,11 +2,11 @@
 
 ## 何时调用
 
-需要真实人工来源补量且已有可验证结果时调用。该工具只允许作为企微外发前补量：在供给方案确认后、`create_with_distributions` 前调用。
+需要真实人工来源补量、已有可验证结果且结果已关联到当前需求时调用。该工具只允许作为企微外发前补量：在供给方案确认后、`create_with_distributions` 前调用。
 
 ## 输入
 
-必填 `demand_id`、`demand_version`；可选 `search_context`、`manual_results`。
+只传必填的 `requirement_id`。人工结果及其来源必须已由媒介在服务端关联到该需求，当前本地契约不接收 `demand_id`、`demand_version`、`search_context` 或 `manual_results`。
 
 ## 输出成功证据
 

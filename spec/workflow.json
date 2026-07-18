@@ -45,20 +45,55 @@
     "providerFacts": true,
     "providerOutputSchemaAdvertised": false,
     "phaseAdvance": "derive-after-each-write-from-committed-facts",
+    "derivationOrder": [
+      "closed-demand",
+      "conflict-or-ledger-unknown-blocked",
+      "submission-batch-ready",
+      "recommendation-ready",
+      "candidate-pool-enriched",
+      "waiting-mcn-return",
+      "mcn-planning",
+      "candidate-pool-ready",
+      "requirement-ready",
+      "requirement-draft"
+    ],
+    "factTables": [
+      "customer_demands",
+      "creator_candidate_pool",
+      "mcn_recommendation_items",
+      "mcp_tool_call_ledger",
+      "core_project",
+      "core_distribution",
+      "mcn_inquiries",
+      "mcn_submission_items",
+      "recommendation_runs",
+      "creator_recommendation_items",
+      "submission_batches",
+      "creator_submissions"
+    ],
     "missingEvidenceBehavior": "no-phase-advance",
     "unknownWriteResult": "WRITE_RESULT_UNKNOWN",
     "mayGrantProviderAuthority": true,
     "mayDenyForSafety": true,
     "sessionLifecycleRequired": false,
     "rawPayloadStored": false,
-    "ledger": "mcp_tool_call_ledger"
+    "ledger": {
+      "table": "mcp_tool_call_ledger",
+      "status": "schema-present-not-used-by-current-tools",
+      "authority": "target-only-until-the-server-side-idempotency-guard-is-implemented"
+    },
+    "currentProviderGaps": {
+      "create_with_distributions": "writes the external API but does not persist project or distribution identifiers in the local ledger",
+      "sync_mcn_inquiry_status": "records sync metadata only; it does not query provider state or upsert mcn_inquiries",
+      "maximumRecoverablePhase": "mcn_planning until provider inquiry sync is implemented"
+    }
   },
   "policies": {
     "outwardSendConfirmation": "ten-minute one-time request fingerprint confirmed through AskUserQuestion",
     "fieldSelectionBinding": "selected columns remain preparation evidence until a real distribution is committed",
     "unsupportedProviderArguments": ["candidate_pool_id", "mcn_recommendation_id", "preview_only", "remindAt", "trigger"],
     "stateRefresh": "on resume, compaction, unknown write, conflict, missing state, and before outward send",
-    "unknownWriteRecovery": "get_workflow_state by demand identity or ledger trace_id; never blind retry",
+    "unknownWriteRecovery": "current provider: get_workflow_state by demand identity from existing business facts; ledger trace_id reconciliation is target-only and an unknown external create remains blocked; never blind retry",
     "postSearchSupplyPlanConfirmation": "AskUserQuestion confirms fielded supply-demand ratio and MCN/manual allocation before rank_mcns",
     "manualSourcingPlacement": "optional pre-send enrichment only; never proves distribution or recovery",
     "rankCreatorsPrerequisite": "committed WeCom distribution plus completed recovery"
@@ -84,16 +119,28 @@
       "id": "mcn-plan-ready",
       "from": "candidate_pool_ready",
       "trigger": {"type": "tool", "name": "rank_mcns"},
-      "guards": ["candidate pool belongs to the same requirement", "one-time Ask supply-plan confirmation binds demand_count, database_candidate_count, supply_demand_ratio, recommended_mcn_count, recommended_manual_count, and recommended_mcn_manual_ratio"],
+      "guards": ["candidate pool belongs to the same requirement", "one-time Ask supply-plan confirmation binds demand_count, database_candidate_count, supply_demand_ratio, target_submission_count, estimated_valid_return_count, estimated_gap_count, recommended_mcn_count, mcn_covered_creator_count, recommended_manual_creator_count, and mcn_manual_creator_ratio; both ratio terms use creator-account counts"],
       "evidence": ["committed mcn_recommendation_items rows"],
+      "nextPhase": "mcn_planning"
+    },
+    {
+      "id": "distribution-created",
+      "from": "mcn_planning",
+      "trigger": {"type": "tool", "name": "create_with_distributions"},
+      "guards": ["one-time Ask confirmation matches the unchanged request fingerprint", "supplier and prefill rows resolve one requirement"],
+      "implementationStatus": "target-blocked",
+      "blockedBy": "current provider does not use mcp_tool_call_ledger for this Tool",
+      "evidence": ["target-only: real external project and distribution identifiers persisted in the idempotency ledger; current provider does not produce this evidence"],
       "nextPhase": "mcn_planning"
     },
     {
       "id": "distribution-waiting",
       "from": "mcn_planning",
-      "trigger": {"type": "tool", "name": "create_with_distributions"},
-      "guards": ["one-time Ask confirmation matches the unchanged request fingerprint", "supplier and prefill rows resolve one requirement"],
-      "evidence": ["real project and distribution mirrored to mcn_inquiries"],
+      "trigger": {"type": "tool", "name": "sync_mcn_inquiry_status"},
+      "guards": ["real project and distribution identifiers resolve to the same requirement and supplier"],
+      "implementationStatus": "target-blocked",
+      "blockedBy": "current sync Tool is metadata-only and does not query provider state or upsert mcn_inquiries",
+      "evidence": ["target-only: authoritative provider distribution mirrored to mcn_inquiries; current provider does not produce this evidence"],
       "nextPhase": "waiting_mcn_return"
     },
     {
@@ -117,6 +164,7 @@
       "from": "waiting_mcn_return",
       "trigger": {"type": "tool", "name": "ingest_mcn_submissions"},
       "guards": ["inquiry identity and ownership resolve uniquely"],
+      "implementationStatus": "target-blocked-by-provider-inquiry-sync",
       "evidence": ["committed valid mcn_submission_items and updated inquiry"],
       "nextPhase": "candidate_pool_enriched"
     },
@@ -125,6 +173,7 @@
       "from": "waiting_mcn_return",
       "trigger": {"type": "tool", "name": "sync_mcn_inquiry_status"},
       "guards": ["committed WeCom distribution exists", "all active platform inquiries are recovered or closed"],
+      "implementationStatus": "target-blocked-by-provider-inquiry-sync",
       "evidence": ["authoritative completed recovery lifecycle"],
       "nextPhase": "candidate_pool_enriched"
     },
@@ -133,6 +182,7 @@
       "from": "candidate_pool_enriched",
       "trigger": {"type": "tool", "name": "rank_creators"},
       "guards": ["committed WeCom distribution exists", "all active platform recovery facts are complete"],
+      "implementationStatus": "target-blocked-by-provider-inquiry-sync",
       "evidence": ["successful recommendation_run and recommendation items"],
       "nextPhase": "recommendation_ready"
     },

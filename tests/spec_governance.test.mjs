@@ -143,9 +143,9 @@ describe("Spec governance", () => {
       "observed-development-runtime",
     );
     assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.customer_demands, ["validate_requirement", "record_client_feedback"]);
+    assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.mcn_inquiries, ["sync_mcn_inquiry_status"]);
     assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.mcn_inquiry_status_syncs, ["sync_mcn_inquiry_status"]);
-    assert.equal("mcn_inquiries" in database.mvpEntityBaseline.businessMcpWriterOwnership, false);
-    assert.match(database.toolDatabaseEffects.sync_mcn_inquiry_status.currentLimitation, /Does not query/);
+    assert.match(database.toolDatabaseEffects.sync_mcn_inquiry_status.currentLimitation, /not yet deployed/);
     assert.equal(database.toolDatabaseEffects.audit_manual_adjustment.writes.includes("audit_events"), false);
   });
 

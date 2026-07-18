@@ -1,51 +1,70 @@
 # 需求入口
 
-## 输入模式
+## 权威与输入
 
-`validate_requirement` 接受至少一种模式，也允许两者共存：
+`customer_demands` 当前 61 列是需求解析和落库的最高权威，随 Skill 打包的 `reference_schema.csv` 是其 2026-07-18 真实开发库快照。`field_match_mapping` 是后端把需求范围拆成达人筛选 Min/Max 的权威映射。Agent 只负责把客户原文稳定解析成 `customer_demands` 字段，不自行推导达人表字段，也不传历史字段。
 
-- raw：`raw_messages` 或 `raw_messages_json`；
-- structured：mvp-v2 profile 中声明的任一结构字段。
+`validate_requirement` 接受当前宿主 Tool schema 声明的 `payload`。除控制字段 `status` 外，每个业务字段必须存在于参考 CSV；若运行时 schema 与 CSV 冲突，停止并返回 `integration_required`，不得猜字段。
 
-运行时 schema 是语法权威。Agent 不要求用户提供 `trace_id` 或幂等键。第一次 validation 前只处理会造成错误业务写入的硬冲突：不支持或无法映射的平台、缺少年份或已经过去的档期、多平台数量口径、金额是达人官方报价还是项目总预算，以及无法解析的语病；其余信息不增加无关确认。
+## 必填口径
 
-## 解析原则
+新 Brief 的业务最小必填为：
 
-- 保留原文，不把推测写成客户事实。
-- 先把 Brief 拆成不可再分的原子需求，再逐条映射；每条必须进入一个明确的 schema 字段，没有专用字段时才进入 `rawMessagesJson`。禁止只放在说明文字、歧义清单后继续调用或静默丢弃。
-- 任一必填字段为空、值不唯一或语义不明确时，立即提出最小澄清问题并停止；不得调用 `validate_requirement` 写 Draft 试错。
-- 使用 `tools/validate_requirement.md` 已列出的高频映射和运行时 schema。运行时禁止读取数据库 CSV；未覆盖、类型冲突或平台语义不明的字段进入 `rawMessagesJson` 或最小澄清，不自行扩展字段。
-- 平台仅写全拼 `xiaohongshu`、`douyin`；把“小红书/XHS/红书”和“抖音/DY/Douyin”分别标准化，缩写不得进入业务 Tool。
-- 项目总预算金额写分，返点写 0–1 小数。自然语言时间先按当前会话时区消歧，再按数据库 `datetime` 格式 `YYYY-MM-DD HH:mm:ss` 写入；原始时区表达保留到对应 `*Raw` 字段。
-- 达人官方价、刊例价、单人预算或与发文类型绑定的价格，按明确档位和 schema 的 `decimal(12,2)` 写人民币元单值到 `kolOfficialPriceL1/L2/L3`；小红书与抖音使用同一组三档字段，不得换算后写入 `budget*`。区间或比较条件无法写入 decimal，必须保留原文并确认确定值。
-- “粉丝 10 万以上”等比较条件没有专用 min/max 字段时直接进入 `rawMessagesJson`；不得把下限写成 `followercount` 单值，也不得为此查 CSV。
-- “品类/行业：母婴”等普通行业条件写 `businessIndustry` 字符串；不猜 JSON 标签结构。
-- `int`/`bigint`/`decimal` 输出 JSON 数值，`tinyint(1)` 布尔字段输出 `1`/`0`，`json` 输出实际数组/对象，字符类型输出字符串；不得把所有值无条件字符串化。
-- 只有明确的项目总预算或整体预算才写 `budgetMinCents/budgetMaxCents/budgetRaw`；单值总预算可按已确认口径映射为闭区间。
-- 报价档位不确定就停在 `requirement_draft`，不得猜测。
-- 用户要求候选池扩展筛选但当前字段无法表达时，先保留原文并说明能力边界；运行时不读取候选表 CSV。
+- `platform`：仅 `xiaohongshu` 或 `douyin`；
+- `quantityTotal`：正整数；
+- `submissionDeadlineAt`：`YYYY-MM-DD HH:mm:ss`；
+- `rawMessagesJson`：合法的 `ypmcn-brief-v1` 审计对象；
+- `kolOfficialPriceL1/L2/L3` 至少一项合法且上界大于 0 的 `"[min,max]"`，并能确定内容档位。
 
-## 调用前预览与评分
+`projectName`、`brandName`、`product`、项目档期、项目总预算、返点和其他约束为业务可选。`rebate` 物理列不允许 NULL，但客户未提供返点时 Agent 不得编造；空值落库策略属于 Provider，不得由 Agent用假值绕过。
 
-调用 `validate_requirement` 前先发送一条用户可见消息，顺序固定为：
+## 范围字段硬格式
 
-1. `解析字段（字段预览）`：展示即将提交的完整 payload，不隐藏空缺造成的业务影响。
-2. `原文保留`：列出无法可靠结构化但已进入 `rawMessagesJson` 的要求。
-3. `歧义/缺失`：列出需要确认的档位、年份、平台拆分或数量口径。
-4. `解析评分`：展示总分和各项扣分。
-5. `落库决定`：仅当总分严格大于 80 且无硬阻断项时写“允许调用”；否则写“禁止调用”并停止。
+参考 CSV 注释为“范围”的 `varchar(255)` 字段统一传无空格字符串 `"[min,max]"`。两端必须是有限非负数，且 `min <= max`：
 
-评分满分 100：
+- 确定单值 5000 → `"[5000,5000]"`；
+- 不超过 5000 → `"[0,5000]"`；
+- 3000–5000 → `"[3000,5000]"`；
+- 不超过 50% → `"[0,0.5]"`。
 
-- 原子需求覆盖 40 分：按“已处置原子需求数 / 可识别原子需求总数”计分；静默遗漏一条即扣对应分。
-- 字段语义准确 30 分：平台、官方报价/总预算、返点、数量、项目档期、提报截止各 5 分；Brief 未涉及的类别直接得 5 分，涉及但映射错误或只塞入 `note`/`description` 得 0 分。
-- 事实完整性 20 分：从 20 分开始，每个杜撰或擅自推断值扣 10 分，每个未显式列出的歧义扣 5 分，最低 0 分。
-- schema 与格式 10 分：字段存在性、逐字段 `Type` 校验、平台枚举、金额/比例格式、日期时间格式各 2 分。
+比例字段先把百分数换成 0–1 小数；`photoInteract`、`femaleRate`、`age1Rate`—`age6Rate` 的两端都必须在 0–1。只有下限而没有明确有限上限时不得发明上限，列为 `semantic_ambiguity` 并一次询问。不得传 JSON 数组、自然语言、`>=5000`、`3000-5000` 或带空格的变体；数据库列是 varchar，值必须是上述规范字符串。
 
-以下任一项为硬阻断，总分即使大于 80 也不得调用：官方报价无法确定 L1/L2/L3；金额无法区分达人报价与项目总预算；缺少或冲突的平台；多平台数量无法拆分；年份/时区导致日期不唯一；存在未处置的原子需求；payload 含推测字段。
+后端读取需求后，按 `(platform, source_field_name, match_status='已匹配')` 查询 `field_match_mapping`，把 `[min,max]` 分别送入该字段已确认的目标参数。Agent 不拆 `*Min/*Max`，不改映射表，也不把目标参数名写回 `customer_demands`。
 
-## 成功与停止
+## 高频映射
 
-只有 `success === true`、`data.id` 存在、`data.status === ready` 时，才把 ID 记为 `requirement_id` 并进入搜索。status 非 ready 时只向媒介展示缺项，不伪造补齐。
+- 小红书/XHS/红书 → `platform="xiaohongshu"`；抖音/DY/Douyin → `platform="douyin"`。
+- 人数 → `quantityTotal`。
+- 项目、品牌、产品 → `projectName`、`brandName`、`product`。
+- 内容标签 → `contentTag`；明确的内容要求可写 `description`；只有原文给出可验证标签结构时才写 JSON 标签字段。
+- 达人主页 → `kwUserUrl`；性别 → `kwGender`；IP 属地 → `kwIpDependency`。
+- 达人官方价、刊例价、单人预算或与发文类型绑定的价格 → 按明确档位写 `kolOfficialPriceL1/L2/L3` 的范围字符串。小红书图文/视频对应 L1/L2；抖音 1–20 秒、21–60 秒、60 秒以上对应 L1/L2/L3。
+- 返点原文 → `rebate`；不拆分为不存在的 `rebateMinRate/rebateMaxRate`。
+- 项目档期 → `projectStartStart/projectStartEnd`；提报截止 → `submissionDeadlineAt`。原始时间表述保留在 `rawMessagesJson` atom，不创建 `submissionDeadlineRaw`。
+- 项目总预算当前没有专用列，只逐字保留在 `rawMessagesJson`，不创建 `budget*`。
 
-同一用户需求在补充信息、修正字段或再次校验时，必须沿用 Provider 已返回的 `demandId`，并省略 `demandVersion`，由 Provider 原子分配下一版本；不得自行递增版本或为同一需求生成新的 `demandId`。如果返回 `requirement_draft`、status 非 ready，或响应指出缺失、冲突、待确认字段，立即把具体问题转换为最小用户澄清问题并等待回答；不得持续停在 Draft、静默等待或重放相同写入。
+字段含义不能精确对应时完整保留原文，不把相似字段当同义字段。参考账号、审美、负向要求、排竞、授权和调性等没有可靠专用列的条件都进入 `rawMessagesJson`。
+
+## 三遍解析与审计
+
+第一遍逐句拆成不可再分的原子条件，至少检查平台、数量、截止、单达人预算及档位、项目/品牌/产品、内容、画像、地域、账号、返点、档期、效果指标、负向要求和总预算。
+
+第二遍逐条处置：能唯一映射且值合法就写真实字段；没有专用字段就逐字保留；字段、档位或范围端点不能唯一确定就进入歧义清单。`rawMessagesJson` 固定包含：
+
+- `schemaVersion="ypmcn-brief-v1"`；
+- 完整非空 `originalBrief`；
+- 非空 `atoms`；每项含原文子串 `sourceText`、`mapped/preserved`、0–1 `confidence`、布尔 `inferred`；
+- mapped atom 的 `targetField` 必须实际存在于 payload；preserved atom 的 `preservedText` 必须与 `sourceText` 完全一致；
+- `coverageCheck.atomCount/mappedCount/preservedCount` 与 atoms 一致，`unresolvedCount=0`。
+
+第三遍从 payload 和 atoms 反向逐条核对原 Brief。任何遗漏、错误字段、错误类型、未规范范围或占位符都阻断。
+
+## 三态门禁与询问
+
+先完整生成缺失清单和歧义清单，再选状态：有必填缺失为 `missing_required`；无缺失但有真实歧义为 `semantic_ambiguity`；两者都无才是 `ready`。可确定的闭区间不是歧义，必须直接规范。
+
+阻断时只展示已确定字段，用一次自包含 `AskUserQuestion` 合并最多三个关键问题：header 固定“需求确认”，question 按“已确认：…；需确认：…；影响：…”组织。单达人预算问题必须同时确认金额范围与内容档位。阻断状态禁止调用 Tool、禁止写 `status=ready`，也禁止使用 `TBD`、空串或假值。
+
+`ready` 时展示与实际调用完全一致的 `{"payload": {..., "status": "ready"}}`，再调用一次。新建省略 `demandVersion`，也不传 `id`、`createdAt`、`updatedAt`；同一需求补充时只沿用 Provider 返回的 `demandId`，版本由 Provider 原子分配。
+
+只有实际返回 `success=true`、需求主键和 `status=ready` 才进入搜索。写结果未知时用 `get_workflow_state` 对账，不重放写入。

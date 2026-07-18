@@ -12,4 +12,4 @@
 
 用户确认 description 后，`create_with_distributions.columns` 必须与字段名数量和顺序一致；每个 column 对象必须在顶层 key 或 string value 中明确包含对应字段名。无法一一证明时返回 `FIELD_SELECTION_INVALID`。
 
-Hook 只保存 description 与字段名，不声称 provider 返回结构化字段快照。会话证据丢失时重新调用选择工具，不复用旧会话结果。
+当前 Native Hook 不持久化 description 或字段名，只对最终外发参数做请求指纹绑定。字段选择证据必须来自当前 Agent 上下文或数据库/provider 返回；上下文丢失时重新调用选择工具，不复用旧会话推测。

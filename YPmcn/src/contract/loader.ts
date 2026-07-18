@@ -735,106 +735,91 @@ export function loadRequirementsContract(): RequirementsContract {
 
   const canonicalInput = requireRecord(value.canonicalInput, "requirements canonicalInput");
   if (
-    canonicalInput.field !== "raw_messages_json" ||
-    canonicalInput.transportType !== "canonical-json-text" ||
-    canonicalInput.storedType !== "json-array" ||
+    canonicalInput.field !== "rawMessagesJson" ||
+    canonicalInput.transportType !== "json-object" ||
+    canonicalInput.storedType !== "json-object" ||
+    canonicalInput.schemaVersion !== "ypmcn-brief-v1" ||
     canonicalInput.canonicalization !== "recursive-key-sort-json-v1-preserve-array-order" ||
-    JSON.stringify(canonicalInput.compatibilityAliases) !== JSON.stringify(["raw_messages"]) ||
-    canonicalInput.whenCanonicalAndAliasPresent !==
-      "parse-normalize-and-require-deep-equality" ||
-    canonicalInput.onConflict !== "fail-closed" ||
-    canonicalInput.conflictError !== "CANONICAL_INPUT_CONFLICT" ||
+    JSON.stringify(canonicalInput.requiredMembers) !==
+      JSON.stringify(["originalBrief", "atoms", "coverageCheck"]) ||
+    JSON.stringify(canonicalInput.compatibilityAliases) !== JSON.stringify([]) ||
     canonicalInput.dictionaryMayContainValues !== false
   ) {
     throw new Error("requirements canonical input policy is invalid");
   }
   const valuePolicies = requireRecord(value.valuePolicies, "requirements valuePolicies");
-  const budget = requireRecord(valuePolicies.budget, "requirements budget policy");
+  const mappedRanges = requireRecord(valuePolicies.mappedRanges, "requirements range policy");
+  const creatorUnitPrice = requireRecord(
+    valuePolicies.creatorUnitPrice,
+    "requirements creator unit price policy",
+  );
+  const projectTotalBudget = requireRecord(
+    valuePolicies.projectTotalBudget,
+    "requirements project total budget policy",
+  );
   const rebate = requireRecord(valuePolicies.rebate, "requirements rebate policy");
   if (
-    budget.lowerBoundField !== "budget_min_cents" ||
-    budget.upperBoundField !== "budget_max_cents" ||
-    budget.type !== "integer" ||
-    budget.unit !== "CNY-cent" ||
-    budget.minimum !== 0 ||
-    budget.boundsRequired !== true ||
-    budget.ordering !== "lower <= upper" ||
-    budget.onViolation !== "VALUE_RANGE_INVALID"
+    mappedRanges.storageType !== "varchar(255)" ||
+    mappedRanges.format !== "[min,max] JSON-array text without spaces" ||
+    mappedRanges.minimum !== 0 ||
+    mappedRanges.boundsRequired !== 2 ||
+    mappedRanges.ordering !== "min <= max" ||
+    mappedRanges.mappingAuthority !== "field_match_mapping" ||
+    mappedRanges.onViolation !== "VALUE_RANGE_INVALID" ||
+    !isStringArray(mappedRanges.rateFields) ||
+    mappedRanges.rateMaximum !== 1
   ) {
-    throw new Error("requirements budget policy is invalid");
+    throw new Error("requirements mapped range policy is invalid");
   }
   if (
-    rebate.lowerBoundField !== "rebate_min_rate" ||
-    rebate.upperBoundField !== "rebate_max_rate" ||
-    rebate.type !== "number" ||
-    rebate.unit !== "fraction" ||
-    rebate.minimum !== 0 ||
-    rebate.maximum !== 1 ||
-    rebate.boundsRequired !== true ||
-    rebate.ordering !== "lower <= upper" ||
-    rebate.onViolation !== "VALUE_RANGE_INVALID"
+    JSON.stringify(creatorUnitPrice.fields) !==
+      JSON.stringify(["kolOfficialPriceL1", "kolOfficialPriceL2", "kolOfficialPriceL3"]) ||
+    creatorUnitPrice.businessRequiredOneOf !== true ||
+    creatorUnitPrice.unit !== "CNY-yuan" ||
+    creatorUnitPrice.storage !== "mappedRanges" ||
+    projectTotalBudget.dedicatedField !== null ||
+    projectTotalBudget.behavior !== "preserve-verbatim-in-rawMessagesJson" ||
+    rebate.field !== "rebate" ||
+    rebate.type !== "string" ||
+    rebate.businessRequired !== false
   ) {
-    throw new Error("requirements rebate policy is invalid");
+    throw new Error("requirements money and rebate policy is invalid");
   }
   const deadlines = requireRecord(valuePolicies.deadlines, "requirements deadline policy");
   const deadlineTypes = requireArray(deadlines.types, "requirements deadline types").map(
     (rawDeadline, index) => requireRecord(rawDeadline, `requirements deadline types[${index}]`),
   );
   if (
-    deadlines.timezoneRequired !== true ||
-    deadlines.format !== "RFC3339-date-time" ||
+    deadlines.format !== "YYYY-MM-DD HH:mm:ss" ||
     deadlines.onViolation !== "DEADLINE_ORDER_INVALID" ||
     JSON.stringify(deadlineTypes.map((deadline) => deadline.name)) !==
       JSON.stringify([
-        "supplier_response_deadline_at",
-        "client_submission_deadline_at",
-        "content_publish_deadline_at",
+        "submissionDeadlineAt",
+        "projectStartStart",
+        "projectStartEnd",
       ]) ||
-    deadlineTypes.some((deadline) => deadline.required !== true)
+    deadlineTypes[0].required !== true ||
+    deadlineTypes.slice(1).some((deadline) => deadline.required !== false) ||
+    deadlines.rawWordingStorage !== "matching rawMessagesJson atom" ||
+    deadlines.prohibitedLegacyField !== "submissionDeadlineRaw"
   ) {
-    throw new Error("requirements deadline policy must define three ordered deadlines");
+    throw new Error("requirements deadline policy is invalid");
   }
   requireExactStrings(
     deadlines.ordering,
-    [
-      "supplier_response_deadline_at <= client_submission_deadline_at",
-      "client_submission_deadline_at <= content_publish_deadline_at",
-    ],
+    ["projectStartStart <= projectStartEnd when both are present"],
     "requirements deadline ordering",
   );
-  const compatibilityInputs = requireArray(
-    deadlines.compatibilityInputs,
-    "requirements deadline compatibilityInputs",
-  ).map((entry, index) => requireRecord(
-    entry,
-    `requirements deadline compatibilityInputs[${index}]`,
-  ));
-  if (
-    JSON.stringify(compatibilityInputs.map(({ field, mapsTo }) => [field, mapsTo])) !==
-      JSON.stringify([
-        ["submission_deadline_at", "client_submission_deadline_at"],
-        ["submission_deadline_raw", "client_submission_deadline_at"],
-      ]) ||
-    compatibilityInputs.some((entry) =>
-      typeof entry.normalization !== "string" ||
-      entry.whenBothPresent !== "require-equal-after-normalization"
-    ) ||
-    deadlines.compatibilityConflictBehavior !== "fail-closed" ||
-    deadlines.compatibilityConflictError !== "DEADLINE_ORDER_INVALID"
-  ) {
-    throw new Error("requirements deadline compatibility policy is invalid");
-  }
   const platformSplit = requireRecord(
     valuePolicies.platformSplit,
     "requirements platformSplit policy",
   );
   if (
     JSON.stringify(platformSplit.supportedPlatforms) !== JSON.stringify(["xiaohongshu", "douyin"]) ||
-    platformSplit.headEntity !== "requirement_headers" ||
     platformSplit.executionEntity !== "customer_demands" ||
     platformSplit.executionUnitPlatformCardinality !== 1 ||
     platformSplit.multiPlatformBehavior !==
-      "one-child-requirement-per-platform-under-one-head" ||
+      "one independently validated customer_demands record per platform" ||
     platformSplit.crossPlatformExecutionAllowed !== false
   ) {
     throw new Error("requirements single-platform split policy is invalid");
@@ -963,7 +948,7 @@ export function loadRequirementsContract(): RequirementsContract {
   }
   const governance = requireRecord(value.governance, "requirements governance");
   if (
-    governance.databaseDeploymentStatus !== "external-unverified" ||
+    governance.databaseDeploymentStatus !== "development-read-only-verified-2026-07-18" ||
     governance.legacyProfileCapability !== "detection-only" ||
     governance.productionReadiness !== "NO-GO" ||
     governance.algorithmContract !== "algorithms.json" ||

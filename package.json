@@ -1,11 +1,10 @@
 {
   "name": "ypmcn-contract-first-automation",
-  "version": "3.0.6",
+  "version": "3.0.8",
   "private": true,
   "type": "module",
   "workspaces": [
-    "YPmcn",
-    "vector-mcp"
+    "YPmcn"
   ],
   "scripts": {
     "test": "npm run verify",
@@ -18,14 +17,11 @@
     "verify:provider:prod": "node scripts/check-provider-contract.mjs --url https://mcp.eshypdata.com/sse",
     "mcp:dev": "node scripts/set-mcp-profile.mjs development",
     "mcp:prod": "node scripts/set-mcp-profile.mjs production",
-    "test:fast": "npm --workspace YPmcn test && npm --workspace vector-mcp run build && uv run --no-project python -B tests/test_hooks.py && node scripts/smoke-vector-mcp.mjs",
-    "test:mcp": "npm --workspace vector-mcp run build && node scripts/smoke-vector-mcp.mjs",
+    "test:fast": "npm --workspace YPmcn test",
+    "test:legacy-hooks": "uv run --no-project python -B tests/test_hooks.py",
     "test:openclaw": "npm --workspace YPmcn run build && node scripts/check-openclaw-source.mjs",
     "test:headless": "npm run test:fast && npm run test:openclaw",
     "pack:yp": "node scripts/prepare-package.mjs"
-  },
-  "dependencies": {
-    "mysql2": "3.22.6"
   },
   "devDependencies": {
     "yaml": "2.9.0"

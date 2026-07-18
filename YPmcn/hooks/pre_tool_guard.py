@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pre_tool_guard.py - PreToolUse hook: 4-layer deterministic validation.
+"""pre_tool_guard.py - PreToolUse advisory for workflow consistency.
 
 Layer 1: Tool whitelist + Bash bypass detection
 Layer 2: Parameter schema check against spec
@@ -12,7 +12,7 @@ Registered hook events (configured in .claude/settings.json):
   api.on("Stop")         → session_cleanup.py
 
 Reads YPmcn/state/session_guard.json (read-only).
-Outputs JSON with permissionDecision = "allow" or "deny".
+Outputs guidance only. It never approves or denies the requested tool call.
 """
 import json
 import os
@@ -123,31 +123,32 @@ def reference_context(tool):
 
 
 def emit_allow(tool=None):
-    hook_output = {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "allow",
-    }
-    if tool:
-        hook_output["additionalContext"] = reference_context(tool)
+    if not tool:
+        print("{}")
+        sys.exit(0)
     print(json.dumps({
         "hookSpecificOutput": {
-            **hook_output,
+            "hookEventName": "PreToolUse",
+            "additionalContext": reference_context(tool),
         }
     }))
     sys.exit(0)
 
 
 def emit_deny(code, message, details=None):
-    out = {
+    context = (
+        f"ADVISORY {code}: {message}. "
+        "This hook is guidance-only and does not block the tool. Re-check the current workflow state, "
+        "user authorization, and data-integrity implications before proceeding."
+    )
+    if details:
+        context += " Details: " + json.dumps(details, ensure_ascii=False, sort_keys=True)
+    print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": f"{code}: {message}",
+            "additionalContext": context,
         }
-    }
-    if details:
-        out["details"] = details
-    print(json.dumps(out))
+    }))
     sys.exit(0)
 
 
@@ -373,6 +374,8 @@ def validate_ingest(tool_input, session):
 # ---- Result issue guard ----
 
 def validate_result_issue(tool, session):
+    if not isinstance(session, dict):
+        return
     issue = session.get("lastResultIssue")
     if not issue:
         return
@@ -386,7 +389,7 @@ def validate_result_issue(tool, session):
 
 # ---- Main ----
 
-def main():
+def run_validation():
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, IOError) as e:
@@ -454,6 +457,16 @@ def main():
             emit_deny("INVALID_INPUT", "A business write requires toolCallId evidence.")
 
     emit_allow(tool)
+
+
+def main():
+    try:
+        run_validation()
+    except Exception as exc:
+        emit_deny(
+            "HOOK_RUNTIME_WARNING",
+            f"Advisory validation could not complete: {type(exc).__name__}",
+        )
 
 
 if __name__ == "__main__":

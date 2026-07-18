@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "profile": "mvp-v2",
   "providerContractBasis": {
-    "endpoint": "http://192.168.0.129:32008/sse",
+    "endpoint": "https://mcp.eshypdata.com/sse",
     "productionEndpoint": "https://mcp.eshypdata.com/sse",
     "activeProfile": "development",
     "inputAuthority": "live-tools/list",
@@ -29,7 +29,7 @@
         "creatorIdentity": "platform creator table joined by platform + kwUid",
         "creatorPrices": "xhs_creator_accounts or dy_creator_accounts: kolOfficialPriceL1/L2/L3 and downloadPriceL1/L2/L3",
         "creatorSupplierRebate": "core_supplier.default_rebate_rate joined through creator_supply_offers.supplier_id",
-        "requirementRebateThreshold": "customer_demands.rebateMinRate/rebateMaxRate; filter input only, never actual rebate",
+        "requirementRebateThreshold": "customer_demands.rebate contains original customer wording; any parsed filter is input only and never actual supplier rebate",
         "legacyPriceCents": "not authoritative when creator price tiers exist"
       }
     },
@@ -71,11 +71,10 @@
     "record_client_feedback",
     "get_recommendation_run_detail",
     "get_creator_detail",
-    "audit_manual_adjustment"
-  ],
-  "optionalTools": [
+    "audit_manual_adjustment",
     "get_workflow_state"
   ],
+  "optionalTools": [],
   "outputEnvelopes": {
     "observed-runtime": {
       "contractStatus": "not-advertised",
@@ -598,40 +597,11 @@
     "manual_source_creators": {
       "name": "manual_source_creators",
       "required": [
-        "demand_id",
-        "demand_version"
+        "requirement_id"
       ],
       "properties": {
-        "demand_id": {
+        "requirement_id": {
           "type": "string"
-        },
-        "demand_version": {
-          "type": "integer"
-        },
-        "search_context": {
-          "anyOf": [
-            {
-              "type": "object",
-              "additionalProperties": true
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "manual_results": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "forbidden": [],

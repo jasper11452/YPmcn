@@ -11,7 +11,8 @@
   "missingTargetTools": [
     "select_inquiry_form_fields",
     "sync_mcn_inquiry_status",
-    "create_with_distributions"
+    "create_with_distributions",
+    "get_workflow_state"
   ],
   "schemaHashScope": "observedSummary",
   "schemaHashAlgorithm": "sha256",

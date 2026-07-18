@@ -35,7 +35,7 @@
 
 三个数字允许不同。回复时必须带口径名称，不得统称为“候选数量”或把差异解释为状态冲突。
 
-搜索完成后还必须从已校验需求和实际搜索结果生成六个确认字段：`demand_count`、`database_candidate_count`、`supply_demand_ratio`、`recommended_mcn_count`、`recommended_manual_count`、`recommended_mcn_manual_ratio`。Ask 确认是进入 `rank_mcns` 的人工门禁，不是新的数据库 phase。
+搜索完成后，必须从已校验需求和 MCP 实际 `supply_plan` 展示十个确认字段：`demand_count`、`database_candidate_count`、`supply_demand_ratio`、`target_submission_count`、`estimated_valid_return_count`、`estimated_gap_count`、`recommended_mcn_count`、`mcn_covered_creator_count`、`recommended_manual_creator_count`、`mcn_manual_creator_ratio`。比例两端都按达人账号数；Ask 确认是进入 `rank_mcns` 的人工门禁，不是新数据库 phase。
 
 ## 身份链
 
@@ -52,6 +52,6 @@
 
 ## 写结果
 
-所有写操作先写 Ledger `in_progress`，完成后标记 `succeeded/failed/unknown`。相同幂等键已成功则返回已有摘要；unknown 只能查询对账，不得盲目重试。
+目标规则是所有写操作先写 Ledger `started`，完成后标记 `succeeded/failed/unknown`；相同幂等键和请求哈希返回已有摘要，不同哈希冲突，unknown 只能查询对账，不得盲目重试。待部署后端源码已接入 11 个写入口，但当前开发库 ledger 仍为 0 行，故 Agent 必须以远程 trace/重放证据判断是否生效；本地 Hook 的确认凭证只防误触，不构成数据库幂等。
 
-`select_inquiry_form_fields` 和用户确认是外发准备，不形成持久 phase。只有真实项目和 distribution 写入并镜像为 inquiry 后，状态才进入 `waiting_mcn_return`。
+`select_inquiry_form_fields` 和用户确认是外发准备，不形成持久 phase。`create_with_distributions` 只负责外部创建；只有 `sync_mcn_inquiry_status` 查询真实 project/distribution 并维护 inquiry 后，状态才进入 `waiting_mcn_return`。

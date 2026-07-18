@@ -13,12 +13,11 @@ import { mcpConfig } from "./set-mcp-profile.mjs";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
 const specRoot = fileURLToPath(new URL("../spec/", import.meta.url));
-const vectorRoot = fileURLToPath(new URL("../vector-mcp/", import.meta.url));
-const vectorDist = fileURLToPath(new URL("../vector-mcp/dist/", import.meta.url));
 const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.url));
 const stagingRoot = join(stagingBase, "ypmcn-media-assistant");
 const releaseRoot = fileURLToPath(new URL("../packages/releases/", import.meta.url));
 const pluginAssets = [
+  ".codex-plugin",
   ".claude-plugin",
   ".npmignore",
   "README.md",
@@ -62,7 +61,6 @@ export function stagePackageAssets() {
   rmSync(join(pluginRoot, "spec"), { recursive: true, force: true });
   rmSync(join(pluginRoot, "vector-mcp"), { recursive: true, force: true });
   run(npm, ["run", "build"], pluginRoot);
-  run(npm, ["run", "build"], vectorRoot);
   mkdirSync(stagingRoot, { recursive: true });
   for (const asset of pluginAssets) {
     cpSync(join(pluginRoot, asset), join(stagingRoot, asset), { recursive: true });
@@ -70,30 +68,34 @@ export function stagePackageAssets() {
   const packagedMcpConfig = `${JSON.stringify(mcpConfig("development"), null, 2)}\n`;
   writeFileSync(join(stagingRoot, ".mcp.json"), packagedMcpConfig);
   writeFileSync(join(stagingRoot, "mcp.json"), packagedMcpConfig);
-  cpSync(
-    join(pluginRoot, "hooks", "ypmcn-media-assistant"),
-    join(stagingRoot, "hooks", "ypmcn-media-assistant"),
-    { recursive: true },
-  );
   cpSync(specRoot, join(stagingRoot, "spec"), { recursive: true });
-  cpSync(vectorDist, join(stagingRoot, "vector-mcp", "dist"), { recursive: true });
   assertOfflineInstallablePackage(stagingRoot);
   return stagingRoot;
+}
+
+export function packPackageArchive(packageRoot, destination) {
+  mkdirSync(destination, { recursive: true });
+  const output = run(
+    "npm",
+    ["pack", "--pack-destination", destination, "--json", "--ignore-scripts"],
+    packageRoot,
+    { capture: true },
+  );
+  const packed = JSON.parse(output)[0];
+  if (!packed?.filename) {
+    throw new Error("npm pack did not report an archive filename");
+  }
+  return {
+    archive: join(destination, packed.filename),
+    files: (packed.files ?? []).map(({ path }) => path),
+  };
 }
 
 export function preparePackage({ verify = true } = {}) {
   if (verify) verifyRepository();
   stagePackageAssets();
-  mkdirSync(releaseRoot, { recursive: true });
   try {
-    const output = run(
-      "npm",
-      ["pack", "--pack-destination", releaseRoot, "--json", "--ignore-scripts"],
-      stagingRoot,
-      { capture: true },
-    );
-    const packed = JSON.parse(output)[0];
-    const archive = join(releaseRoot, packed.filename);
+    const { archive } = packPackageArchive(stagingRoot, releaseRoot);
     run(process.execPath, ["scripts/scan-secrets.mjs", archive], repoRoot);
     process.stdout.write(`${archive}\n`);
     return archive;

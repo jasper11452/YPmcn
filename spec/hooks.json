@@ -1,28 +1,37 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "profile": "mvp-v2",
-  "implementation": "YPmcn/hooks/pre_tool_guard.py",
+  "implementation": "YPmcn/src/index.ts",
+  "handlerImplementation": "YPmcn/src/runtime-hooks.ts",
+  "executionSurface": "YP Action/OpenClaw Node plugin",
   "events": {
-    "PreToolUse": {
-      "responsibility": "deterministic_precondition_and_permission_guards_with_soft_reference_context",
+    "before_prompt_build": {
+      "responsibility": "inject_strict_brief_and_continuous_workflow_context",
+      "mayBlock": false,
+      "script": "YPmcn/src/index.ts"
+    },
+    "before_tool_call": {
+      "responsibility": "deterministic_contract_permission_and_confirmation_guards",
       "mayBlock": true,
-      "script": "YPmcn/hooks/pre_tool_guard.py"
+      "script": "YPmcn/src/runtime-hooks.ts"
     },
-    "PostToolUse": {
-      "responsibility": "validated_runtime_state_projection",
+    "after_tool_call": {
+      "responsibility": "consume_or_invalidate_local_confirmation_receipts_without_advancing_business_phase",
       "mayBlock": false,
-      "script": "YPmcn/hooks/post_tool_update.py"
+      "script": "YPmcn/src/runtime-hooks.ts"
     },
-    "Stop": {
-      "responsibility": "delete_expired_session_projections",
+    "session_end": {
+      "responsibility": "opportunistic_expired_confirmation_cleanup",
       "mayBlock": false,
-      "script": "YPmcn/hooks/session_cleanup.py"
+      "script": "YPmcn/src/runtime-hooks.ts"
     }
   },
   "stateStore": {
-    "path": "YPmcn/state/session_guard.json",
-    "ttl": "24h",
-    "format": "session_guard_schema_v1"
+    "path": "YPmcn/state/confirmation_guard.json",
+    "ttl": "10m",
+    "format": "confirmation_guard_schema_v2",
+    "storesBusinessPayload": false,
+    "authoritative": false
   },
   "boundaries": {
     "owns": [
@@ -30,7 +39,8 @@
       "format_validation",
       "preconditions",
       "permission_guards",
-      "risk_blocking"
+      "risk_blocking",
+      "one_time_confirmation_fingerprints"
     ],
     "doesNotOwn": [
       "database_schema",
@@ -39,13 +49,26 @@
       "allowed_actions",
       "recovery_ownership_or_authorization",
       "business_ranking_algorithm",
-      "provider_evidence_rewrite"
+      "provider_evidence_rewrite",
+      "server_side_idempotency"
     ],
-    "sessionProjection": {
+    "localConfirmationProjection": {
       "authoritative": false,
       "mayGrantServerAction": false,
       "mayDenyForAdditionalSafety": true,
+      "advancesBusinessPhase": false,
       "authoritativeContract": "workflow.json#stateAuthority"
     }
+  },
+  "legacyArtifacts": {
+    "paths": [
+      "YPmcn/hooks/pre_tool_guard.py",
+      "YPmcn/hooks/post_tool_update.py",
+      "YPmcn/hooks/session_cleanup.py",
+      "tests/test_hooks.py"
+    ],
+    "status": "historical-regression-only",
+    "includedInCurrentVerification": false,
+    "includedInReleasePackage": false
   }
 }

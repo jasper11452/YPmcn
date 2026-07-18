@@ -1,0 +1,9 @@
+【{project_name}｜达人提报】
+平台：{{platform}}
+{{brand_product_line}}
+回填要求：{{content_requirement}}
+需求数量：{{quantity_total}} 位
+单达人预算：{{creator_budget_tier_and_amount}}
+提报截止：{deadline}
+回填字段：{{confirmed_column_names}}
+请填写符合要求且可确认档期与报价的达人：{form_link}

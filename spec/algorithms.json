@@ -49,9 +49,7 @@
       }
     }
   },
-  "sourceDocuments": [
-    "doc/20260630-06-业务算法规则.md的替身"
-  ],
+  "sourceDocuments": [],
   "governance": {
     "changePolicy": "approved-baseline-parameters-require-frozen-sample-evaluation",
     "implementationMustNotDefineContract": true,

@@ -7,6 +7,7 @@ import {
   checkProviderUrl,
   compareProviderTools,
   extractSnapshotTools,
+  sanitizeNetworkCause,
 } from "../scripts/check-provider-contract.mjs";
 
 const legacyProfilePath = fileURLToPath(
@@ -65,7 +66,7 @@ describe("read-only provider contract checker", () => {
     }
   });
 
-  it("detects the legacy profile and reports exactly the three target tool gaps", () => {
+  it("detects the legacy profile and reports exactly the four target tool gaps", () => {
     const report = compareProviderTools(legacyToolDefinitions());
     assert.equal(report.status, "FAIL");
     assert.equal(report.detectedProfile, "legacy-1.9.4");
@@ -73,6 +74,7 @@ describe("read-only provider contract checker", () => {
       "select_inquiry_form_fields",
       "create_with_distributions",
       "sync_mcn_inquiry_status",
+      "get_workflow_state",
     ]);
     assert.ok(report.schemaDiffs.length > 0);
     assert.match(report.schemaHash, /^[a-f0-9]{64}$/);
@@ -131,6 +133,31 @@ describe("read-only provider contract checker", () => {
     assert.deepEqual(extractSnapshotTools({ result: { tools } }), tools);
     assert.deepEqual(extractSnapshotTools({ tools }), tools);
     assert.throws(() => extractSnapshotTools({ result: {} }), /tools\/list snapshot/i);
+  });
+
+  it("reports only sanitized network cause fields", () => {
+    const error = new TypeError("fetch failed", {
+      cause: {
+        code: "ECONNREFUSED",
+        message: "connect failed with token=secret",
+        stack: "sensitive stack",
+        errors: [{
+          address: "203.0.113.10",
+          port: 32008,
+          message: "http://user:password@203.0.113.10:32008/sse",
+        }],
+      },
+    });
+
+    const cause = sanitizeNetworkCause(error);
+
+    assert.deepEqual(cause, {
+      code: "ECONNREFUSED",
+      address: "203.0.113.10",
+      port: 32008,
+    });
+    assert.equal(JSON.stringify(cause).includes("secret"), false);
+    assert.equal(JSON.stringify(cause).includes("password"), false);
   });
 
   it("uses only initialize, initialized notification, and tools/list over HTTP", async () => {

@@ -5,7 +5,6 @@
 ```text
 业务来源 → changes/ 决策 → spec/ 契约 → 组件实现 → tests/ 验证 → packages/ 发布
                                    ├─ YPmcn/        Skill + Hook
-                                   ├─ vector-mcp/   向量检索
 ```
 
 | 位置 | 责任 | 人工检查重点 |
@@ -15,7 +14,6 @@
 | `spec/` | 唯一正式机器契约 | 字段、Tool、Host namespace、阶段、错误、副作用是否一致 |
 | `changes/` | 为什么改、影响什么 | 范围、风险、验证、回滚是否明确 |
 | `YPmcn/` | 可发布插件组件 | Skill/Hook 是否只执行契约允许的行为 |
-| `vector-mcp/` | 创作者向量检索 | 召回可靠性、超时、持久化和隔离 |
 | `tests/` | 仓库总门禁 | 是否锁定契约而不是迁就实现 |
 | `scripts/` | 验证、同步、打包 | 是否确定性、无隐式安装或生产写入 |
 | `docs/` | 人类说明 | 是否短、当前、只解释不复制 Spec |
@@ -27,7 +25,7 @@
 <!-- human-docs:contract-map:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-Spec 摘要：`sha256:7104cb86a097da6c5f988fd0630bbb8c6a737fe0cbdecea73a4bbdf2093127ad`
+Spec 摘要：`sha256:a09d78d7b37e69a95d086881c97b28074c327a53007cb83a734f8cc37ba1eaa3`
 
 | 领域 | 唯一权威 | 人类理解 |
 | --- | --- | --- |
@@ -50,7 +48,7 @@ Spec 摘要：`sha256:7104cb86a097da6c5f988fd0630bbb8c6a737fe0cbdecea73a4bbdf209
 | 写表、不变量、幂等 | `spec/database.json` | provider/数据库外部证明 |
 | canonical 需求、字典、金额/deadline、constraint/Join/late data | `spec/requirements.json` | `spec/requirement-dictionary.json`、`spec/schemas/` 与错误映射 |
 | Skill 可调用范围 | `spec/skills.json` | `YPmcn/skills/` 与 Tool 卡 |
-| Hook 事件和守卫 | `spec/hooks.json` | `YPmcn/hooks/*.py` 与 `tests/test_hooks.py` |
+| Hook 事件和守卫 | `spec/hooks.json` | `YPmcn/src/index.ts`、`YPmcn/src/runtime-hooks.ts` 与 `YPmcn/tests/native-hooks.test.mjs` |
 | 错误与重试 | `spec/errors.json` | 写结果未知时的对账路径 |
 | 算法规则 | `spec/algorithms.json` | 未批准时保持阻断，不从代码反推 |
 | Agent 执行边界 | `CLAUDE.md` / `AGENTS.md` | 不改业务 Spec；遵守单写者、最小验证和 Token 上限 |

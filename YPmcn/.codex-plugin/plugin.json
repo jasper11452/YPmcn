@@ -1,0 +1,31 @@
+{
+  "id": "ypmcn-media-assistant",
+  "name": "ypmcn-media-assistant",
+  "version": "3.0.8",
+  "description": "YPmcn 媒介助手：解析客户需求、检索与排序达人，并通过远程 MCP 推进媒介工作流。",
+  "author": {
+    "name": "Jasper"
+  },
+  "license": "MIT",
+  "keywords": [
+    "media",
+    "mcn",
+    "creator"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "YPmcn 媒介助手",
+    "shortDescription": "解析客户需求并协助完成达人媒介工作流",
+    "longDescription": "根据客户 Brief 建立结构化需求，通过远程 YPmcn MCP 检索、排序并推进机构与达人协作。",
+    "developerName": "Jasper",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "解析这份客户需求，并按 YPmcn 工作流给出下一步。"
+    ]
+  }
+}

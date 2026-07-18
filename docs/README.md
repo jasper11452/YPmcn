@@ -4,9 +4,9 @@
 
 ## 先看结论
 
-- YPmcn 是一个契约优先的媒介助手仓库：Host 业务工具只接受 `mcp__ypmcn__<contract-tool>`，provider `tools/list` 保持 bare tool name；插件负责 Skill/Hook，provider 负责真实业务写入，vector MCP 负责向量检索。
+- YPmcn 是一个契约优先的媒介助手仓库：Host 业务工具只接受 `mcp__ypmcn__<contract-tool>`，provider `tools/list` 保持 bare tool name；插件负责 Skill/Hook，远程 provider 负责真实业务写入，并在 `search_creators` / `rank_creators` 内部消费向量能力；独立 Vector MCP 不进入插件包。
 - P0 与首批 P1 已收口为 Requirements、Database、MCP、Workflow、Error 和 JSON Schema 契约；这只是目标定义，不代表 provider、数据库或 Hook/Skill 已实现。
-- 离线仓库可验证，但生产 provider 仍是旧契约，数据库证明与算法定义尚未完成，所以当前仍是 **NO-GO**。
+- 离线仓库可验证，2026-07-18 开发 MySQL 已真实只读核对；独立后端工作树已实现 ledger、权威 inquiry sync 和 Search/Rank 向量融合并通过本地回归，但尚未部署到远程开发机，也没有真实 Agent E2E，因此当前仍是 **NO-GO**。
 - 唯一项目根就是当前 Git 仓库；`YPmcn/` 是组件，临时 worktree 不是第二个项目。
 
 ## 1 分钟阅读顺序
@@ -29,12 +29,12 @@
 | --- | --- |
 | Profile / 状态 | `mvp-v2` / `approved` |
 | 正式契约域 | 8 个 |
-| MCP Tool | 15 个（必需 14，可选 1） |
-| Workflow / Hook | 11 个阶段 / 3 个事件 |
+| MCP Tool | 15 个（必需 15，可选 0） |
+| Workflow / Hook | 11 个阶段 / 4 个事件 |
 | 数据库证明 | 5 项不变量，`development-observed` |
 | 算法定义 | `external-unverified` |
 | 兼容检测 | `legacy-1.9.4` |
-| Spec 摘要 | `sha256:7104cb86a097da6c5f988fd0630bbb8c6a737fe0cbdecea73a4bbdf2093127ad` |
+| Spec 摘要 | `sha256:a09d78d7b37e69a95d086881c97b28074c327a53007cb83a734f8cc37ba1eaa3` |
 <!-- human-docs:spec-summary:end -->
 
 ## 五条原则

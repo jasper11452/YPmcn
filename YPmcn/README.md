@@ -37,7 +37,7 @@ validate_requirement
 
 ## Provider 状态
 
-开发 profile 默认连接开发 MCP；当前 15 个业务工具输入契约通过只读检查。生产 provider 只有在 `tools/list` 实际广告完整业务工具后才可称为可用。
+开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。
 
 ```bash
 npm run mcp:dev
@@ -46,7 +46,7 @@ npm run mcp:prod
 npm run verify:provider:prod
 ```
 
-发布暂存始终使用生产 SSE；开发机 PASS 不作为生产成功证据。
+发布包写入统一远程 SSE，包内不含 Vector MCP。YP Action/OpenClaw 已支持 SSE；`.codex-plugin/plugin.json` 通过 `mcpServers` 指向包内 `.mcp.json`。Codex 插件结构校验已通过，但“YP Action 在没有预存全局配置的全新环境安装 tgz 后自动注册 MCP”仍必须用干净安装环境验收，不能用手工 `mcp set` 代替。
 
 ## 开发与安装包
 
@@ -56,6 +56,8 @@ npm test
 npm run pack:yp
 ```
 
-安装时使用生成的 `.tgz`，不要直接选择源码目录。本地测试结果不能作为生产业务成功证据。
+安装时使用生成的 `.tgz`，不要直接选择源码目录。安装后先确认远程 `ypmcn-mcp` 已被宿主注册，再运行真实 Live E2E；本地测试不能作为生产业务成功证据。
 
 Agent 指令见 [skills/media-assistant/SKILL.md](skills/media-assistant/SKILL.md)。机器契约以根目录 `../spec/` 为准；发布包内 spec 由统一打包脚本生成。
+
+`hooks/*.py` 只保留为历史状态机的确定性回归工件，不是当前 YP Action 执行面，也不会进入发布包；当前宿主实际运行的是 `src/runtime-hooks.ts` 注册的 Node Hook。

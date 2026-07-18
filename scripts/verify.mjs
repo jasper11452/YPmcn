@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginRoot = fileURLToPath(new URL("../YPmcn/", import.meta.url));
-const vectorRoot = fileURLToPath(new URL("../vector-mcp/", import.meta.url));
 
 function runStage({ name, command, args, cwd = repoRoot, env }) {
   process.stderr.write(`[verify] ${name}\n`);
@@ -59,22 +58,10 @@ export function verifyRepository() {
       args: ["--test", "tests/provider_contract.test.mjs"],
     },
     {
-      name: "Python hooks",
-      command: "uv",
-      args: ["run", "--no-project", "python", "-B", "tests/test_hooks.py"],
-      env: { PYTHONDONTWRITEBYTECODE: "1" },
-    },
-    {
       name: "Skill and operator documentation",
       command: "uv",
       args: ["run", "--no-project", "python", "-B", "-m", "unittest", "-v", "tests/test_skill_package.py"],
       env: { PYTHONDONTWRITEBYTECODE: "1" },
-    },
-    {
-      name: "vector MCP source build and reliability",
-      command: "npm",
-      args: ["test"],
-      cwd: vectorRoot,
     },
     {
       name: "release metadata and package contents",

@@ -1,84 +1,66 @@
 [
   {
-    "id": "budget-only",
-    "raw_messages": [{"role": "client", "content": "预算3000"}],
-    "expected_fields": {"budget_max_cents": 300000, "quantity_total": null}
+    "id": "canonical-range-string",
+    "payload_fragment": {"femaleRate": "[0,0.5]"},
+    "expected_guard": "allow"
   },
   {
-    "id": "quantity-only",
-    "raw_messages": [{"role": "client", "content": "需要3000人"}],
-    "expected_fields": {"budget_max_cents": null, "quantity_total": 3000}
+    "id": "rebate-lower-bound-plus",
+    "brief_fragment": "返点30%+",
+    "payload_fragment": {"rebate": "[0.3,1]"},
+    "expected_guard": "allow"
   },
   {
-    "id": "budget-and-quantity",
-    "raw_messages": [{"role": "client", "content": "预算3000，数量10位"}],
-    "expected_fields": {"budget_max_cents": 300000, "quantity_total": 10}
+    "id": "rebate-lower-bound-chinese",
+    "brief_fragment": "返点30%以上",
+    "payload_fragment": {"rebate": "[0.3,1]"},
+    "expected_guard": "allow"
   },
   {
-    "id": "agent-correction-same-version",
-    "existing_demand_id": "demand-001",
-    "existing_demand_version": 1,
-    "raw_messages": [
-      {"role": "client", "content": "预算3000"},
-      {"role": "agent", "content": "更正解析：3000是预算，不是人数。"}
-    ],
-    "previous_fields": {"budget_max_cents": null, "quantity_total": 3000},
-    "expected_fields": {"budget_max_cents": 300000, "quantity_total": null},
-    "expected_demand_version": 1,
-    "expected_version_reason": "agent_correction",
-    "expected_run_invalidated": true
+    "id": "rebate-exact-percentage",
+    "brief_fragment": "返点30%",
+    "payload_fragment": {"rebate": "[0.3,0.3]"},
+    "expected_guard": "allow"
   },
   {
-    "id": "human-budget-change-new-version",
-    "existing_demand_id": "demand-001",
-    "existing_demand_version": 1,
-    "raw_messages": [
-      {"role": "client", "content": "预算3000"},
-      {"role": "client", "content": "预算改成5000"}
-    ],
-    "previous_fields": {"budget_max_cents": 300000, "quantity_total": null},
-    "expected_fields": {"budget_max_cents": 500000, "quantity_total": null},
-    "expected_demand_version": 2,
-    "expected_version_reason": "human_requirement_change",
-    "expected_run_invalidated": true
+    "id": "rebate-bounded-percentage",
+    "brief_fragment": "返点20%-30%",
+    "payload_fragment": {"rebate": "[0.2,0.3]"},
+    "expected_guard": "allow"
   },
   {
-    "id": "human-repeat-no-version",
-    "existing_demand_id": "demand-001",
-    "existing_demand_version": 1,
-    "raw_messages": [
-      {"role": "client", "content": "预算3000"},
-      {"role": "client", "content": "预算3000"}
-    ],
-    "previous_fields": {"budget_max_cents": 300000, "quantity_total": null},
-    "expected_fields": {"budget_max_cents": 300000, "quantity_total": null},
-    "expected_demand_version": 1,
-    "expected_version_reason": "no_material_change",
-    "expected_run_invalidated": false
+    "id": "json-array-is-not-varchar-range",
+    "payload_fragment": {"femaleRate": [0, 0.5]},
+    "expected_guard": "block"
   },
   {
-    "id": "human-ack-no-version",
-    "existing_demand_id": "demand-001",
-    "existing_demand_version": 1,
-    "raw_messages": [
-      {"role": "client", "content": "预算3000"},
-      {"role": "media", "content": "好的"}
-    ],
-    "previous_fields": {"budget_max_cents": 300000, "quantity_total": null},
-    "expected_fields": {"budget_max_cents": 300000, "quantity_total": null},
-    "expected_demand_version": 1,
-    "expected_version_reason": "no_material_change",
-    "expected_run_invalidated": false
+    "id": "natural-language-range",
+    "payload_fragment": {"femaleRate": "0-0.5"},
+    "expected_guard": "block"
   },
   {
-    "id": "stale-version-conflict",
-    "existing_demand_id": "demand-001",
-    "existing_demand_version": 1,
-    "server_demand_version": 2,
-    "raw_messages": [
-      {"role": "client", "content": "预算改成5000"}
-    ],
-    "expected_error_code": "VERSION_CONFLICT",
-    "expected_write": false
+    "id": "spaced-range",
+    "payload_fragment": {"femaleRate": "[0, 0.5]"},
+    "expected_guard": "block"
+  },
+  {
+    "id": "agent-split-target-fields",
+    "payload_fragment": {"femaleRateMin": 0, "femaleRateMax": 0.5},
+    "expected_guard": "block"
+  },
+  {
+    "id": "rate-outside-unit-interval",
+    "payload_fragment": {"femaleRate": "[0,50]"},
+    "expected_guard": "block"
+  },
+  {
+    "id": "reversed-range",
+    "payload_fragment": {"followercount": "[300000,100000]"},
+    "expected_guard": "block"
+  },
+  {
+    "id": "obsolete-budget-field",
+    "payload_fragment": {"budgetMaxCents": 500000},
+    "expected_guard": "block"
   }
 ]

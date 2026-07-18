@@ -1,32 +1,44 @@
 [
-  {"id":"row-001","row_number":1,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"],"relative_time_without_sent_at":true},
-  {"id":"row-002","row_number":2,"expected_status":"draft","blocking_fields":["submission_deadline_at"],"expected_platforms":["douyin"],"relative_time_without_sent_at":true},
-  {"id":"row-003","row_number":3,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"],"unsupported_platforms":["视频号"],"relative_time_without_sent_at":true},
-  {"id":"row-004","row_number":4,"expected_status":"ready","blocking_fields":[],"expected_platforms":["douyin"]},
-  {"id":"row-005","row_number":5,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-006","row_number":6,"expected_status":"ready","blocking_fields":[],"expected_platforms":["xiaohongshu","douyin"]},
-  {"id":"row-007","row_number":7,"expected_status":"draft","blocking_fields":["platform","submission_deadline_at"],"expected_platforms":[],"relative_time_without_sent_at":true},
-  {"id":"row-008","row_number":8,"expected_status":"draft","blocking_fields":["quantity_total"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-009","row_number":9,"expected_status":"ready","blocking_fields":[],"expected_platforms":["douyin"]},
-  {"id":"row-010","row_number":10,"expected_status":"draft","blocking_fields":["quantity_total"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-011","row_number":11,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-012","row_number":12,"expected_status":"draft","blocking_fields":["platform","quantity_total","submission_deadline_at"],"expected_platforms":[],"relative_time_without_sent_at":true},
-  {"id":"row-013","row_number":13,"expected_status":"draft","blocking_fields":["submission_deadline_at"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-014","row_number":14,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-015","row_number":15,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"],"relative_time_without_sent_at":true},
-  {"id":"row-016","row_number":16,"expected_status":"draft","blocking_fields":["platform","quantity_total","submission_deadline_at"],"expected_platforms":[]},
-  {"id":"row-017","row_number":17,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"],"relative_time_without_sent_at":true},
-  {"id":"row-018","row_number":18,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-019","row_number":19,"expected_status":"draft","blocking_fields":["submission_deadline_at"],"expected_platforms":["xiaohongshu"],"relative_time_without_sent_at":true},
-  {"id":"row-020","row_number":20,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-021","row_number":21,"expected_status":"draft","blocking_fields":["platform","submission_deadline_at"],"expected_platforms":[],"relative_time_without_sent_at":true},
-  {"id":"row-022","row_number":22,"expected_status":"draft","blocking_fields":["platform","quantity_total","submission_deadline_at"],"expected_platforms":[],"relative_time_without_sent_at":true},
-  {"id":"row-023","row_number":23,"expected_status":"draft","blocking_fields":["platform","quantity_total","submission_deadline_at"],"expected_platforms":[]},
-  {"id":"row-024","row_number":24,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-025","row_number":25,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu","douyin"]},
-  {"id":"row-026","row_number":26,"expected_status":"draft","blocking_fields":["submission_deadline_at"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-027","row_number":27,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"]},
-  {"id":"row-028","row_number":28,"expected_status":"draft","blocking_fields":["platform","quantity_total","submission_deadline_at"],"expected_platforms":[]},
-  {"id":"row-029","row_number":29,"expected_status":"draft","blocking_fields":["quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"],"relative_time_without_sent_at":true},
-  {"id":"row-030","row_number":30,"expected_status":"draft","blocking_fields":["budget_min_cents","quantity_total","submission_deadline_at"],"expected_platforms":["xiaohongshu"]}
+  {
+    "id": "upper-rate-to-canonical-range",
+    "brief_fragment": "女性粉丝占比不超过50%",
+    "expected_gate": "ready",
+    "expected_range_fields": {"femaleRate": "[0,0.5]"},
+    "forbidden_fields": ["femaleRateMin", "femaleRateMax"]
+  },
+  {
+    "id": "closed-follower-range",
+    "brief_fragment": "粉丝10万到30万",
+    "expected_gate": "ready",
+    "expected_range_fields": {"followercount": "[100000,300000]"},
+    "forbidden_fields": ["followercountMin", "followercountMax"]
+  },
+  {
+    "id": "exact-single-creator-price",
+    "brief_fragment": "小红书图文单达人官方报价5000元",
+    "expected_gate": "ready",
+    "expected_range_fields": {"kolOfficialPriceL1": "[5000,5000]"},
+    "forbidden_fields": ["kolOfficialPriceL1Min", "kolOfficialPriceL1Max"]
+  },
+  {
+    "id": "upper-photo-interaction-rate",
+    "brief_fragment": "图文互动率不超过5%",
+    "expected_gate": "ready",
+    "expected_range_fields": {"photoInteract": "[0,0.05]"},
+    "forbidden_fields": ["pictureNoteInteractRateMin", "pictureNoteInteractRateMax"]
+  },
+  {
+    "id": "open-ended-lower-bound",
+    "brief_fragment": "粉丝不少于10万",
+    "expected_gate": "semantic_ambiguity",
+    "expected_range_fields": {},
+    "clarify": ["followercount finite upper bound"]
+  },
+  {
+    "id": "single-creator-price-tier-missing",
+    "brief_fragment": "单达人预算5000元",
+    "expected_gate": "semantic_ambiguity",
+    "expected_range_fields": {},
+    "clarify": ["kolOfficialPriceL1/L2/L3 tier"]
+  }
 ]

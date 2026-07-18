@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export const MCP_PROFILES = Object.freeze({
-  development: "http://192.168.0.129:32008/sse",
+  development: "https://mcp.eshypdata.com/sse",
   production: "https://mcp.eshypdata.com/sse",
 });
 

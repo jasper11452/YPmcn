@@ -11,9 +11,9 @@ const REQUIRED = [
   "sync_mcn_inquiry_status", "ingest_mcn_submissions",
   "manual_source_creators", "rank_creators", "create_submission_batch",
   "record_client_feedback", "get_recommendation_run_detail",
-  "get_creator_detail", "audit_manual_adjustment",
+  "get_creator_detail", "audit_manual_adjustment", "get_workflow_state",
 ];
-const OPTIONAL = ["get_workflow_state"];
+const OPTIONAL = [];
 
 const EXPECTED_INPUTS = {
   validate_requirement: { required: ["payload"], properties: { payload: "object" } },
@@ -51,11 +51,8 @@ const EXPECTED_INPUTS = {
     properties: { inquiry_id: "string", items: "array" },
   },
   manual_source_creators: {
-    required: ["demand_id", "demand_version"],
-    properties: {
-      demand_id: "string", demand_version: "integer",
-      search_context: "object|null", manual_results: "array|null",
-    },
+    required: ["requirement_id"],
+    properties: { requirement_id: "string" },
   },
   rank_creators: {
     required: ["requirement_id", "limit"],
@@ -118,7 +115,7 @@ function inputSummary(tool) {
 describe("current Endpoint MCP contract", () => {
   it("declares the exact non-pgy tool catalog", () => {
     assert.deepEqual(profile.providerContractBasis, {
-      endpoint: "http://192.168.0.129:32008/sse",
+      endpoint: "https://mcp.eshypdata.com/sse",
       productionEndpoint: "https://mcp.eshypdata.com/sse",
       activeProfile: "development",
       inputAuthority: "live-tools/list",
@@ -131,7 +128,7 @@ describe("current Endpoint MCP contract", () => {
     assert.equal([...REQUIRED, ...OPTIONAL].some((name) => name.startsWith("pgy")), false);
   });
 
-  it("matches the live tools/list input surface exactly", () => {
+  it("matches the declared local contract", () => {
     assert.deepEqual(Object.keys(profile.tools), [...REQUIRED, ...OPTIONAL]);
     for (const [name, expected] of Object.entries(EXPECTED_INPUTS)) {
       assert.deepEqual(inputSummary(profile.tools[name]), expected, name);

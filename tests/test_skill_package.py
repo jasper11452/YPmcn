@@ -14,6 +14,8 @@ SKILL = PACKAGE / "skills" / "media-assistant" / "SKILL.md"
 REFERENCES = SKILL.parent / "references"
 TOOLS_DIR = REFERENCES / "tools"
 CSV_SCHEMA = REFERENCES / "reference_schema.csv"
+REQUIREMENT_CASES = ROOT / "tests" / "goldens" / "requirement_cases.json"
+REQUIREMENT_REGRESSIONS = ROOT / "tests" / "goldens" / "requirement_regressions.json"
 
 EXPECTED_REFERENCE_FILES = {
     "ask-user-question-patterns.md",
@@ -27,7 +29,7 @@ EXPECTED_REFERENCE_FILES = {
     "requirement-parsing.md",
     "validation-playbook.md",
 }
-EXPECTED_CSV_SHA256 = "c822ec617d53a4da423dbbcbef2b607f971c16ccc0ec7481874518d85f76fb97"
+EXPECTED_CSV_SHA256 = "9138eaa15cab836bb919e9386dfdeb4ac1639533b0ace21f99266846255336b0"
 
 
 def read(path: Path) -> str:
@@ -51,16 +53,14 @@ class SkillPackageContractTest(unittest.TestCase):
         cls.required_tools = cls.profile["requiredTools"]
         cls.all_tools = set(cls.profile["tools"])
 
-    def test_package_contains_runtime_contract_and_operator_entrypoints(self):
+    def test_source_tree_contains_current_runtime_and_legacy_regression_entrypoints(self):
         required = [
             ROOT / "AGENTS.md",
             ROOT / "README.md",
             PACKAGE / "README.md",
             PACKAGE / "openclaw.plugin.json",
             PACKAGE / "src" / "index.ts",
-            PACKAGE / "hooks" / "pre_tool_guard.py",
-            PACKAGE / "hooks" / "post_tool_update.py",
-            PACKAGE / "hooks" / "session_cleanup.py",
+            PACKAGE / "src" / "runtime-hooks.ts",
             PROFILE_PATH,
             WORKFLOW_PATH,
             SKILL,
@@ -130,7 +130,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "workflow_state",
             "allowed_actions",
             "数据库",
-            "in_progress",
+            "started",
             "succeeded/failed/unknown",
             "不得盲目重试",
         ):
@@ -152,6 +152,10 @@ class SkillPackageContractTest(unittest.TestCase):
             r"当前不创建\s*Cron",
         ):
             self.assertIsNone(re.search(pattern, joined, re.IGNORECASE), pattern)
+        ingest = read(TOOLS_DIR / "ingest_mcn_submissions.md")
+        self.assertIn("待部署后端源码已把本 Tool 接入 `mcp_tool_call_ledger`", ingest)
+        self.assertIn("当前远程响应给出 trace/重放证据", ingest)
+        self.assertNotIn("写入受 MCP 调用 Ledger 保护", ingest)
 
     def test_provider_contract_mismatch_is_a_hard_integration_error(self):
         joined = "\n".join(read(path) for path in [SKILL, REFERENCES / "contract-gate.md", REFERENCES / "phase-tool-matrix.md"])
@@ -189,8 +193,9 @@ class SkillPackageContractTest(unittest.TestCase):
             "1–20 秒",
             "21–60 秒",
             "60 秒以上",
-            "元转分",
-            "不得写入 `budget*`",
+            '"[min,max]"',
+            "当前表没有 `businessIndustry`",
+            "不得杜撰字段",
         ):
             self.assertIn(required, joined)
         for obsolete in (
@@ -201,7 +206,7 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertNotIn(obsolete, parsing)
 
-    def test_requirement_intake_requires_scored_preview_before_persistence(self):
+    def test_requirement_intake_uses_three_state_gate_before_persistence(self):
         skill = read(SKILL)
         parsing = read(REFERENCES / "requirement-parsing.md")
         intake = read(REFERENCES / "requirement-intake.md")
@@ -209,29 +214,83 @@ class SkillPackageContractTest(unittest.TestCase):
         routing = read(REFERENCES / "phase-tool-matrix.md")
         joined = "\n".join((skill, parsing, intake, tool_card, routing))
         for required in (
-            "字段预览",
             "原文保留",
-            "歧义",
-            "解析评分",
-            "score > 80",
-            "score === 80",
-            "各 5 分",
-            "每个杜撰或擅自推断值扣 10 分",
-            "不得先调用再补展示",
+            "missing_required",
+            "semantic_ambiguity",
+            "`ready`",
+            "业务可选",
+            "__UNRESOLVED__",
+            "ypmcn-brief-v1",
+            "currentLocalDateTime",
+            "没有可用于该字段的具体候选值",
+            "没有数字的模糊数量",
+            "先完整生成缺失清单和歧义清单",
             "原子需求",
-            "quantityTotal=2",
-            "rebateMinRate=0.3",
-            "价格 4w",
-            "不主动提交 `status=ready`",
+            'followercount: "[100000,300000]"',
+            'femaleRate: "[0.5,1]"',
+            'kolOfficialPriceL2: "[3000,5000]"',
+            '`{"payload": {..., "status": "ready"}}`',
         ):
             self.assertIn(required, joined)
+        self.assertNotIn("score > 80", joined)
+        self.assertNotIn("score === 80", joined)
+        self.assertNotIn("不存在、为空或无法生成", joined)
+
+    def test_requirement_goldens_use_current_range_boundary(self):
+        cases = json.loads(read(REQUIREMENT_CASES))
+        regressions = json.loads(read(REQUIREMENT_REGRESSIONS))
+        canonical_range = re.compile(r"^\[(?:0|[1-9]\d*)(?:\.\d+)?,(?:0|[1-9]\d*)(?:\.\d+)?\]$")
+
+        self.assertTrue(cases)
+        self.assertTrue(regressions)
+        for case in cases:
+            for field, value in case.get("expected_range_fields", {}).items():
+                self.assertIn(field, read(CSV_SCHEMA))
+                self.assertIsInstance(value, str)
+                self.assertRegex(value, canonical_range)
+                lower, upper = json.loads(value)
+                self.assertLessEqual(lower, upper)
+            for field in case.get("forbidden_fields", []):
+                self.assertNotIn(field, read(CSV_SCHEMA))
+
+        by_id = {item["id"]: item for item in regressions}
+        self.assertEqual("allow", by_id["canonical-range-string"]["expected_guard"])
+        self.assertEqual("[0,0.5]", by_id["canonical-range-string"]["payload_fragment"]["femaleRate"])
+        for regression_id, wording in (
+            ("rebate-lower-bound-plus", "返点30%+"),
+            ("rebate-lower-bound-chinese", "返点30%以上"),
+        ):
+            self.assertEqual("allow", by_id[regression_id]["expected_guard"])
+            self.assertEqual(wording, by_id[regression_id]["brief_fragment"])
+            self.assertEqual("[0.3,1]", by_id[regression_id]["payload_fragment"]["rebate"])
+        for regression_id, expected_range in (
+            ("rebate-exact-percentage", "[0.3,0.3]"),
+            ("rebate-bounded-percentage", "[0.2,0.3]"),
+        ):
+            self.assertEqual("allow", by_id[regression_id]["expected_guard"])
+            self.assertEqual(expected_range, by_id[regression_id]["payload_fragment"]["rebate"])
+        self.assertTrue(all(
+            item["expected_guard"] == "block"
+            for item in regressions
+            if item["id"] not in {
+                "canonical-range-string",
+                "rebate-lower-bound-plus",
+                "rebate-lower-bound-chinese",
+                "rebate-exact-percentage",
+                "rebate-bounded-percentage",
+            }
+        ))
+
+        serialized = json.dumps([cases, regressions], ensure_ascii=False)
+        for obsolete in ("quantity_total", "submission_deadline_at", "budget_min_cents", "budget_max_cents"):
+            self.assertNotIn(obsolete, serialized)
 
     def test_csv_authority_keeps_supplied_line_count_fields_and_hash(self):
         raw = CSV_SCHEMA.read_bytes()
         self.assertEqual(EXPECTED_CSV_SHA256, hashlib.sha256(raw).hexdigest())
         with CSV_SCHEMA.open("r", encoding="utf-8-sig", newline="") as handle:
             rows = list(csv.DictReader(handle))
-        self.assertEqual(323, len(rows))
+        self.assertEqual(61, len(rows))
         fields = [row["Field"] for row in rows]
         self.assertEqual(len(fields), len(set(fields)))
         for field in (
@@ -241,9 +300,38 @@ class SkillPackageContractTest(unittest.TestCase):
             "brandName",
             "status",
             "platform",
-            "kwUid",
+            "rawMessagesJson",
+            "followercount",
         ):
             self.assertIn(field, fields)
+        by_field = {row["Field"]: row for row in rows}
+        self.assertEqual("YES", by_field["kolOfficialPriceL1"]["Null"])
+        self.assertEqual("varchar(255)", by_field["kolOfficialPriceL1"]["Type"])
+        self.assertIn("[min,max]", by_field["kolOfficialPriceL1"]["Comment"])
+        self.assertIn("至少一项为Brief业务必填", by_field["kolOfficialPriceL1"]["Comment"])
+        self.assertEqual("NO", by_field["rebate"]["Null"])
+        self.assertNotIn("budgetMinCents", by_field)
+        self.assertNotIn("submissionDeadlineRaw", by_field)
+        self.assertIn("ypmcn-brief-v1", by_field["rawMessagesJson"]["Comment"])
+
+    def test_output_assets_fix_wecom_and_submission_shapes(self):
+        assets = PACKAGE / "skills" / "media-assistant" / "assets"
+        csv_header = (assets / "ypmcn_submission_template.csv").read_text(encoding="utf-8").strip()
+        self.assertEqual(
+            "排名,平台,达人昵称,达人ID,来源,机构名称,官方报价（元）,提报报价（元）,提报返点（%）,推荐得分,推荐理由,风险提示",
+            csv_header,
+        )
+        wecom = (assets / "wecom_inquiry_template.txt").read_text(encoding="utf-8")
+        for required in (
+            "【{project_name}｜达人提报】",
+            "平台：{{platform}}",
+            "回填要求：{{content_requirement}}",
+            "单达人预算：{{creator_budget_tier_and_amount}}",
+            "提报截止：{deadline}",
+            "回填字段：{{confirmed_column_names}}",
+            "{form_link}",
+        ):
+            self.assertIn(required, wecom)
 
     def test_creator_search_field_authority_matches_current_database(self):
         texts = [
@@ -294,11 +382,10 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_readiness_report_matches_current_verification_inventory(self):
         text = read(ROOT / "docs" / "integration-readiness.md")
         for required in (
-            "统一验证覆盖 204 项测试",
-            "人类文档同步、自动提交与精简度：5 项",
-            "根 workspace 安装图：1 项",
-            "provider checker：8 项；Python Hook：24 项",
-            "Skill、工具卡和文档一致性：16 项",
+            "OpenClaw 插件、契约与 Native Node Hook",
+            "provider checker",
+            "Skill、工具卡和文档一致性",
+            "旧 Python Hook 状态机已从当前验收门禁移除",
         ):
             self.assertIn(required, text)
         self.assertNotIn("统一验证覆盖 207 项测试", text)

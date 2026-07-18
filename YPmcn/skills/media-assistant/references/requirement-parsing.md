@@ -1,75 +1,49 @@
 # 需求字段解析
 
-## 权威字段
+## 真实字段权威
 
-`reference_schema.csv` 由 YP 数据库 `customer_demands` 的只读元数据生成，是当前字段与格式权威。`Field` 是真实列名，`Type` 是真实 MySQL 类型，`Null` 表示是否可传空，`Comment` 说明业务语义和平台差异。`customer_demands`、`xhs_creator_accounts`、`dy_creator_accounts` 和候选搜索使用同名字段时必须保持一致；不擅自改列名、造同义列或发明数据库不存在的格式。
+`reference_schema.csv` 是 2026-07-18 从 YP 开发 MySQL `ypmcn.customer_demands` 只读核对的 61 列快照。`Field`、`Type`、`Null`、`Key`、`Default`、`Extra` 与真实表逐项一致；`Comment` 在数据库原注释上补充 Agent 输入边界。不得引用旧 CSV 中的达人表字段，也不得创建 `businessIndustry`、`budget*`、`rebateMinRate`、`submissionDeadlineRaw` 等不存在的字段。
 
-## Type 解析规则
+数据库可空性与 Brief 业务门禁分开：系统字段可由 Provider 生成；三个单达人官方报价列物理可空，但业务要求至少一个合法范围。`rebate` 物理非空但业务可选，Agent 不得为了通过数据库约束而编造客户返点。
 
-先按 `Comment` 判断原文对应哪个字段，再严格按该行 MySQL `Type` 生成值：
+## 类型规则
 
-- `char(N)` / `varchar(N)` / `text`：输出 JSON 字符串；`char`/`varchar` 不得超过 `N` 个字符。
-- `int` / `bigint`：输出 JSON 整数，不带千分位、单位或小数。计数和分金额不得写中文单位。
-- `decimal(P,S)`：输出 JSON 数值，最多 `S` 位小数、总有效位不超过 `P`；百分比字段统一写 0–1 小数，例如 20% 写 `0.2`。
-- `tinyint(1)`：布尔语义统一写 `1` 或 `0`；不得写 `"是"`、`"否"`、`"true"` 等字符串。
-- `enum('a','b')`：只输出枚举中列出的字符串；用户别名先标准化。
-- `date`：输出 `YYYY-MM-DD`；`datetime`：输出 `YYYY-MM-DD HH:mm:ss`。年份或具体时刻不能唯一确定时不得补猜。
-- `json`：输出实际 JSON 数组或对象，不得二次序列化为带转义的 JSON 字符串。
+- `char(N)` / `varchar(N)` / `text`：JSON 字符串，不超过列长度。
+- CSV 注释为“范围”的 `varchar(255)`：只允许规范字符串 `"[min,max]"`，不是 JSON 数组。两端为有限非负数且 `min <= max`；比例范围还必须在 0–1。
+- `int` / `bigint`：JSON 整数，不带单位和千分位。
+- `decimal(P,S)`：JSON 数值，最多 S 位小数；比例 50% 写 `0.5`。
+- `tinyint(1)`：写 `1` 或 `0`。
+- `enum`：只写枚举值。
+- `datetime`：写 `YYYY-MM-DD HH:mm:ss`。
+- `json`：写实际 JSON 对象或数组，不二次序列化。
 
-字段单位由 `Comment` 和专用规则共同决定：`budgetMinCents/budgetMaxCents` 是人民币分；`kolOfficialPrice*`、`kolPredictPrice*`、`downloadPrice*` 和其他报价/成本字段是数据库 decimal 数值，按人民币元写单个数字。数据库没有为报价字段提供区间或比较表达式类型，因此 `30000-50000`、`>=40000` 不得直接塞入 decimal 字段；应保留原文并列入歧义，直到能得到一个确定数值或 Provider 提供专用范围字段。
+范围归一化只有四步：识别字段与单位 → 换算人民币元/计数/0–1 比例 → 得到两个有限端点 → 输出无空格 `"[min,max]"`。确定单值写相同两端；只有上限时非负指标下限写 0；明确闭区间按小到大写。比例的每个百分数端点都先除以 100，例如 `30%` → `0.3`。除返点外，只有下限而没有业务确认的有限上限时必须询问，不能使用 `null`、`Infinity`、空字符串或任意大数。
 
-提交前逐字段执行一次 `Type`、`Null`、长度和精度校验。任何必填缺失、数值越界、枚举不合法、单位错误、格式不匹配或需要猜测才能转换，均进入歧义清单并阻断调用。
+返点是上界固定为 100% 的比例区间：确定值 `30%` → `rebate: "[0.3,0.3]"`；闭区间 `20%-30%` → `rebate: "[0.2,0.3]"`；`30%+`、`30%以上`、`至少 30%`、`不低于 30%` 及等价的“至少”措辞都表示开口下限并补全业务上界 1，统一写 `rebate: "[0.3,1]"`。不得把这些表达原样写入 `rebate`，也不得因缺少显式上限而询问。
 
-## 两遍解析
+## 与映射表的边界
 
-第一遍逐句拆分原子需求，至少检查：项目名、平台、达人数量、达人类型、内容方向、账号画像、参考账号、官方报价、项目总预算、返点、项目档期、提报截止、地域/性别/年龄、效果指标、负向要求和紧急程度。
+Agent 只写 `customer_demands` 的 source 字段。`validate_requirement` 落库后，后端在搜索/手扒链路按平台和 source 字段读取 `field_match_mapping`，再把 `[min,max]` 拆给该行已确认的目标 Min/Max 参数。Agent 不应：
 
-第二遍为每条原子需求记录处置结果：
+- 自己去掉目标字段的 `Min` / `Max` 后缀；
+- 把目标参数写进需求表；
+- 直接查询或猜达人表列；
+- 因为不同 source 字段共享目标参数名而否定已确认映射。
 
-- 有明确字段和确定值：写入字段。
-- 有明确字段但值或档位不确定：进入歧义清单，禁止猜测。
-- 没有可靠专用字段：完整保留到 `rawMessagesJson`，不得塞进含义相近但错误的字段。
+## 解析例子
 
-组装完成后反向逐条核对原 Brief。任何原子需求没有字段、原文保留或歧义记录，视为解析遗漏并阻断调用。
+- “粉丝 10–30 万” → `followercount: "[100000,300000]"`。
+- “女性粉丝不低于 50%”只给出了下限，若没有确认上限则询问；确认上限为 100% 后写 `femaleRate: "[0.5,1]"`。
+- “图文互动率不超过 5%” → `photoInteract: "[0,0.05]"`。
+- “小红书图文单达人预算 5000 元” → `kolOfficialPriceL1: "[5000,5000]"`。
+- “抖音 21–60 秒报价 3000–5000 元” → `kolOfficialPriceL2: "[3000,5000]"`。
+- “抖音 60 秒以上报价不超过 8000 元” → `kolOfficialPriceL3: "[0,8000]"`。
+- “返点 30%+”或“返点 30%以上” → `rebate: "[0.3,1]"` 并保留原文 atom。
+- “项目总预算 3 万” → 仅保留到 `rawMessagesJson`；当前表无总预算列。
+- “母婴亲子、不要低龄奶粉、评论真实” → 能精确作为内容标签的部分写 `contentTag`，其余逐字 preserved；不塞进无关达人事实字段。
 
-## 常用映射
+## 完整性规则
 
-| 用户表达 | 参数 |
-|---|---|
-| 小红书 / XHS / 红书 | `platform=xiaohongshu` |
-| 抖音 / DY / Douyin | `platform=douyin` |
-| 人数 | `quantityTotal` 正整数 |
-| 项目总预算 / 整体预算 3 万元 | `budgetMinCents`、`budgetMaxCents`、`budgetRaw`；金额写分 |
-| 达人官方价 / 刊例价 / 单人预算 / 单人价格 | 按明确档位写人民币元数值到 `decimal(12,2)` 的 `kolOfficialPriceL1`、`kolOfficialPriceL2` 或 `kolOfficialPriceL3` |
-| 20% 返点 | `0.2` |
-| 截止时间 | 按当前会话时区解析为 `YYYY-MM-DD HH:mm:ss` 写 `submissionDeadlineAt`，原文写 `submissionDeadlineRaw` |
-| 内容与类目 | `contentThemeLabel`、`contentTag`、`industryTagLabel`、`businessIndustry` 等已声明字段 |
+每个原子条件必须是 mapped 或 preserved。mapped atom 的目标字段必须真实存在于 payload 且值通过上述类型规则；preserved atom 必须逐字保留。最后反向核对原文，任何遗漏、字段杜撰、范围未规范、比例未换算、价格档位不明或系统字段被 Agent 伪造都阻断 `validate_requirement`。
 
-## 官方报价档位
-
-- 小红书和抖音统一使用 `kolOfficialPriceL1`、`kolOfficialPriceL2`、`kolOfficialPriceL3` 承载达人官方报价筛选，不得写入 `budgetMinCents`、`budgetMaxCents` 或 `budgetRaw`。
-- 官方报价字段类型为 `decimal(12,2)`，只写有原文证据的人民币元单值；不得套用项目总预算的“元转分”规则。区间或比较条件不能直接写入，必须保留原文并请求最小确认。
-- 抖音按视频时长映射：1–20 秒 → `kolOfficialPriceL1`，21–60 秒 → `kolOfficialPriceL2`，60 秒以上 → `kolOfficialPriceL3`。
-- 小红书按原文明确的 L1/L2/L3 档位写入对应字段；原文未给出可确定档位时保留原文并请求最小确认，不猜档位。
-- 同一 Brief 明确包含多个报价档位时分别写入对应字段；只有无法由 L1/L2/L3 表达的发文类型报价才使用 `kolOfficialPriceOther`。
-- 只有明确表达为项目总预算、整体预算或总成本上限的金额才使用 `budget*` 系列字段。不得仅因出现“预算”二字，就把“单人预算”或与发文类型绑定的价格写入 `budget*`。
-
-## 高频表达补全
-
-- “要/需/找 N 个、N 位达人” → `quantityTotal=N`。
-- “返点 30%+、不低于 30%” → `rebateMinRate=0.3`，同时保留 `rebateRaw`；没有上限证据时不填写 `rebateMaxRate`。
-- “档期 7.30–7.31” → `projectStartStart/projectStartEnd`；年份不能唯一确定时列为歧义，不自行补年。
-- “最晚明天上午 11 点提报” → `submissionDeadlineAt` 和 `submissionDeadlineRaw`，按当前时区解析并检查是否为未来时间。
-- 明确数量、返点、档期或截止时间不得只塞入 `note`/`description`，必须优先写专用字段。
-- 参考账号、主观审美、负向要求以及没有数值阈值的“互动高、评论真实”等要求，在没有可靠专用需求字段时保留到 `rawMessagesJson`；不得误写为候选达人事实字段。
-- 不主动提交 `status=ready`；ready 只能依据 `validate_requirement` 的实际返回判断。
-
-## 示例覆盖基线
-
-对于“千问61儿童节”示例，至少识别并处置：`projectName`、`platform`、`quantityTotal=2`、`rebateMinRate=0.3`、`rebateRaw=30%+`、项目档期、提报截止、母婴亲子账号、内容方向、参考账号、价格 4w、不要低龄吃奶粉、不要僵硬口播、孩子颜值要求、阅读与报价关系、互动要求、评论真实性和紧急程度。价格 4w 未给出小红书 L1/L2/L3 档位时必须列为硬阻断，不得写入 `budget*`，也不得调用落库。
-
-## 冲突处理
-
-同一字段存在冲突时保留原始消息并请求一次最小确认。Agent 修正解析不代表客户需求变更；是否产生新版本由业务 MCP 决定。没有 schema 字段承载的信息放入已声明的 JSON 扩展，不塞入无关列。
-
-平台写入只允许 `xiaohongshu`、`douyin`；`xhs`、`dy` 仅作为用户输入别名解析，禁止写入数据库或传给业务 Tool。
+平台只写 `xiaohongshu` 或 `douyin`。相对时间按宿主注入的当前时间与时区唯一换算；无法唯一确定日期、年份或范围端点时才询问，不重复询问已经可以确定的信息。

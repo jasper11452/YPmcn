@@ -16,6 +16,34 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function sanitizeNetworkCause(error) {
+  if (!isRecord(error)) return null;
+
+  const queue = [error];
+  const seen = new Set();
+  const safe = {};
+  while (queue.length > 0) {
+    const candidate = queue.shift();
+    if (!isRecord(candidate) || seen.has(candidate)) continue;
+    seen.add(candidate);
+
+    if (safe.code === undefined && typeof candidate.code === "string") {
+      safe.code = candidate.code;
+    }
+    if (safe.address === undefined && typeof candidate.address === "string") {
+      safe.address = candidate.address;
+    }
+    if (safe.port === undefined && Number.isInteger(candidate.port)) {
+      safe.port = candidate.port;
+    }
+
+    if (isRecord(candidate.cause)) queue.push(candidate.cause);
+    if (Array.isArray(candidate.errors)) queue.push(...candidate.errors);
+  }
+
+  return Object.keys(safe).length > 0 ? safe : null;
+}
+
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (!isRecord(value)) return value;
@@ -426,9 +454,11 @@ async function main() {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     process.exitCode = report.status === "PASS" ? 0 : 1;
   } catch (error) {
+    const cause = sanitizeNetworkCause(error);
     process.stdout.write(`${JSON.stringify({
       status: "ERROR",
       message: error instanceof Error ? error.message : String(error),
+      ...(cause ? { cause } : {}),
     }, null, 2)}\n`);
     process.exitCode = 2;
   }

@@ -8,7 +8,7 @@ function json(relativePath) {
 
 describe("root workspace installation", () => {
   it("locks every buildable component for one root npm ci", () => {
-    const expectedWorkspaces = ["YPmcn", "vector-mcp"];
+    const expectedWorkspaces = ["YPmcn"];
     const rootPackage = json("package.json");
     const rootLock = json("package-lock.json");
 
