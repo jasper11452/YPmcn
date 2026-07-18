@@ -29,7 +29,7 @@ EXPECTED_REFERENCE_FILES = {
     "requirement-parsing.md",
     "validation-playbook.md",
 }
-EXPECTED_CSV_SHA256 = "9138eaa15cab836bb919e9386dfdeb4ac1639533b0ace21f99266846255336b0"
+EXPECTED_CSV_SHA256 = "4c43529eb289983d0f9adcd06312f57be465a0a74f9d03330e4a5b7bea69e883"
 
 
 def read(path: Path) -> str:
@@ -79,6 +79,30 @@ class SkillPackageContractTest(unittest.TestCase):
         for required in (
             "integration_required",
             "sync → ingest → sync",
+        ):
+            self.assertIn(required, text)
+
+    def test_skill_stops_after_hook_block_without_semantic_rewrite(self):
+        text = read(SKILL)
+        for required in (
+            "Hook 返回任意阻断结果后",
+            '`details.status="blocked"`',
+            "不得自动改写 payload、把同一 ID 改作另一种查询模式",
+            '`details.deniedReason="plugin-before-tool-call"`',
+            "明确说明“未到达 MCP/Provider”",
+            "只有结果包含实际远程 MCP response evidence 时才可归因 MCP/Provider",
+            "禁止把已映射的真实业务字段（包括 `rebate`）降级为 `preserved`",
+            "用户要求“失败即停止”时绝不重试",
+        ):
+            self.assertIn(required, text)
+
+    def test_skill_requires_provenance_for_detail_and_write_ids(self):
+        text = read(SKILL)
+        for required in (
+            "逐项核对 ID 血缘",
+            "必须逐字复制自当前工作流中受信 Tool 的实际成功响应或已验证状态查询",
+            "不得用虚构 ID 调详情工具来探测其是否存在",
+            "integration_required",
         ):
             self.assertIn(required, text)
 
@@ -256,6 +280,40 @@ class SkillPackageContractTest(unittest.TestCase):
         by_id = {item["id"]: item for item in regressions}
         self.assertEqual("allow", by_id["canonical-range-string"]["expected_guard"])
         self.assertEqual("[0,0.5]", by_id["canonical-range-string"]["payload_fragment"]["femaleRate"])
+        rebate_full_brief = by_id["rebate-preserved-regression-full-brief"]
+        self.assertEqual("semantic_ambiguity", rebate_full_brief["expected_gate"])
+        self.assertEqual({
+            "atomCount": 6,
+            "mappedCount": 5,
+            "preservedCount": 0,
+            "unresolvedCount": 1,
+        }, rebate_full_brief["expected_preview_summary"])
+        self.assertEqual({
+            "mappedCount": 6,
+            "unresolvedCount": 0,
+        }, rebate_full_brief["forbidden_preview_summary"])
+        self.assertEqual(
+            rebate_full_brief["expected_preview_summary"]["atomCount"],
+            rebate_full_brief["expected_preview_summary"]["mappedCount"]
+            + rebate_full_brief["expected_preview_summary"]["preservedCount"]
+            + rebate_full_brief["expected_preview_summary"]["unresolvedCount"],
+        )
+        self.assertGreater(rebate_full_brief["expected_preview_summary"]["unresolvedCount"], 0)
+        self.assertEqual(0, rebate_full_brief["expected_tool_calls_before_confirmation"])
+        self.assertEqual(5, rebate_full_brief["expected_payload_fragment"]["quantityTotal"])
+        self.assertIsInstance(rebate_full_brief["expected_payload_fragment"]["quantityTotal"], int)
+        self.assertEqual("[5,5]", rebate_full_brief["forbidden_payload_fragment"]["quantityTotal"])
+        self.assertEqual("[0.3,1]", rebate_full_brief["expected_payload_fragment"]["rebate"])
+        self.assertEqual({
+            "sourceText": "返点30%以上",
+            "disposition": "mapped",
+            "targetField": "rebate",
+        }, rebate_full_brief["expected_audit_atom"])
+        self.assertEqual("preserved", rebate_full_brief["forbidden_rebate_disposition"])
+        ambiguous_account_type = by_id["ambiguous-account-type-taxonomy"]
+        self.assertEqual("semantic_ambiguity", ambiguous_account_type["expected_gate"])
+        self.assertEqual(["contentTag", "pgyBloggerTypeLabel"], ambiguous_account_type["forbidden_inferred_fields"])
+        self.assertIn("账号类型：母婴类、亲子相关", ambiguous_account_type["brief_fragment"])
         for regression_id, wording in (
             ("rebate-lower-bound-plus", "返点30%+"),
             ("rebate-lower-bound-chinese", "返点30%以上"),
@@ -289,7 +347,12 @@ class SkillPackageContractTest(unittest.TestCase):
         raw = CSV_SCHEMA.read_bytes()
         self.assertEqual(EXPECTED_CSV_SHA256, hashlib.sha256(raw).hexdigest())
         with CSV_SCHEMA.open("r", encoding="utf-8-sig", newline="") as handle:
-            rows = list(csv.DictReader(handle))
+            reader = csv.DictReader(handle)
+            self.assertEqual([
+                "Field", "Type", "InputShape", "Example", "FilterMode",
+                "Null", "Key", "Default", "Extra", "Comment",
+            ], reader.fieldnames)
+            rows = list(reader)
         self.assertEqual(61, len(rows))
         fields = [row["Field"] for row in rows]
         self.assertEqual(len(fields), len(set(fields)))
@@ -305,11 +368,48 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertIn(field, fields)
         by_field = {row["Field"]: row for row in rows}
+        for field, row in by_field.items():
+            shape = row["InputShape"].removesuffix(" (Provider-managed)")
+            example = row["Example"]
+            self.assertTrue(example, f"{field}: missing example")
+            if shape == "range-string [min,max]":
+                bounds = json.loads(example)
+                self.assertEqual(2, len(bounds), field)
+                self.assertTrue(all(isinstance(value, (int, float)) for value in bounds), field)
+                self.assertLessEqual(bounds[0], bounds[1], field)
+                self.assertEqual(example, json.dumps(bounds, separators=(",", ":")), field)
+            elif shape == "json-array":
+                self.assertIsInstance(json.loads(example), list, field)
+            elif shape == "json-object":
+                self.assertIsInstance(json.loads(example), dict, field)
+            elif shape in {"integer", "boolean-integer 0|1"}:
+                value = int(example)
+                if shape == "boolean-integer 0|1":
+                    self.assertIn(value, (0, 1), field)
+            elif shape == "number":
+                self.assertIsInstance(float(example), float, field)
+            elif shape == "datetime-string YYYY-MM-DD HH:mm:ss":
+                self.assertRegex(example, r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", field)
         self.assertEqual("YES", by_field["kolOfficialPriceL1"]["Null"])
         self.assertEqual("varchar(255)", by_field["kolOfficialPriceL1"]["Type"])
         self.assertIn("[min,max]", by_field["kolOfficialPriceL1"]["Comment"])
         self.assertIn("至少一项为Brief业务必填", by_field["kolOfficialPriceL1"]["Comment"])
         self.assertEqual("NO", by_field["rebate"]["Null"])
+        self.assertEqual("range-string [min,max]", by_field["rebate"]["InputShape"])
+        self.assertEqual([0.05, 0.10], json.loads(by_field["rebate"]["Example"]))
+        self.assertEqual("integer", by_field["quantityTotal"]["InputShape"])
+        self.assertEqual(10, int(by_field["quantityTotal"]["Example"]))
+        self.assertEqual("json-object", by_field["rawMessagesJson"]["InputShape"])
+        self.assertIsInstance(json.loads(by_field["rawMessagesJson"]["Example"]), dict)
+        self.assertEqual("text", by_field["contentTag"]["Type"])
+        self.assertEqual("string", by_field["contentTag"]["InputShape"])
+        self.assertEqual("美妆,护肤", by_field["contentTag"]["Example"])
+        self.assertEqual("json-array", by_field["pgyBloggerTypeLabel"]["InputShape"])
+        self.assertIsInstance(json.loads(by_field["pgyBloggerTypeLabel"]["Example"]), list)
+        self.assertEqual("boolean-integer 0|1", by_field["hasOrganization"]["InputShape"])
+        self.assertEqual("datetime-string YYYY-MM-DD HH:mm:ss", by_field["submissionDeadlineAt"]["InputShape"])
+        self.assertEqual("[min,max]", by_field["followercount"]["FilterMode"])
+        self.assertEqual("向量查询", by_field["pgyBloggerTypeLabel"]["FilterMode"])
         self.assertNotIn("budgetMinCents", by_field)
         self.assertNotIn("submissionDeadlineRaw", by_field)
         self.assertIn("ypmcn-brief-v1", by_field["rawMessagesJson"]["Comment"])

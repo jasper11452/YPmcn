@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,8 +40,12 @@ function run(args) {
 
 try {
   writeFileSync(configPath, `${JSON.stringify({
-    gateway: { mode: "local" },
+    gateway: {
+      mode: "local",
+      auth: { mode: "token", token: randomBytes(32).toString("hex") },
+    },
     plugins: {
+      allow: ["ypmcn-media-assistant"],
       load: { paths: [pluginRoot] },
       entries: { "ypmcn-media-assistant": { enabled: true } },
     },
@@ -49,11 +54,23 @@ try {
 
   const runtimeVersion = run(["--version"]);
   assert.match(runtimeVersion, new RegExp(`OpenClaw ${expectedOpenClawVersion.replaceAll(".", "\\.")}(?:\\s|$)`));
+  const activeConfigPath = run(["config", "file"]);
+  assert.ok(
+    activeConfigPath.includes(configPath),
+    `OpenClaw escaped the isolated smoke config: ${activeConfigPath.trim()}`,
+  );
 
   run(["mcp", "set", "ypmcn-mcp", JSON.stringify({ ...sourceMcp, url: mcpUrl })]);
   const configuredMcp = JSON.parse(run(["mcp", "list", "--json"]));
   assert.equal(configuredMcp["ypmcn-mcp"]?.url, mcpUrl);
   assert.equal(configuredMcp["ypmcn-mcp"]?.transport, "sse");
+
+  const securityAudit = JSON.parse(run(["security", "audit", "--json"]));
+  assert.equal(
+    securityAudit.summary?.critical,
+    0,
+    `isolated smoke config has critical security findings: ${JSON.stringify(securityAudit.findings)}`,
+  );
 
   const inspected = JSON.parse(run(["plugins", "inspect", "ypmcn-media-assistant", "--json"]));
   assert.equal(inspected.plugin.id, "ypmcn-media-assistant");

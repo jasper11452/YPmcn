@@ -162,6 +162,9 @@ describe("current Endpoint input validation", () => {
     assert.equal(validateToolParams("get_workflow_state", {
       demand_id: "demand-1",
     }).length, 1);
+    assert.equal(validateToolParams("sync_mcn_inquiry_status", {
+      requirement_id: "req-1", project_id: "0", mcn_id: "mcn-1",
+    })[0].path, "$.project_id");
     assert.equal(validateToolParams("get_recommendation_run_detail", { run_id: "0" }).length, 1);
     assert.equal(validateToolParams("get_recommendation_run_detail", { run_id: "abc" }).length, 1);
   });

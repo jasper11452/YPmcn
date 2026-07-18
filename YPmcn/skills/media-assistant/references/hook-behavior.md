@@ -26,4 +26,8 @@ Hook 是无会话依赖的安全守卫，不是业务状态机。
 
 Hook 不推进数据库 phase。外发成功只消费确认凭证并清除短时状态摘要；外发结果未知则禁止盲目重试。业务状态仍由 MCP Service 从数据库派生并通过 `workflow_state/allowed_actions` 返回。
 
+## 来源归因
+
+先看结果 provenance，再描述责任方。`details.deniedReason="plugin-before-tool-call"`、`block=true` 且没有远程响应，表示本地 Hook 在调用前阻断，必须明确“未到达 MCP/Provider”。只有实际远程 MCP response 或 trace 证据存在时，才能称为 MCP/Provider 返回；没有 Hook 或远程证据时只写“来源未知”。Hook 的本地 confirmation receipt 只可拒绝，不可授权或推进 MCP 工作流；MCP 响应也必须同时提供可归属当前身份的 `workflow_state/allowed_actions` 才能推进。
+
 `session_end` 仅做机会性 TTL 清理；即使宿主从不触发，也不影响正确性。

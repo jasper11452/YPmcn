@@ -65,6 +65,30 @@
 
 阻断时只展示已确定字段，用一次自包含 `AskUserQuestion` 合并最多三个关键问题：header 固定“需求确认”，question 按“已确认：…；需确认：…；影响：…”组织。单达人预算问题必须同时确认金额范围与内容档位。阻断状态禁止调用 Tool、禁止写 `status=ready`，也禁止使用 `TBD`、空串或假值。
 
+标准 Brief 使用宿主注入的确定性解析/预览规则，不再读取 Skill、reference 或 Tool card，也不调用 `read`、resources、prompts、schema probe 或业务 Tool。未决门禁在澄清前必须保持零 Tool 调用；只有宿主明确提供的原生 `AskUserQuestion` 可以作为例外，不能用 MCP `prompts_get` 或其他 prompt wrapper 模拟。原生 Ask 不存在时，在聊天中给出同一问题并停止。
+
+预览是单一 JSON envelope，键顺序固定如下；不要在 JSON 前后另写一份独立计数的自然语言预览：
+
+```json
+{
+  "requirementPreview": {
+    "gate": "missing_required|semantic_ambiguity|ready",
+    "resolvedFields": {},
+    "atoms": [],
+    "missingRequired": [],
+    "semanticAmbiguities": [],
+    "summary": {"atomCount": 0, "mappedCount": 0, "preservedCount": 0, "unresolvedCount": 0},
+    "nextAction": "ask_user|validate_requirement"
+  },
+  "clarification": null,
+  "toolArguments": null
+}
+```
+
+三个块始终存在。每个 atom 必须来自同一内存列表且只含一个 `resolution`：mapped 行使用单数 `targetField` 与类型正确的 `value`；preserved 行使用逐字 `preservedText`；未决行使用 `resolution="missing_required"` 或 `resolution="semantic_ambiguity"` 与 `reason`，不得伪造正式 audit 的 disposition。禁止 `targetFields`、`dispositions`、`targetField="fieldA+fieldB"` 或任何组合处置。`summary` 从该数组机械计数；未决时 `clarification` 填完整问题结构、`toolArguments=null`。ready 时 `clarification=null`，`toolArguments` 是随后调用逐字复用的 `{"payload": {..., "status": "ready"}}`；所有 datetime 都是带秒的 `YYYY-MM-DD HH:mm:ss`，`quantityTotal` 等整数是 JSON integer，只有 CSV 声明的范围字段是无空格 `"[min,max]"` 字符串。
+
 `ready` 时展示与实际调用完全一致的 `{"payload": {..., "status": "ready"}}`，再调用一次。新建省略 `demandVersion`，也不传 `id`、`createdAt`、`updatedAt`；同一需求补充时只沿用 Provider 返回的 `demandId`，版本由 Provider 原子分配。
 
 只有实际返回 `success=true`、需求主键和 `status=ready` 才进入搜索。写结果未知时用 `get_workflow_state` 对账，不重放写入。
+
+状态迁移固定为：`received → scanned → missing_required|semantic_ambiguity|ready`；用户回答未决项后回到 `scanned` 并从原 Brief 与答案重建全量 atom 列表。`ready → validation_pending` 才能调用 Tool；实际成功证据使其进入 MCP 权威的 `requirement_ready`，明确失败进入 `blocked`，结果未知进入 `reconciliation_required`。preview gate 不是 `workflow_state`，Hook confirmation 也不推进任何业务 phase。

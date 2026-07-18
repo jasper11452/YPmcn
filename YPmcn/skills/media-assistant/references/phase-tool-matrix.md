@@ -55,3 +55,11 @@
 目标规则是所有写操作先写 Ledger `started`，完成后标记 `succeeded/failed/unknown`；相同幂等键和请求哈希返回已有摘要，不同哈希冲突，unknown 只能查询对账，不得盲目重试。待部署后端源码已接入 11 个写入口，但当前开发库 ledger 仍为 0 行，故 Agent 必须以远程 trace/重放证据判断是否生效；本地 Hook 的确认凭证只防误触，不构成数据库幂等。
 
 `select_inquiry_form_fields` 和用户确认是外发准备，不形成持久 phase。`create_with_distributions` 只负责外部创建；只有 `sync_mcn_inquiry_status` 查询真实 project/distribution 并维护 inquiry 后，状态才进入 `waiting_mcn_return`。
+
+## 状态迁移纪律
+
+- requirement preview 的 `missing_required/semantic_ambiguity/ready` 是调用前解析状态，不是 MCP `workflow_state`；只有实际成功 `validate_requirement` 响应才能建立 `requirement_ready`。
+- 每次写后只接受该次实际 MCP 响应或随后 `get_workflow_state` 返回的 `workflow_state + allowed_actions`；缺任一项不推进。Hook 凭证、Ask 答案、预期响应、示例 JSON 和 Agent 推断都不能推进 phase。
+- 连续成功链只按 `requirement_ready → candidate_pool_ready → mcn_planning → waiting_mcn_return → candidate_pool_enriched → recommendation_ready → submission_batch_ready → feedback_routing` 前进，并逐步满足正式 Tool/人工门禁；不得跨阶段调用。`blocked` 只按返回的唯一恢复动作处理，`closed` 以及询价 `recovered/closed` 终态不重复写入。
+- 写结果未知不回退也不前进，进入 `reconciliation_required` 执行一次权威状态查询；身份无法唯一证明时返回 `integration_required`。接手、压缩、冲突和外发前同理先查询，不选择“最近一次”。
+- Tool 结果来源按 provenance 判定：`details.deniedReason="plugin-before-tool-call"` 是本地 Hook 调用前拒绝且未到 MCP；只有实际远程 response/trace 证据才归因 MCP/Provider；两类证据都没有时标记来源未知。Hook 阻断不改变业务 phase，MCP 成功也只有返回权威状态时才改变业务 phase。

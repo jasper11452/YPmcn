@@ -271,6 +271,14 @@ function validateSemanticRequirements(
       "Provide exactly one lookup mode: trace_id, or demand_id with demand_version.",
     )];
   }
+  if (tool === "sync_mcn_inquiry_status") {
+    for (const key of ["requirement_id", "project_id", "mcn_id"] as const) {
+      const value = params[key];
+      if (typeof value !== "string" || value.trim().length === 0 || value.trim() === "0") {
+        return [issue("INVALID_INPUT", `$.${key}`, `${key} must not be empty or a placeholder ID.`)];
+      }
+    }
+  }
   if (tool === "get_recommendation_run_detail") {
     if (typeof params.run_id === "string" && /^[1-9]\d*$/.test(params.run_id)) return [];
     return [issue("INVALID_INPUT", "$.run_id", "run_id must represent a positive integer.")];

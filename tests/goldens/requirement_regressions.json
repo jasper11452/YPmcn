@@ -59,6 +59,35 @@
     "expected_guard": "block"
   },
   {
+    "id": "rebate-preserved-regression-full-brief",
+    "brief": "小红书，账号类型：母婴类、亲子相关，数量5，L1单达人价格4万元以下，返点30%以上，明天15:00前提报",
+    "expected_gate": "semantic_ambiguity",
+    "expected_preview_summary": {
+      "atomCount": 6,
+      "mappedCount": 5,
+      "preservedCount": 0,
+      "unresolvedCount": 1
+    },
+    "forbidden_preview_summary": {"mappedCount": 6, "unresolvedCount": 0},
+    "expected_tool_calls_before_confirmation": 0,
+    "expected_payload_fragment": {"quantityTotal": 5, "rebate": "[0.3,1]"},
+    "forbidden_payload_fragment": {"quantityTotal": "[5,5]"},
+    "expected_audit_atom": {
+      "sourceText": "返点30%以上",
+      "disposition": "mapped",
+      "targetField": "rebate"
+    },
+    "forbidden_rebate_disposition": "preserved",
+    "expected_guard": "block"
+  },
+  {
+    "id": "ambiguous-account-type-taxonomy",
+    "brief_fragment": "账号类型：母婴类、亲子相关",
+    "forbidden_inferred_fields": ["contentTag", "pgyBloggerTypeLabel"],
+    "expected_gate": "semantic_ambiguity",
+    "expected_guard": "block"
+  },
+  {
     "id": "obsolete-budget-field",
     "payload_fragment": {"budgetMaxCents": 500000},
     "expected_guard": "block"

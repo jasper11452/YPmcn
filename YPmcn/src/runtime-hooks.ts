@@ -12,6 +12,7 @@ const PREFIXES = ["ypmcn__", "mcp__ypmcn__", "ypmcn-mcp__", "ypmcn-provider__"];
 const SHELL_TOOLS = new Set(["bash", "exec", "shell", "powershell", "pwsh"]);
 const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 const WORKFLOW_STATE_TTL_MS = 10 * 60 * 1_000;
+const TRUSTED_ID_TTL_MS = 10 * 60 * 1_000;
 const WECOM_TEMPLATE_ID = "ypmcn-wecom-inquiry-v1";
 const WECOM_TEMPLATE_RELATIVE_PATH = join("skills", "media-assistant", "assets", "wecom_inquiry_template.txt");
 const CONFIRMATION_MARKER = /\[YP_CONFIRMATION:([0-9a-f-]{36})\]/i;
@@ -72,6 +73,7 @@ const REQUIREMENT_LABEL_FIELDS = new Set([
   "contentFeatureLabel", "contentThemeLabel", "kolPersonaLabel", "talentTypeLabel",
   "pgyBloggerTypeLabel", "xtTalentTypeLabel",
 ]);
+const ACCOUNT_TYPE_TARGET_FIELDS = new Set(["contentTag", ...REQUIREMENT_LABEL_FIELDS]);
 const REQUIREMENT_BOOLEAN_INTEGER_FIELDS = new Set(["hasOrganization", "hasOrder30day", "hasSocial30day"]);
 const REQUIREMENT_NONNEGATIVE_INTEGER_FIELDS = new Set(["clickMedium", "viewMedium", "photoView", "videoInteract"]);
 const REQUIREMENT_OPTIONAL_DATETIME_FIELDS = ["projectStartStart", "projectStartEnd"] as const;
@@ -198,8 +200,12 @@ function deny(code: string, message: string): Json {
 function store(rootDir: string): { path: string; data: Json } {
   const path = statePath(rootDir);
   const data = load(path);
-  data.schema_version = 4;
+  data.schema_version = 7;
   data.confirmations ??= {};
+  if (!Array.isArray(data.trusted_ids)) data.trusted_ids = [];
+  if (!data.blocked_requirement_semantics || typeof data.blocked_requirement_semantics !== "object" || Array.isArray(data.blocked_requirement_semantics)) {
+    data.blocked_requirement_semantics = {};
+  }
   if (!data.supply_plans || typeof data.supply_plans !== "object" || Array.isArray(data.supply_plans)) {
     data.supply_plans = {};
   }
@@ -220,8 +226,63 @@ function store(rootDir: string): { path: string; data: Json } {
       changed = true;
     }
   }
+  const trustedIds = data.trusted_ids.filter((receipt: unknown) =>
+    receipt && typeof receipt === "object" &&
+    text((receipt as Json).kind) && text((receipt as Json).value) &&
+    Number((receipt as Json).expires_at_ms ?? 0) > now
+  );
+  if (trustedIds.length !== data.trusted_ids.length) {
+    data.trusted_ids = trustedIds;
+    changed = true;
+  }
   if (changed) save(path, data);
   return { path, data };
+}
+
+export function beginPromptTurn(rootDir: string, preview?: Json): void {
+  const current = store(rootDir);
+  current.data.prompt_epoch = Number(current.data.prompt_epoch ?? 0) + 1;
+  current.data.blocked_requirement_semantics = {};
+  delete current.data.blocked_tool_turn;
+  if (preview && preview.gate !== "ready") {
+    current.data.prompt_requirement_gate = {
+      gate: preview.gate,
+      preview_fingerprint: fingerprint(preview),
+      missing_required: Array.isArray(preview.missingRequired) ? preview.missingRequired : [],
+      semantic_ambiguities: Array.isArray(preview.semanticAmbiguities) ? preview.semanticAmbiguities : [],
+      status: "pending",
+      prompt_epoch: current.data.prompt_epoch,
+      observed_at_ms: Date.now(),
+    };
+  } else {
+    delete current.data.prompt_requirement_gate;
+  }
+  save(current.path, current.data);
+}
+
+const CONTINUATION_BLOCK_CODES = new Set([
+  "YP_CONFIRMATION_REQUIRED",
+  "YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED",
+  "WRITE_RESULT_UNKNOWN",
+  "WORKFLOW_STATE_REFRESH_REQUIRED",
+]);
+
+export function recordBlockedToolResult(rootDir: string, result: Json | undefined): void {
+  if (!result?.block || !text(result.blockReason)) return;
+  const code = result.blockReason.split(":", 1)[0];
+  if (code.startsWith("BLOCKED_") || CONTINUATION_BLOCK_CODES.has(code)) return;
+  const current = store(rootDir);
+  current.data.blocked_tool_turn = { code, observed_at_ms: Date.now() };
+  save(current.path, current.data);
+}
+
+export function blockedToolTurnFailure(rootDir: string): Json | undefined {
+  const blocked = store(rootDir).data.blocked_tool_turn;
+  if (!blocked || typeof blocked !== "object" || !text(blocked.code)) return undefined;
+  return deny(
+    "BLOCKED_PREVIOUS_HOOK_RESULT",
+    `A previous Tool call in this user turn was blocked with ${blocked.code}; stop without changing arguments or calling another Tool until the next user turn.`,
+  );
 }
 
 function saveReceipt(rootDir: string, id: string, receipt: Json): void {
@@ -276,6 +337,74 @@ function unwrap(value: any): any {
 function successful(result: any): boolean {
   const root = unwrap(result);
   return Boolean(root && typeof root === "object" && root.success === true && root.isError !== true && root.error == null);
+}
+
+function collectTrustedIds(
+  value: unknown,
+  found = new Map<string, Set<string>>(),
+): Map<string, Set<string>> {
+  if (Array.isArray(value)) {
+    for (const item of value) collectTrustedIds(item, found);
+    return found;
+  }
+  if (!value || typeof value !== "object") return found;
+  const record = value as Json;
+  const aliases: Record<string, string> = {
+    kwUid: "kwUid",
+    kw_uid: "kwUid",
+    requirement_id: "requirement_id",
+    requirementId: "requirement_id",
+    project_id: "project_id",
+    projectId: "project_id",
+    mcn_id: "mcn_id",
+    mcnId: "mcn_id",
+    inquiry_id: "inquiry_id",
+    inquiryId: "inquiry_id",
+    run_id: "run_id",
+    runId: "run_id",
+  };
+  for (const [key, kind] of Object.entries(aliases)) {
+    if (!text(record[key])) continue;
+    if (!found.has(kind)) found.set(kind, new Set());
+    found.get(kind)?.add(record[key].trim());
+  }
+  for (const child of Object.values(record)) collectTrustedIds(child, found);
+  return found;
+}
+
+function recordTrustedIds(event: Json, tool: string, rootDir: string): void {
+  if (!successful(event.error ? { isError: true } : event.result)) return;
+  const result = unwrap(event.result);
+  const valuesByKind = collectTrustedIds(result);
+  if (tool === "validate_requirement") {
+    const requirementId = result?.data?.id ?? result?.id;
+    if (text(requirementId)) valuesByKind.set("requirement_id", new Set([requirementId.trim()]));
+  }
+  if (valuesByKind.size === 0) return;
+  const current = store(rootDir);
+  const now = Date.now();
+  for (const [kind, values] of valuesByKind) {
+    for (const value of values) {
+      current.data.trusted_ids = current.data.trusted_ids.filter((receipt: Json) =>
+        receipt.kind !== kind || receipt.value !== value
+      );
+      current.data.trusted_ids.push({
+        kind,
+        value,
+        source_tool: tool,
+        observed_at_ms: now,
+        expires_at_ms: now + TRUSTED_ID_TTL_MS,
+      });
+    }
+  }
+  save(current.path, current.data);
+}
+
+function hasTrustedId(rootDir: string, kind: string, value: unknown): boolean {
+  if (!text(value)) return false;
+  return store(rootDir).data.trusted_ids.some((receipt: Json) =>
+    receipt.kind === kind && receipt.value === value.trim()
+  );
 }
 
 function recordValue(value: unknown): Json | undefined {
@@ -623,8 +752,8 @@ function validateAuditableBrief(raw: unknown, payload: Json): Json | undefined {
     coverage.atomCount !== coverage.mappedCount + coverage.preservedCount + coverage.unresolvedCount
   ) {
     return deny(
-      "BLOCKED_REQUIREMENT_INCOMPLETE",
-      "payload.rawMessagesJson.coverageCheck counts must match atoms and unresolvedCount must be zero.",
+      "BLOCKED_REQUIREMENT_AUDIT_CONFLICT",
+      "payload.rawMessagesJson.coverageCheck must be derived from the same atoms: atomCount=atoms.length, mappedCount and preservedCount must match dispositions, unresolvedCount must be zero, and atomCount=mappedCount+preservedCount+unresolvedCount.",
     );
   }
   return undefined;
@@ -654,6 +783,50 @@ function exactOptionLabels(question: Json, expected: readonly string[]): boolean
       : undefined;
   });
   return labels.every((label, index) => label === expected[index]);
+}
+
+function nativeRequirementClarification(input: Json): boolean {
+  if (!Array.isArray(input.questions) || input.questions.length < 1 || input.questions.length > 3) return false;
+  return input.questions.every((question: unknown) => {
+    if (!question || typeof question !== "object") return false;
+    const item = question as Json;
+    const body = text(item.question) ? item.question : "";
+    const title = [item.header, item.title, body].filter(text).join(" ");
+    if (!/需求确认/.test(title) || !/已确认[：:]/.test(body) || !/需确认[：:]/.test(body) || !/影响[：:]/.test(body)) {
+      return false;
+    }
+    if (!Array.isArray(item.options) || item.options.length < 2 || item.options.length > 3) return false;
+    return item.options.every((option: unknown) =>
+      typeof option === "string" ? text(option) : Boolean(option && typeof option === "object" && text((option as Json).label))
+    );
+  });
+}
+
+function promptRequirementGate(
+  raw: string,
+  input: Json,
+  current: { path: string; data: Json },
+): Json | undefined {
+  const gate = current.data.prompt_requirement_gate;
+  if (!gate || typeof gate !== "object" || gate.status !== "pending") return undefined;
+  if (!isAskTool(raw)) {
+    return deny(
+      "BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED",
+      `The authoritative prompt gate is ${gate.gate}; before clarification, read/resources/prompts and all business Tools are denied. Use only the native AskUserQuestion Tool.`,
+    );
+  }
+  if (!nativeRequirementClarification(input)) {
+    return deny(
+      "BLOCKED_REQUIREMENT_CONFIRMATION_MISMATCH",
+      "Use one native AskUserQuestion with 1-3 questions titled 需求确认; every question body must contain 已确认:, 需确认:, and 影响:, with 2-3 mutually exclusive options.",
+    );
+  }
+  gate.clarification_fingerprint = fingerprint(input);
+  gate.clarification_in_flight = true;
+  gate.updated_at_ms = Date.now();
+  current.data.prompt_requirement_gate = gate;
+  save(current.path, current.data);
+  return undefined;
 }
 
 function numericQuestionValues(question: string, field: string): number[] {
@@ -782,6 +955,82 @@ function validateMarkedAsk(input: Json, data: Json): Json | undefined {
   return undefined;
 }
 
+function requirementSemanticKey(payload: Json): string | undefined {
+  const originalBrief = payload.rawMessagesJson?.originalBrief;
+  return text(originalBrief) ? fingerprint(originalBrief.trim()) : undefined;
+}
+
+function mappedRequirementSemantics(payload: Json): Json {
+  const atoms = Array.isArray(payload.rawMessagesJson?.atoms) ? payload.rawMessagesJson.atoms : [];
+  const mapped: Json = {};
+  for (const atom of atoms) {
+    if (!atom || typeof atom !== "object" || atom.disposition !== "mapped" ||
+      !text(atom.sourceText) || !text(atom.targetField)) continue;
+    mapped[atom.sourceText] = atom.targetField;
+  }
+  return mapped;
+}
+
+function recordBlockedRequirementSemantics(current: { path: string; data: Json }, payload: Json): void {
+  const key = requirementSemanticKey(payload);
+  if (!key) return;
+  const mapped = mappedRequirementSemantics(payload);
+  if (Object.keys(mapped).length === 0) return;
+  current.data.blocked_requirement_semantics[key] = mapped;
+  save(current.path, current.data);
+}
+
+function requirementSemanticDowngrade(current: { path: string; data: Json }, payload: Json): Json | undefined {
+  const key = requirementSemanticKey(payload);
+  const previous = key ? current.data.blocked_requirement_semantics[key] : undefined;
+  if (!previous || typeof previous !== "object" || Array.isArray(previous)) return undefined;
+  const currentMapped = mappedRequirementSemantics(payload);
+  const downgraded = Object.entries(previous).find(([sourceText, targetField]) =>
+    currentMapped[sourceText] !== targetField || !Object.prototype.hasOwnProperty.call(payload, String(targetField))
+  );
+  if (!downgraded) return undefined;
+  return deny(
+    "BLOCKED_REQUIREMENT_SEMANTIC_REWRITE",
+    `The blocked atom ${JSON.stringify(downgraded[0])} must remain mapped to payload.${String(downgraded[1])}; wait for a new user turn instead of deleting, preserving, or remapping it.`,
+  );
+}
+
+function explicitJsonArray(sourceText: string): boolean {
+  try {
+    const parsed = JSON.parse(sourceText.trim());
+    return Array.isArray(parsed) && parsed.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function validateTaxonomyMapping(payload: Json): Json | undefined {
+  const audit = payload.rawMessagesJson;
+  if (!audit || typeof audit !== "object" || !Array.isArray(audit.atoms) || !text(audit.originalBrief)) {
+    return undefined;
+  }
+  for (const atom of audit.atoms) {
+    if (!atom || typeof atom !== "object" || atom.disposition !== "mapped" ||
+      !text(atom.sourceText) || !text(atom.targetField) ||
+      !ACCOUNT_TYPE_TARGET_FIELDS.has(atom.targetField)) continue;
+    const index = audit.originalBrief.indexOf(atom.sourceText);
+    const context = index >= 0
+      ? audit.originalBrief.slice(Math.max(0, index - 16), index + atom.sourceText.length)
+      : atom.sourceText;
+    const accountTypeWording = /(?:账号|达人|博主|蒲公英|星图)?类型\s*[：:]?/.test(context);
+    if (atom.targetField === "contentTag") {
+      if (!accountTypeWording) continue;
+    } else if (explicitJsonArray(atom.sourceText)) {
+      continue;
+    }
+    return deny(
+      "BLOCKED_TAXONOMY_CONFIRMATION_REQUIRED",
+      `Natural-language atom ${JSON.stringify(atom.sourceText)} cannot map to payload.${atom.targetField} without an explicit taxonomy value; ask whether it is a content topic or a platform talent type and stop.`,
+    );
+  }
+  return undefined;
+}
+
 function validateRequirementPayload(payload: Json): Json | undefined {
   const unknownField = Object.keys(payload).find((field) => !REQUIREMENT_PAYLOAD_FIELDS.has(field));
   if (unknownField) {
@@ -882,6 +1131,8 @@ function validateRequirementPayload(payload: Json): Json | undefined {
   }
   const auditFailure = validateAuditableBrief(payload.rawMessagesJson, payload);
   if (auditFailure) return auditFailure;
+  const taxonomyFailure = validateTaxonomyMapping(payload);
+  if (taxonomyFailure) return taxonomyFailure;
   const sentinelPath = findAmbiguitySentinel(payload);
   if (sentinelPath) {
     return deny("BLOCKED_REQUIREMENT_INCOMPLETE", `${sentinelPath} contains an unresolved placeholder; clarify the semantic ambiguity and stop.`);
@@ -1031,6 +1282,8 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
     event.arguments && typeof event.arguments === "object" ? event.arguments : {};
 
   const current = store(rootDir);
+  const promptGateFailure = promptRequirementGate(raw, input, current);
+  if (promptGateFailure) return promptGateFailure;
   if (SHELL_TOOLS.has(raw.toLowerCase())) {
     const command = [input.command, input.cmd, input.script, input.input].filter(text).join("\n");
     return PROVIDER_WRITE_TARGET.test(command) && SHELL_WRITE_CLIENT.test(command)
@@ -1046,23 +1299,63 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
     const first = issues[0];
     return deny(first.code, `${first.path}: ${first.message}`);
   }
+  if (tool === "get_creator_detail" && !hasTrustedId(rootDir, "kwUid", input.kwUid)) {
+    return deny(
+      "ID_PROVENANCE_REQUIRED",
+      "$.kwUid must come from a successful trusted YPmcn Tool response observed in the current TTL window; do not probe invented creator IDs.",
+    );
+  }
+  if (tool === "sync_mcn_inquiry_status") {
+    const untrusted = ["requirement_id", "project_id", "mcn_id"].find((kind) =>
+      !hasTrustedId(rootDir, kind, input[kind])
+    );
+    if (untrusted) {
+      return deny(
+        "ID_PROVENANCE_REQUIRED",
+        `$.${untrusted} must come from a successful trusted YPmcn Tool response observed in the current TTL window.`,
+      );
+    }
+  }
+  if (tool === "ingest_mcn_submissions" && !hasTrustedId(rootDir, "inquiry_id", input.inquiry_id)) {
+    return deny(
+      "ID_PROVENANCE_REQUIRED",
+      "$.inquiry_id must come from a successful trusted YPmcn Tool response observed in the current TTL window.",
+    );
+  }
+  if ([
+    "create_submission_batch",
+    "record_client_feedback",
+    "get_recommendation_run_detail",
+    "audit_manual_adjustment",
+  ].includes(tool) && !hasTrustedId(rootDir, "run_id", input.run_id)) {
+    return deny(
+      "ID_PROVENANCE_REQUIRED",
+      "$.run_id must come from a successful trusted YPmcn Tool response observed in the current TTL window.",
+    );
+  }
   if (tool === "validate_requirement") {
     const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
+    const semanticDowngrade = requirementSemanticDowngrade(current, payload);
+    if (semanticDowngrade) return semanticDowngrade;
     const labels = [payload.projectName, payload.brandName, payload.note].filter(text).join(" ");
+    const blockRequirement = (failure: Json): Json => {
+      recordBlockedRequirementSemantics(current, payload);
+      return failure;
+    };
     if (SCHEMA_PROBE.test(labels)) {
-      return deny("BLOCKED_NO_DRY_RUN", "validate_requirement always writes; inspect the host tool schema without calling it.");
+      return blockRequirement(deny("BLOCKED_NO_DRY_RUN", "validate_requirement always writes; inspect the host tool schema without calling it."));
     }
     if (payload.status !== "ready") {
-      return deny("BLOCKED_REQUIREMENT_INCOMPLETE", "payload.status must be ready; clarify every missing or ambiguous required value before validation.");
+      return blockRequirement(deny("BLOCKED_REQUIREMENT_INCOMPLETE", "payload.status must be ready; clarify every missing or ambiguous required value before validation."));
     }
     const requirementFailure = validateRequirementPayload(payload);
-    if (requirementFailure) return requirementFailure;
+    if (requirementFailure) return blockRequirement(requirementFailure);
     const emptyField = Object.entries(payload).find(([, value]) =>
       value === null || (typeof value === "string" && value.trim() === "") ||
       (Array.isArray(value) && value.length === 0)
     );
     if (emptyField) {
-      return deny("BLOCKED_REQUIREMENT_INCOMPLETE", `payload.${emptyField[0]} is empty; omit optional fields and clarify required fields before validation.`);
+      return blockRequirement(deny("BLOCKED_REQUIREMENT_INCOMPLETE", `payload.${emptyField[0]} is empty; omit optional fields and clarify required fields before validation.`));
     }
   }
   if (tool === "rank_mcns") return authorizeSupplyPlan(input, rootDir);
@@ -1075,6 +1368,7 @@ export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
   const input = event.params && typeof event.params === "object" ? event.params :
     event.arguments && typeof event.arguments === "object" ? event.arguments : {};
   const tool = normalize(raw);
+  if (tool) recordTrustedIds(event, tool, rootDir);
   if (tool === "search_creators") {
     recordSupplyPlan(event, input, rootDir);
     return;
@@ -1086,6 +1380,19 @@ export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
   const current = store(rootDir);
 
   if (isAskTool(raw)) {
+    const promptGate = current.data.prompt_requirement_gate;
+    if (promptGate && typeof promptGate === "object" && promptGate.status === "pending" &&
+      promptGate.clarification_in_flight === true && promptGate.clarification_fingerprint === fingerprint(input)) {
+      const outcome = event.error ? "denied" : approvalOutcome(event.result ?? event.message, "");
+      const hasAnswers = Array.isArray(event.result?.answers) && event.result.answers.length > 0;
+      if (outcome !== "denied" && hasAnswers) {
+        promptGate.status = "clarified";
+        promptGate.updated_at_ms = Date.now();
+        delete promptGate.clarification_in_flight;
+        current.data.prompt_requirement_gate = promptGate;
+        save(current.path, current.data);
+      }
+    }
     const marker = findMarker(input);
     if (!marker || !current.data.confirmations[marker.id]) return;
     const receipt = current.data.confirmations[marker.id] as Json;
