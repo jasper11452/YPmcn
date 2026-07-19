@@ -2,11 +2,12 @@
 
 ## 工作流程
 
-- 定位问题关联的内容
-- 提出修复方案
-- 拆解修复行动
-- 调用opencode，并行启动多个session执行修复(OPENCODE_DISABLE_EXTERNAL_SKILLS=1 opencode run --auto --pure -m yuepu/Deepseek-V4-Flash --variant max "</prompt>")
+- 调用opencode，并行启动多个session，定位问题关联的文件和内容
+- 提出修复方案，并拆解任务
+- 调用opencode，并行启动多个session，执行单个文件修复
 - 验证修复结果
+
+opencode调用命令：OPENCODE_DISABLE_EXTERNAL_SKILLS=1 opencode run --auto --pure -m yuepu/Deepseek-V4-Flash --variant max "</prompt>"
 
 ## 适用范围
 

@@ -592,6 +592,96 @@ describe("YP Action native hook guard", () => {
     assert.equal(allowed, undefined);
   });
 
+  it("records validate_requirement provenance from a later JSON content block", async () => {
+    const requirementId = "multi-block-requirement-id";
+    const scope = { sessionKey: "multi-block-result-session" };
+    await hooks.get("after_tool_call")({
+      toolName: "ypmcn-mcp__validate_requirement",
+      params: { payload: requirementPayload() },
+      result: {
+        content: [
+          { type: "text", text: "Requirement validated successfully." },
+          {
+            type: "text",
+            text: `\`\`\`json\n${JSON.stringify({ success: true, data: { id: requirementId }, error: null })}\n\`\`\``,
+          },
+        ],
+        details: { mcpServer: "ypmcn-mcp", mcpTool: "validate_requirement" },
+      },
+    }, scope);
+
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "ypmcn-mcp__search_creators",
+      params: { id: requirementId },
+    }, scope), undefined);
+  });
+
+  it("preserves validate_requirement data.id from an OpenClaw-truncated success result", async () => {
+    const requirementId = "1fc9ba46b660432f918a497b0dcd2da6";
+    const scope = { sessionKey: "truncated-result-session" };
+    const fullResult = JSON.stringify({
+      success: true,
+      trace_id: "trace-for-truncated-result",
+      data: { id: requirementId, response_body: "x".repeat(9_000) },
+      error: null,
+    }, null, 2);
+    const truncatedResult = `${fullResult.slice(0, 8_000)}\n…(truncated)…`;
+
+    await hooks.get("after_tool_call")({
+      toolName: "ypmcn-mcp__validate_requirement",
+      params: { payload: requirementPayload() },
+      result: {
+        content: [{ type: "text", text: truncatedResult }],
+        details: { mcpServer: "ypmcn-mcp", mcpTool: "validate_requirement" },
+      },
+    }, scope);
+
+    const persistedPath = join(
+      tempDir,
+      "state",
+      "sessions",
+      createHash("sha256").update(scope.sessionKey).digest("hex").slice(0, 24),
+      "confirmation_guard.json",
+    );
+    const persisted = JSON.parse(readFileSync(persistedPath, "utf8"));
+    assert.equal(persisted.latest_requirement_id.value, requirementId);
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "ypmcn-mcp__search_creators",
+      params: { id: requirementId },
+    }, scope), undefined);
+  });
+
+  it("does not trust a truncated success prefix when the host reports a Tool failure", async () => {
+    const requirementId = "untrusted-truncated-requirement-id";
+    const scope = { sessionKey: "truncated-failure-session" };
+    const failedResult = JSON.stringify({
+      success: true,
+      data: { id: requirementId, response_body: "x".repeat(9_000) },
+      error: null,
+    }, null, 2);
+    await hooks.get("after_tool_call")({
+      toolName: "ypmcn-mcp__validate_requirement",
+      params: { payload: requirementPayload() },
+      result: { content: [{ type: "text", text: `${failedResult.slice(0, 8_000)}\n…(truncated)…` }] },
+      error: "provider failed",
+    }, scope);
+
+    const persistedPath = join(
+      tempDir,
+      "state",
+      "sessions",
+      createHash("sha256").update(scope.sessionKey).digest("hex").slice(0, 24),
+      "confirmation_guard.json",
+    );
+    const persisted = JSON.parse(readFileSync(persistedPath, "utf8"));
+    assert.equal(persisted.latest_requirement_id, undefined);
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "ypmcn-mcp__search_creators",
+      params: { id: requirementId },
+    }, scope);
+    assert.match(blocked.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*MCP_TOOL_FAILED/);
+  });
+
   it("allows a corrected read-only call immediately after a Hook denial", async () => {
     await hooks.get("before_prompt_build")({ prompt: "恢复状态", messages: [] }, {});
     const invalid = await hooks.get("before_tool_call")({

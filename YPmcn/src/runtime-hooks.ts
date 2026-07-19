@@ -20,7 +20,7 @@ import {
   recordFailedContinuousTool,
   recordTrustedIds,
   recordWorkflowToolResult,
-  successful,
+  successfulValidateRequirement,
   validateMarkedAsk,
 } from "./runtime-hook-workflow.js";
 
@@ -69,7 +69,7 @@ export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
   const tool = normalize(raw);
   if (tool) recordTrustedIds(event, tool, rootDir);
   if (tool === "validate_requirement") {
-    settleReadyRequirement(input, rootDir, successful(event.error ? { isError: true } : event.result));
+    settleReadyRequirement(input, rootDir, successfulValidateRequirement(event));
     recordFailedContinuousTool(event, tool, rootDir);
     return;
   }

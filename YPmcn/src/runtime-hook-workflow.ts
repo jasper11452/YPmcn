@@ -139,14 +139,25 @@ function createSummary(input: Json, template: MessageTemplateBinding): Json {
   };
 }
 
+const OPENCLAW_TRUNCATION_SUFFIX = "\n…(truncated)…";
+const TRUNCATED_VALIDATE_REQUIREMENT_PREFIX = /^\s*\{\s*"success"\s*:\s*true\s*,(?:\s*"trace_id"\s*:\s*"(?:[^"\\]|\\.)*"\s*,)?\s*"data"\s*:\s*\{\s*"id"\s*:\s*("(?:[^"\\]|\\.)*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)(?=\s*[,}])/;
+
+function parsedJsonObject(value: string): Json | undefined {
+  const trimmed = value.trim();
+  const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i.exec(trimmed);
+  const candidate = fenced?.[1] ?? trimmed;
+  try {
+    const parsed = JSON.parse(candidate);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Json : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function unwrap(value: any): any {
   if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      if (parsed && typeof parsed === "object") return unwrap(parsed);
-    } catch {
-      // Native YP Action confirmations are flattened text, not JSON.
-    }
+    const parsed = parsedJsonObject(value);
+    if (parsed) return unwrap(parsed);
     return value;
   }
   if (!value || typeof value !== "object") return value;
@@ -156,18 +167,48 @@ function unwrap(value: any): any {
     return unwrap(value.details.structuredContent);
   }
   if (Array.isArray(value.content)) {
+    let fallback: string | undefined;
     for (const item of value.content) {
       if (text(item?.text)) {
-        try { return unwrap(JSON.parse(item.text)); } catch { return item.text; }
+        fallback ??= item.text;
+        const parsed = parsedJsonObject(item.text);
+        if (parsed) return unwrap(parsed);
       }
     }
+    if (fallback) return fallback;
   }
   return value;
+}
+
+function truncatedValidateRequirementId(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || (value as Json).isError === true) return undefined;
+  const content = (value as Json).content;
+  if (!Array.isArray(content)) return undefined;
+  for (const item of content) {
+    if (!text(item?.text)) continue;
+    const candidate = item.text.trimEnd();
+    if (!candidate.endsWith(OPENCLAW_TRUNCATION_SUFFIX)) continue;
+    const prefix = candidate.slice(0, -OPENCLAW_TRUNCATION_SUFFIX.length).trimEnd();
+    const match = TRUNCATED_VALIDATE_REQUIREMENT_PREFIX.exec(prefix);
+    if (!match) continue;
+    try {
+      const id = JSON.parse(match[1]);
+      if (text(id) || (typeof id === "number" && Number.isFinite(id))) return String(id).trim();
+    } catch {
+      // The captured scalar must itself be valid JSON.
+    }
+  }
+  return undefined;
 }
 
 export function successful(result: any): boolean {
   const root = unwrap(result);
   return Boolean(root && typeof root === "object" && root.success === true && root.isError !== true && root.error == null);
+}
+
+export function successfulValidateRequirement(event: Json): boolean {
+  if (successful(event.error ? { isError: true } : event.result)) return true;
+  return !event.error && Boolean(truncatedValidateRequirementId(event.result));
 }
 
 function collectTrustedIds(
@@ -204,14 +245,21 @@ function collectTrustedIds(
 }
 
 export function recordTrustedIds(event: Json, tool: string, rootDir: string): void {
-  if (!successful(event.error ? { isError: true } : event.result)) return;
-  const result = unwrap(event.result);
+  const resultSucceeded = successful(event.error ? { isError: true } : event.result);
+  const truncatedRequirementId = tool === "validate_requirement" && !event.error
+    ? truncatedValidateRequirementId(event.result)
+    : undefined;
+  if (!resultSucceeded && !truncatedRequirementId) return;
+  const result = resultSucceeded ? unwrap(event.result) : {};
   const valuesByKind = collectTrustedIds(result);
   let validatedRequirementId: string | undefined;
   if (tool === "validate_requirement") {
     const requirementId = result?.data?.id;
     if (text(requirementId) || (typeof requirementId === "number" && Number.isFinite(requirementId))) {
       validatedRequirementId = String(requirementId).trim();
+      valuesByKind.set("requirement_id", new Set([validatedRequirementId]));
+    } else if (truncatedRequirementId) {
+      validatedRequirementId = truncatedRequirementId;
       valuesByKind.set("requirement_id", new Set([validatedRequirementId]));
     }
   }
