@@ -294,6 +294,22 @@ function latestRequirementId(data: Json): string | undefined {
     : undefined;
 }
 
+function recoverRequirementId(data: Json): string | undefined {
+  // Fallback: recover from trusted_ids when latest_requirement_id was not persisted.
+  const receipts = data.trusted_ids;
+  if (!Array.isArray(receipts)) return undefined;
+  const now = Date.now();
+  for (const receipt of receipts) {
+    if (!receipt || typeof receipt !== "object") continue;
+    if (receipt.kind !== "requirement_id") continue;
+    if (!["validate_requirement", "get_workflow_state"].includes(receipt.source_tool)) continue;
+    if (!text(receipt.value)) continue;
+    if (Number(receipt.expires_at_ms ?? 0) <= now) continue;
+    return receipt.value.trim();
+  }
+  return undefined;
+}
+
 function recordValue(value: unknown): Json | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Json : undefined;
 }
@@ -1159,12 +1175,29 @@ export function guardWorkflowTool(
   rootDir: string,
 ): Json | undefined {
   if (tool === "search_creators") {
-    const expectedId = latestRequirementId(current.data);
+    let expectedId = latestRequirementId(current.data);
     if (!expectedId) {
-      return deny(
-        "ID_PROVENANCE_REQUIRED",
-        "$.id must equal data.id from the latest successful validate_requirement response; demand_id and invented IDs are not accepted.",
-      );
+      // Primary provenance missing: try recovery from trusted_ids.
+      expectedId = recoverRequirementId(current.data);
+      if (expectedId) {
+        // Auto-heal: restore latest_requirement_id so subsequent calls use the fast path.
+        const recoveredReceipt = current.data.trusted_ids.find((r: Json) =>
+          r?.kind === "requirement_id" && r?.value === expectedId &&
+          ["validate_requirement", "get_workflow_state"].includes(r?.source_tool)
+        );
+        current.data.latest_requirement_id = {
+          value: expectedId,
+          source_tool: recoveredReceipt?.source_tool ?? "validate_requirement",
+          observed_at_ms: recoveredReceipt?.observed_at_ms ?? Date.now(),
+          expires_at_ms: recoveredReceipt?.expires_at_ms ?? Date.now() + TRUSTED_ID_TTL_MS,
+        };
+        save(current.path, current.data);
+      } else {
+        return deny(
+          "ID_PROVENANCE_REQUIRED",
+          "$.id must equal data.id from the latest successful validate_requirement response; demand_id and invented IDs are not accepted.",
+        );
+      }
     }
     if (input.id.trim() !== expectedId) {
       return deny(
