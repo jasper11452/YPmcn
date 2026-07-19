@@ -871,12 +871,12 @@ describe("YP Action native hook guard", () => {
     }
   });
 
-  it("blocks every same-turn rewrite after a requirement denial", async () => {
+  it("allows a same-turn correction after an invalid mapped field is denied", async () => {
     await hooks.get("before_prompt_build")({ prompt: "新需求", messages: [] }, {});
-    const first = requirementPayload({ quantityTotal: 0, rebate: "[0.3,0.3]" });
-    first.rawMessagesJson.originalBrief += "，返点30%";
+    const first = requirementPayload({ contentForm: "视频" });
+    first.rawMessagesJson.originalBrief += "，内容形式：视频";
     first.rawMessagesJson.atoms.push({
-      sourceText: "返点30%", disposition: "mapped", targetField: "rebate", confidence: 1, inferred: false,
+      sourceText: "内容形式：视频", disposition: "mapped", targetField: "contentForm", confidence: 1, inferred: false,
     });
     first.rawMessagesJson.coverageCheck = {
       atomCount: 5, mappedCount: 5, preservedCount: 0, unresolvedCount: 0,
@@ -885,30 +885,21 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__validate_requirement",
       params: { payload: first },
     }, {});
-    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_INCOMPLETE/);
+    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_INCOMPLETE.*contentForm.*not a real customer_demands field/);
 
-    const rewritten = structuredClone(first);
-    delete rewritten.rebate;
-    rewritten.rawMessagesJson.atoms[4] = {
-      sourceText: "返点30%", disposition: "preserved", preservedText: "返点30%", confidence: 1, inferred: false,
+    const corrected = structuredClone(first);
+    delete corrected.contentForm;
+    corrected.rawMessagesJson.atoms[4] = {
+      sourceText: "内容形式：视频", disposition: "preserved", preservedText: "内容形式：视频", confidence: 1, inferred: false,
     };
-    rewritten.rawMessagesJson.coverageCheck = {
+    corrected.rawMessagesJson.coverageCheck = {
       atomCount: 5, mappedCount: 4, preservedCount: 1, unresolvedCount: 0,
     };
-    const downgrade = await hooks.get("before_tool_call")({
+    const retried = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__validate_requirement",
-      params: { payload: rewritten },
+      params: { payload: corrected },
     }, {});
-    assert.doesNotMatch(downgrade.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT/);
-    // Now receives the real semantic rewrite guard instead of the blanket BLOCKED_REQUIREMENT_INCOMPLETE
-    assert.match(downgrade.blockReason, /BLOCKED_REQUIREMENT_SEMANTIC_REWRITE/);
-
-    await hooks.get("before_prompt_build")({ prompt: "用户明确修正", messages: [] }, {});
-    const nextTurn = await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__validate_requirement",
-      params: { payload: rewritten },
-    }, {});
-    assert.doesNotMatch(nextTurn.blockReason, /BLOCKED_REQUIREMENT_SEMANTIC_REWRITE/);
+    assert.equal(retried, undefined);
   });
 
   it("requires complete auditable brief atoms and matching zero-unresolved coverage", async () => {

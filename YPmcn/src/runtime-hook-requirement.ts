@@ -2,7 +2,6 @@ import { loadContractSchema } from "./contract/loader.js";
 import {
   bindingFingerprint,
   deny,
-  fingerprint,
   type GuardStore,
   type Json,
   save,
@@ -255,46 +254,6 @@ function validateAuditableBrief(raw: unknown, payload: Json): Json | undefined {
   return undefined;
 }
 
-function requirementSemanticKey(payload: Json): string | undefined {
-  const originalBrief = payload.rawMessagesJson?.originalBrief;
-  return text(originalBrief) ? fingerprint(originalBrief.trim()) : undefined;
-}
-
-function mappedRequirementSemantics(payload: Json): Json {
-  const atoms = Array.isArray(payload.rawMessagesJson?.atoms) ? payload.rawMessagesJson.atoms : [];
-  const mapped: Json = {};
-  for (const atom of atoms) {
-    if (!atom || typeof atom !== "object" || atom.disposition !== "mapped" ||
-      !text(atom.sourceText) || !text(atom.targetField)) continue;
-    mapped[atom.sourceText] = atom.targetField;
-  }
-  return mapped;
-}
-
-function recordBlockedRequirementSemantics(current: GuardStore, payload: Json): void {
-  const key = requirementSemanticKey(payload);
-  if (!key) return;
-  const mapped = mappedRequirementSemantics(payload);
-  if (Object.keys(mapped).length === 0) return;
-  current.data.blocked_requirement_semantics[key] = mapped;
-  save(current.path, current.data);
-}
-
-function requirementSemanticDowngrade(current: GuardStore, payload: Json): Json | undefined {
-  const key = requirementSemanticKey(payload);
-  const previous = key ? current.data.blocked_requirement_semantics[key] : undefined;
-  if (!previous || typeof previous !== "object" || Array.isArray(previous)) return undefined;
-  const currentMapped = mappedRequirementSemantics(payload);
-  const downgraded = Object.entries(previous).find(([sourceText, targetField]) =>
-    currentMapped[sourceText] !== targetField || !Object.prototype.hasOwnProperty.call(payload, String(targetField))
-  );
-  if (!downgraded) return undefined;
-  return deny(
-    "BLOCKED_REQUIREMENT_SEMANTIC_REWRITE",
-    `The blocked atom ${JSON.stringify(downgraded[0])} must remain mapped to payload.${String(downgraded[1])}; wait for a new user turn instead of deleting, preserving, or remapping it.`,
-  );
-}
-
 function explicitJsonArray(sourceText: string): boolean {
   try {
     const parsed = JSON.parse(sourceText.trim());
@@ -442,23 +401,17 @@ function validateRequirementPayload(payload: Json): Json | undefined {
 
 export function guardValidateRequirement(input: Json, current: GuardStore): Json | undefined {
   const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
-  const semanticDowngrade = requirementSemanticDowngrade(current, payload);
-  if (semanticDowngrade) return semanticDowngrade;
-  const blockRequirement = (failure: Json): Json => {
-    recordBlockedRequirementSemantics(current, payload);
-    return failure;
-  };
   if (payload.status !== "ready") {
-    return blockRequirement(deny("BLOCKED_REQUIREMENT_INCOMPLETE", "payload.status must be ready; clarify every missing or ambiguous required value before validation."));
+    return deny("BLOCKED_REQUIREMENT_INCOMPLETE", "payload.status must be ready; clarify every missing or ambiguous required value before validation.");
   }
   const requirementFailure = validateRequirementPayload(payload);
-  if (requirementFailure) return blockRequirement(requirementFailure);
+  if (requirementFailure) return requirementFailure;
   const emptyField = Object.entries(payload).find(([, value]) =>
     value === null || (typeof value === "string" && value.trim() === "") ||
     (Array.isArray(value) && value.length === 0)
   );
   if (emptyField) {
-    return blockRequirement(deny("BLOCKED_REQUIREMENT_INCOMPLETE", `payload.${emptyField[0]} is empty; omit optional fields and clarify required fields before validation.`));
+    return deny("BLOCKED_REQUIREMENT_INCOMPLETE", `payload.${emptyField[0]} is empty; omit optional fields and clarify required fields before validation.`);
   }
   markReadyRequirementInFlight(current, payload);
   return undefined;

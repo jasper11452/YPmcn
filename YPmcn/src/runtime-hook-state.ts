@@ -109,9 +109,6 @@ export function store(rootDir: string): GuardStore {
   data.schema_version = 10;
   data.confirmations ??= {};
   if (!Array.isArray(data.trusted_ids)) data.trusted_ids = [];
-  if (!data.blocked_requirement_semantics || typeof data.blocked_requirement_semantics !== "object" || Array.isArray(data.blocked_requirement_semantics)) {
-    data.blocked_requirement_semantics = {};
-  }
   if (!data.supply_plans || typeof data.supply_plans !== "object" || Array.isArray(data.supply_plans)) {
     data.supply_plans = {};
   }
@@ -175,7 +172,6 @@ export function store(rootDir: string): GuardStore {
 export function beginPromptTurn(rootDir: string, preview?: Json, readyPayload?: Json): void {
   const current = store(rootDir);
   current.data.prompt_epoch = Number(current.data.prompt_epoch ?? 0) + 1;
-  current.data.blocked_requirement_semantics = {};
   delete current.data.prompt_requirement_gate;
   delete current.data.ready_requirement_binding;
   if (preview && preview.gate !== "ready") {
