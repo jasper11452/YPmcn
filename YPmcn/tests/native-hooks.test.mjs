@@ -243,9 +243,8 @@ describe("YP Action native hook guard", () => {
     assert.match(result.prependSystemContext, /coverageCheck uses atomCount, mappedCount, preservedCount, and unresolvedCount/);
     assert.match(result.prependSystemContext, /requirement_ready.*search_creators/);
     assert.match(result.prependSystemContext, /candidate_pool_ready.*rank_mcns/);
-    assert.match(result.prependSystemContext, /supply_demand_ratio/);
-    assert.match(result.prependSystemContext, /recommended_manual_creator_count=max/);
-    assert.match(result.prependSystemContext, /Institution count and creator count must never be divided/);
+    assert.match(result.prependSystemContext, /replaces the question body with the compact authoritative ten-field supply plan/);
+    assert.match(result.prependSystemContext, /Do not reconstruct the long search output/);
     assert.match(result.prependSystemContext, /notification_template/);
     assert.match(result.prependSystemContext, /export_csv/);
     assert.match(result.prependSystemContext, /successful WeCom distribution plus completed recovery/);
@@ -928,25 +927,28 @@ describe("YP Action native hook guard", () => {
     }
   });
 
-  it("blocks a forged supply value or non-exact options before AskUserQuestion", async () => {
+  it("hydrates reconstructed supply values from the bound receipt and still rejects non-exact options", async () => {
     const params = { id: "req-forged-plan-popup", platform: "xiaohongshu" };
     await recordSearch(params.id);
     const blocked = await hooks.get("before_tool_call")({ toolName: "mcp__ypmcn__rank_mcns", params }, {});
     const id = confirmationId(blocked);
     const plan = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
     const question = supplyPlanQuestion(id, { ...plan, demand_count: 999 });
+    const forgedParams = {
+      questions: [{ question, options: [{ label: "确认供给方案" }, { label: "调整方案" }] }],
+    };
     const forged = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
-      params: { questions: [{ question, options: [{ label: "确认供给方案" }, { label: "调整方案" }] }] },
+      params: forgedParams,
     }, {});
-    assert.equal(forged.block, true);
-    assert.match(forged.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+    assert.equal(forged, undefined);
+    assert.equal(forgedParams.questions[0].question, supplyPlanQuestion(id, plan).replace("\n", " ").replace("\n", " "));
 
     const extraOption = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
       params: {
         questions: [{
-          question: question.replace("需求人数=999", "需求人数=10"),
+          question: forgedParams.questions[0].question,
           options: [{ label: "确认供给方案" }, { label: "调整方案" }, { label: "稍后" }],
         }],
       },
@@ -967,10 +969,10 @@ describe("YP Action native hook guard", () => {
       },
     }, {});
     assert.match(blocked.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
-    assert.match(blocked.blockReason, /exact current Provider plan.*reconstructed or approximate values/);
+    assert.match(blocked.blockReason, /exactly one current search_creators result/);
   });
 
-  it("rejects a dense one-paragraph supply confirmation even when values are exact", async () => {
+  it("replaces a dense supply confirmation with the compact bound summary", async () => {
     const params = { id: "req-dense-plan-popup", platform: "xiaohongshu" };
     await recordSearch(params.id);
     const blocked = await hooks.get("before_tool_call")({ toolName: "mcp__ypmcn__rank_mcns", params }, {});
@@ -980,36 +982,93 @@ describe("YP Action native hook guard", () => {
       `供给方案。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
       ...Object.entries(plan).map(([field, value]) => `${field}=${value}`),
     ].join("；");
+    const askParams = { questions: [{ question, options: [{ label: "确认供给方案" }, { label: "调整方案" }] }] };
     const formatBlocked = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
-      params: { questions: [{ question, options: [{ label: "确认供给方案" }, { label: "调整方案" }] }] },
+      params: askParams,
     }, {});
-    assert.match(formatBlocked.blockReason, /BLOCKED_CONFIRMATION_FORMAT/);
-    assert.match(formatBlocked.blockReason, /【分区】/);
+    assert.equal(formatBlocked, undefined);
+    assert.equal(askParams.questions[0].question, supplyPlanQuestion(id, plan).replace("\n", " ").replace("\n", " "));
   });
 
-  it("does not accept a supply confirmation that omits fixed calculation fields", async () => {
+  it("fills omitted supply display fields from the receipt before accepting confirmation", async () => {
     const params = { id: "req-supply-incomplete", platform: "xiaohongshu" };
     await recordSearch(params.id);
     const blocked = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-incomplete-1",
     }, {});
     const id = confirmationId(blocked);
+    const askParams = {
+      questions: [{
+        question: `供需比 2:1。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
+        options: [{ label: "确认供给方案" }, { label: "调整方案" }],
+      }],
+    };
+    assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params: askParams }, {}), undefined);
+    assert.match(askParams.questions[0].question, /【真实数据】.*【推荐方案】.*【影响】/);
     await hooks.get("after_tool_call")({
       toolName: "AskUserQuestion",
-      params: {
-        questions: [{
-          question: `供需比 2:1。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
-          options: [{ label: "确认供给方案" }, { label: "调整方案" }],
-        }],
-      },
+      params: askParams,
       result: { status: "submitted", answers: [{ selected_labels: ["确认供给方案"] }] },
     }, {});
     const retried = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-incomplete-2",
     }, {});
-    assert.equal(retried.block, true);
-    assert.match(retried.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
+    assert.equal(retried, undefined);
+  });
+
+  it("binds visible hard-filter counts instead of a stale unfiltered provider plan", async () => {
+    const requirementId = "req-filtered-supply-plan";
+    const stalePlan = supplyPlan({
+      demand_count: 5,
+      database_candidate_count: 2561,
+      supply_demand_ratio: 512.2,
+      target_submission_count: 15,
+      estimated_valid_return_count: 10,
+      estimated_gap_count: 5,
+      recommended_mcn_count: 5,
+      mcn_covered_creator_count: 2561,
+      recommended_manual_creator_count: 5,
+      mcn_manual_creator_ratio: "2561:5",
+    });
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__search_creators",
+      params: { id: requirementId },
+      result: {
+        success: true,
+        data: {
+          supply_plan: stalePlan,
+          total_matched: 377,
+          supply_assessment: { candidate_count: 377, quantity_total: 5, supply_multiplier: 75.4 },
+          creators: [
+            { candidate_id: 1, kw_uid: "creator-1", supplier_id: "supplier-1" },
+            { candidate_id: 2, kw_uid: "creator-2", supplier_id: "supplier-1" },
+            { candidate_id: 3, kw_uid: "creator-3", supplier_id: null },
+          ],
+        },
+        error: null,
+      },
+    }, {});
+
+    const persisted = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.deepEqual(
+      {
+        demand_count: persisted.supply_plans[requirementId].demand_count,
+        database_candidate_count: persisted.supply_plans[requirementId].database_candidate_count,
+        supply_demand_ratio: persisted.supply_plans[requirementId].supply_demand_ratio,
+        mcn_covered_creator_count: persisted.supply_plans[requirementId].mcn_covered_creator_count,
+        recommended_manual_creator_count: persisted.supply_plans[requirementId].recommended_manual_creator_count,
+        mcn_manual_creator_ratio: persisted.supply_plans[requirementId].mcn_manual_creator_ratio,
+      },
+      {
+        demand_count: 5,
+        database_candidate_count: 377,
+        supply_demand_ratio: 75.4,
+        mcn_covered_creator_count: 2,
+        recommended_manual_creator_count: 5,
+        mcn_manual_creator_ratio: "2:5",
+      },
+    );
   });
 
   it("allows a ready requirement without optional project or industry fields", async () => {

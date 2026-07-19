@@ -48,19 +48,6 @@ const SUPPLY_PLAN_FIELDS = [
   "recommended_manual_creator_count",
   "mcn_manual_creator_ratio",
 ] as const;
-const SUPPLY_PLAN_DISPLAY_LABELS = {
-  demand_count: ["需求人数", "demand_count"],
-  database_candidate_count: ["候选达人", "database_candidate_count"],
-  supply_demand_ratio: ["供给倍数", "supply_demand_ratio"],
-  target_submission_count: ["目标提报", "target_submission_count"],
-  estimated_valid_return_count: ["预计有效", "estimated_valid_return_count"],
-  estimated_gap_count: ["预计缺口", "estimated_gap_count"],
-  recommended_mcn_count: ["推荐MCN", "recommended_mcn_count"],
-  mcn_covered_creator_count: ["MCN覆盖达人", "mcn_covered_creator_count"],
-  recommended_manual_creator_count: ["人工补充", "recommended_manual_creator_count"],
-  mcn_manual_creator_ratio: ["MCN人工比例", "mcn_manual_creator_ratio"],
-} satisfies Record<(typeof SUPPLY_PLAN_FIELDS)[number], readonly string[]>;
-
 type SupplyPlan = {
   demand_count: number;
   database_candidate_count: number;
@@ -449,7 +436,44 @@ function responseSupplyPlan(result: unknown): SupplyPlan | undefined {
 
   // If source has all 10 fields, validate strictly
   if (SUPPLY_PLAN_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(source, field))) {
-    return validateSupplyPlan(source);
+    const providerPlan = validateSupplyPlan(source);
+    if (!providerPlan) return undefined;
+
+    // search_creators may return a precomputed plan based on the unfiltered recall pool.
+    // Bind the confirmation to the committed hard-filter result whenever those facts are
+    // present, because that is what the user sees and what rank_mcns will consume.
+    const assessment = recordValue(data?.supply_assessment);
+    const demandCount = nonNegativeInteger(assessment?.quantity_total) && assessment.quantity_total > 0
+      ? assessment.quantity_total
+      : providerPlan.demand_count;
+    const candidateCount = nonNegativeInteger(data?.total_matched)
+      ? data.total_matched
+      : nonNegativeInteger(assessment?.candidate_count)
+        ? assessment.candidate_count
+        : providerPlan.database_candidate_count;
+    const creators = Array.isArray(data?.creators) ? data.creators : [];
+    const coveredCreatorIds = new Set<string>();
+    for (const creator of creators) {
+      if (!creator || typeof creator !== "object" || !text((creator as Json).supplier_id)) continue;
+      const item = creator as Json;
+      const creatorId = [item.kw_uid, item.kwUid, item.candidate_id].find((value) =>
+        text(value) || (typeof value === "number" && Number.isFinite(value))
+      );
+      if (creatorId != null) coveredCreatorIds.add(String(creatorId));
+    }
+    const coveredCount = creators.length > 0 ? coveredCreatorIds.size : providerPlan.mcn_covered_creator_count;
+    const gap = Math.max(0, providerPlan.target_submission_count - providerPlan.estimated_valid_return_count);
+    const manualCount = Math.max(Math.ceil(demandCount * 0.2), gap);
+    return validateSupplyPlan({
+      ...providerPlan,
+      demand_count: demandCount,
+      database_candidate_count: candidateCount,
+      supply_demand_ratio: candidateCount / demandCount,
+      estimated_gap_count: gap,
+      mcn_covered_creator_count: coveredCount,
+      recommended_manual_creator_count: manualCount,
+      mcn_manual_creator_ratio: `${coveredCount}:${manualCount}`,
+    });
   }
 
   // Partial data: require at minimum demand_count and database_candidate_count
@@ -579,6 +603,7 @@ function recordSupplyPlan(event: Json, input: Json, rootDir: string): void {
         updated_at_ms: now,
         expires_at_ms: now + CONFIRMATION_TTL_MS,
       };
+      current.data.latest_supply_plan_confirmation_id = confirmationId;
     }
   }
   save(current.path, current.data);
@@ -819,60 +844,6 @@ export function promptRequirementGate(
   return undefined;
 }
 
-function numericQuestionValues(question: string, field: string): number[] {
-  const numberPattern = "[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][-+]?\\d+)?";
-  const pattern = new RegExp(
-    `(?:^|[^A-Za-z0-9_])(?:[\\s*\u0060"']{0,3})${escapeRegex(field)}(?:[\\s*\u0060"']{0,3})(?:=|:|：)\\s*(${numberPattern})(?![A-Za-z0-9_.])`,
-    "g",
-  );
-  return [...question.matchAll(pattern)].map((match) => Number(match[1]));
-}
-
-function ratioQuestionValues(question: string, field: string): Array<[number, number]> {
-  const pattern = new RegExp(
-    `(?:^|[^A-Za-z0-9_])(?:[\\s*\u0060"']{0,3})${escapeRegex(field)}(?:[\\s*\u0060"']{0,3})(?:=|:|：)\\s*(\\d+)\\s*:\\s*(\\d+)(?!\\d)`,
-    "g",
-  );
-  return [...question.matchAll(pattern)].map((match) => [Number(match[1]), Number(match[2])]);
-}
-
-function questionMatchesSupplyPlan(question: string, values: SupplyPlan): boolean {
-  const extracted: Record<string, number> = {};
-  for (const field of SUPPLY_PLAN_FIELDS) {
-    const aliases = SUPPLY_PLAN_DISPLAY_LABELS[field];
-    if (field === "mcn_manual_creator_ratio") {
-      const matches = aliases.flatMap((alias) => ratioQuestionValues(question, alias));
-      if (matches.length !== 1) return false;
-      extracted[`${field}_a`] = matches[0][0];
-      extracted[`${field}_b`] = matches[0][1];
-    } else {
-      const matches = aliases.flatMap((alias) => numericQuestionValues(question, alias));
-      if (matches.length !== 1) return false;
-      extracted[field] = matches[0];
-    }
-  }
-  const manualShareMatches = ["建议手扒占比", "recommended_manual_creator_share_pct"]
-    .flatMap((alias) => numericQuestionValues(question, alias));
-  if (manualShareMatches.length !== 1) return false;
-
-  const ev = extracted;
-  if (ev.demand_count !== values.demand_count) return false;
-  if (ev.database_candidate_count !== values.database_candidate_count) return false;
-
-  const expectedRatio = ev.database_candidate_count / ev.demand_count;
-  if (ev.supply_demand_ratio !== expectedRatio) return false;
-  const expectedGap = Math.max(0, ev.target_submission_count - ev.estimated_valid_return_count);
-  if (ev.estimated_gap_count !== expectedGap) return false;
-  const expectedManual = Math.max(Math.ceil(ev.demand_count * 0.2), expectedGap);
-  if (ev.recommended_manual_creator_count !== expectedManual) return false;
-  if (ev.mcn_manual_creator_ratio_a !== ev.mcn_covered_creator_count) return false;
-  if (ev.mcn_manual_creator_ratio_b !== ev.recommended_manual_creator_count) return false;
-
-  const manualTotal = ev.mcn_covered_creator_count + ev.recommended_manual_creator_count;
-  const expectedManualShare = manualTotal === 0 ? 0 : Number((ev.recommended_manual_creator_count / manualTotal * 100).toFixed(2));
-  return manualShareMatches[0] === expectedManualShare;
-}
-
 function labeledSegments(question: string, aliases: readonly string[]): string[] {
   const names = aliases.map(escapeRegex).join("|");
   const pattern = new RegExp(
@@ -947,20 +918,19 @@ export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
       return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply-plan confirmation must contain exactly one bound question.");
     }
     const question = supplyQuestions[0];
-    const pending = Object.entries<Json>(data.confirmations)
-      .filter(([, receipt]) => receipt?.kind === "supply_plan" && receipt.status === "pending" && receipt.request_fingerprint == null)
-      .filter(([, receipt]) => {
-        const requirementId = text(receipt.requirement_id) ? receipt.requirement_id : "";
-        const plan = requirementId ? storedSupplyPlan(data, requirementId) : undefined;
-        return Boolean(plan && supplyPlanReceiptMatchesPlan(receipt, requirementId, plan) &&
-          questionMatchesSupplyPlan(question.question, plan.values));
-      });
-    if (pending.length !== 1) {
-      return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply-plan confirmation must use the exact current Provider plan created by search_creators; do not show reconstructed or approximate values.");
+    const latestId = text(data.latest_supply_plan_confirmation_id)
+      ? data.latest_supply_plan_confirmation_id
+      : undefined;
+    const latestReceipt = latestId ? data.confirmations[latestId] as Json | undefined : undefined;
+    const requirementId = text(latestReceipt?.requirement_id) ? latestReceipt.requirement_id : "";
+    const plan = requirementId ? storedSupplyPlan(data, requirementId) : undefined;
+    if (!latestId || !latestReceipt || latestReceipt.kind !== "supply_plan" || latestReceipt.status !== "pending" ||
+      latestReceipt.request_fingerprint != null || !plan ||
+      !supplyPlanReceiptMatchesPlan(latestReceipt, requirementId, plan)) {
+      return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply-plan confirmation needs exactly one current search_creators result.");
     }
-    const [id] = pending[0];
-    question.question = `${question.question} [YP_SUPPLY_PLAN_CONFIRMATION:${id}]`;
-    marker = { id, kind: "supply_plan" };
+    question.question = `${supplyPlanText(latestReceipt.safe_summary)}｜[YP_SUPPLY_PLAN_CONFIRMATION:${latestId}]`;
+    marker = { id: latestId, kind: "supply_plan" };
   }
   const receipt = data.confirmations?.[marker.id] as Json | undefined;
   if (!receipt || receipt.kind !== marker.kind || receipt.status !== "pending") {
@@ -970,13 +940,6 @@ export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
   if (!question) {
     return deny("BLOCKED_CONFIRMATION_MISMATCH", "The marker must appear in exactly one AskUserQuestion question body.");
   }
-  if (!readableMarkedConfirmation(question.question)) {
-    return deny(
-      "BLOCKED_CONFIRMATION_FORMAT",
-      "YP Action collapses ordinary whitespace. Keep the confirmation body within 320 characters and use 3-5 visible 【分区】 headings joined by ｜, including 【影响】; never dump raw fields in one paragraph.",
-    );
-  }
-
   if (marker.kind === "supply_plan") {
     if (!exactOptionLabels(question, [CONFIRM_SUPPLY_PLAN_LABEL, "调整方案"])) {
       return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply-plan options must be exactly 确认供给方案 and 调整方案.");
@@ -986,10 +949,17 @@ export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
     if (!plan || !supplyPlanReceiptMatches(receipt, requirementId, receipt.request_fingerprint, plan)) {
       return deny("INTEGRATION_REQUIRED", "The supply-plan receipt is not bound to the current provider plan.");
     }
-    if (!questionMatchesSupplyPlan(question.question, plan.values)) {
-      return deny("BLOCKED_CONFIRMATION_MISMATCH", "The question must show every bound supply-plan value once using the compact Chinese labels supplied by the Hook.");
-    }
+    // The receipt is authoritative. Hydrate the visible question from it instead of
+    // forcing the agent to reproduce a long result byte-for-byte.
+    question.question = `${supplyPlanText(plan.values)}｜[YP_SUPPLY_PLAN_CONFIRMATION:${marker.id}]`;
     return undefined;
+  }
+
+  if (!readableMarkedConfirmation(question.question)) {
+    return deny(
+      "BLOCKED_CONFIRMATION_FORMAT",
+      "YP Action collapses ordinary whitespace. Keep the confirmation body within 320 characters and use 3-5 visible 【分区】 headings joined by ｜, including 【影响】; never dump raw fields in one paragraph.",
+    );
   }
 
   if (!exactOptionLabels(question, [CONFIRM_SEND_LABEL, "需要修改"])) {
