@@ -509,7 +509,7 @@ export function buildStandardBriefReadyPayload(
 }
 
 export function renderStandardBriefReadyArguments(payload: Record<string, unknown>): string {
-  return `YPmcn authoritative validate_requirement arguments (use this object exactly; do not rebuild any field or audit atom):\n${JSON.stringify({ payload })}`;
+  return `YPmcn authoritative initial validate_requirement arguments (use this object exactly for the first call; after a deterministic argument rejection, preserve confirmed facts and follow the same-turn repair loop):\n${JSON.stringify({ payload })}`;
 }
 
 function ambiguityQuestion(field: string): string {

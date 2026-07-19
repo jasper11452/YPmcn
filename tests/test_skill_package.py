@@ -81,10 +81,18 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertEqual(1 + len(EXPECTED_REFERENCE_FILES), len(markdown))
         self.assertLessEqual(sum(count_han(read(path)) for path in markdown), 3000)
 
-    def test_skill_stops_after_hook_block_without_semantic_rewrite(self):
-        text = "\n".join((read(SKILL), read(REFERENCES / "execution-gates.md")))
+    def test_skill_repairs_requirement_arguments_but_stops_other_hook_failures(self):
+        text = "\n".join((
+            read(SKILL),
+            read(REFERENCES / "requirement-intake.md"),
+            read(REFERENCES / "execution-gates.md"),
+        ))
         for required in (
-            "Hook 任意阻断后立即停止",
+            "参数校验失败",
+            "同一轮持续重新调用直到成功",
+            "保持原始需求语义",
+            "只修报错字段、序列化、映射或审计计数",
+            "除上述 `validate_requirement` 参数自修复外，Hook 任意阻断后立即停止",
             '`details.status="blocked"`',
             "不改写 payload、ID 或已映射字段",
             '`details.deniedReason="plugin-before-tool-call"`',

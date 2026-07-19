@@ -64,6 +64,9 @@ const REQUIREMENT_BOOLEAN_INTEGER_FIELDS = new Set(["hasOrganization", "hasOrder
 const REQUIREMENT_NONNEGATIVE_INTEGER_FIELDS = new Set(["clickMedium", "viewMedium", "photoView", "videoInteract"]);
 const REQUIREMENT_OPTIONAL_DATETIME_FIELDS = ["projectStartStart", "projectStartEnd"] as const;
 
+const REQUIREMENT_CORRECTION_RECOVERY =
+  "This local rejection did not reach MCP/Provider. Preserve every confirmed requirement fact, correct only the reported argument or audit conflict, and call validate_requirement again in this assistant turn. Ask the user only when the confirmed requirement does not determine the correction.";
+
 function requirementRange(value: unknown): readonly [number, number] | undefined {
   if (typeof value !== "string" || value.trim() !== value) return undefined;
   try {
@@ -85,37 +88,84 @@ export function readyRequirementFailure(
   tool: string | undefined,
   input: Json,
   current: GuardStore,
+  isClarificationTool = false,
 ): Json | undefined {
   const binding = current.data.ready_requirement_binding;
   if (!binding || typeof binding !== "object" || binding.status === "validated") return undefined;
   if (binding.status === "failed") return undefined;
-  if (binding.status !== "pending") {
+  if (binding.status === "in_flight") {
     return deny(
       "BLOCKED_REQUIREMENT_VALIDATION_IN_FLIGHT",
-      "The authoritative Ready Preview validation is already in flight or failed; stop until a new user turn.",
+      "The authoritative Ready Preview validation is already in flight; wait for that Tool result before making another call.",
     );
+  }
+  if (binding.status === "correction_required" && isClarificationTool) return undefined;
+  if (binding.status !== "pending" && binding.status !== "correction_required") {
+    return deny("BLOCKED_REQUIREMENT_VALIDATION_IN_FLIGHT", "Requirement validation is in an unknown local state; stop until a new user turn.");
   }
   if (tool !== "validate_requirement") {
     return deny(
       "BLOCKED_REQUIREMENT_VALIDATION_REQUIRED",
-      "A Ready Preview is bound to this turn; the only permitted Tool is validate_requirement with the exact injected arguments.",
+      binding.status === "correction_required"
+        ? "Requirement argument correction is incomplete; correct the reported input and call validate_requirement again before any other business Tool."
+        : "A Ready Preview is bound to this turn; the only permitted Tool is validate_requirement with the exact injected arguments.",
     );
   }
   const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
-  if (!text(binding.payload_fingerprint) || bindingFingerprint(payload) !== binding.payload_fingerprint) {
-    return deny(
-      "BLOCKED_REQUIREMENT_PREVIEW_MISMATCH",
-      "validate_requirement.payload does not match the current Ready Preview after harmless whitespace, Unicode-width, and null-field normalization. Rebuild it from the current confirmed values.",
-    );
+  if (binding.status === "pending" &&
+    (!text(binding.payload_fingerprint) || bindingFingerprint(payload) !== binding.payload_fingerprint)) {
+    binding.status = "correction_required";
+    binding.last_rejected_payload_fingerprint = bindingFingerprint(payload);
+    binding.updated_at_ms = Date.now();
+    current.data.ready_requirement_binding = binding;
+    save(current.path, current.data);
+    return {
+      ...deny(
+        "BLOCKED_REQUIREMENT_PREVIEW_MISMATCH",
+        `validate_requirement.payload does not match the current Ready Preview after harmless whitespace, Unicode-width, and null-field normalization. ${REQUIREMENT_CORRECTION_RECOVERY}`,
+      ),
+      correctionRequired: true,
+      retrySameTurn: true,
+      recoveryAction: REQUIREMENT_CORRECTION_RECOVERY,
+    };
   }
   return undefined;
 }
 
+export function recordReadyRequirementCorrection(
+  input: Json,
+  current: GuardStore,
+  failure: Json,
+): Json {
+  const binding = current.data.ready_requirement_binding;
+  if (!binding || typeof binding !== "object" ||
+    !["pending", "correction_required", "failed"].includes(binding.status)) return failure;
+  const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
+  binding.status = "correction_required";
+  binding.last_rejected_payload_fingerprint = bindingFingerprint(payload);
+  binding.updated_at_ms = Date.now();
+  current.data.ready_requirement_binding = binding;
+  save(current.path, current.data);
+  return {
+    ...failure,
+    blockReason: `${String(failure.blockReason ?? "Requirement arguments were rejected.")} REQUIREMENT_ARGUMENT_CORRECTION_REQUIRED: ${REQUIREMENT_CORRECTION_RECOVERY}`,
+    correctionRequired: true,
+    retrySameTurn: true,
+    recoveryAction: REQUIREMENT_CORRECTION_RECOVERY,
+  };
+}
+
 function markReadyRequirementInFlight(current: GuardStore, payload: Json): void {
   const binding = current.data.ready_requirement_binding;
-  if (!binding || typeof binding !== "object" || binding.status !== "pending") return;
-  if (binding.payload_fingerprint !== bindingFingerprint(payload)) return;
+  if (!binding || typeof binding !== "object" ||
+    !["pending", "correction_required", "failed"].includes(binding.status)) return;
+  const payloadFingerprint = bindingFingerprint(payload);
+  if (binding.status === "pending" && binding.payload_fingerprint !== payloadFingerprint) return;
   binding.status = "in_flight";
+  binding.payload_fingerprint = payloadFingerprint;
+  binding.audit_fingerprint = bindingFingerprint(payload.rawMessagesJson);
+  binding.atom_count = Array.isArray(payload.rawMessagesJson?.atoms) ? payload.rawMessagesJson.atoms.length : 0;
+  delete binding.last_rejected_payload_fingerprint;
   binding.updated_at_ms = Date.now();
   current.data.ready_requirement_binding = binding;
   save(current.path, current.data);

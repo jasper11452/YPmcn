@@ -341,8 +341,12 @@ describe("YP Action native hook guard", () => {
     assert.match(result.prependSystemContext, /sync -> ingest_mcn_submissions.*-> sync/);
     assert.match(result.prependSystemContext, /create_submission_batch\(\{run_id\}\)/);
     assert.match(result.prependSystemContext, /Omit optional and null fields/);
-    assert.match(result.prependSystemContext, /generic tool failure.*details\.status="blocked".*gets no automatic retry/);
-    assert.match(result.prependSystemContext, /INVALID_INPUT\/INTEGRATION_REQUIRED/);
+    assert.match(result.prependSystemContext, /validate_requirement has a mandatory argument-repair loop/);
+    assert.match(result.prependSystemContext, /INVALID_INPUT.*CANONICAL_INPUT_CONFLICT.*BLOCKED_REQUIREMENT_AUDIT_CONFLICT/);
+    assert.match(result.prependSystemContext, /Repeat for each newly reported deterministic argument conflict until the Tool succeeds/);
+    assert.match(result.prependSystemContext, /do not ask the user, wait for “继续”, or stop merely because the Agent built invalid Tool arguments/);
+    assert.match(result.prependSystemContext, /argument-repair loop never applies to a timeout, connection error, integration\/schema incompatibility/);
+    assert.match(result.prependSystemContext, /Outside that exception.*details\.status="blocked" gets no automatic retry/);
     assert.match(result.prependSystemContext, /reinterpret one identifier as another lookup mode/);
     assert.match(result.prependSystemContext, /including timeout_seconds/);
     assert.match(result.prependSystemContext, /Never end a recoverable failure with a plain “blocked” paragraph/);

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { after, before, describe, it } from "node:test";
 
 import { createYpmcnPlugin } from "../dist/index.js";
+import { beginPromptTurn } from "../dist/runtime-hooks.js";
 
 const rootDir = mkdtempSync(join(tmpdir(), "ypmcn-public-hook-regression-"));
 const hooks = new Map();
@@ -100,7 +101,7 @@ async function guard(toolName, params) {
 }
 
 function authoritativePayload(result) {
-  const marker = "YPmcn authoritative validate_requirement arguments (use this object exactly; do not rebuild any field or audit atom):\n";
+  const marker = "YPmcn authoritative initial validate_requirement arguments (use this object exactly for the first call; after a deterministic argument rejection, preserve confirmed facts and follow the same-turn repair loop):\n";
   return JSON.parse(result.prependContext.slice(result.prependContext.indexOf(marker) + marker.length).split("\n", 1)[0]).payload;
 }
 
@@ -182,6 +183,56 @@ describe("requirement behavior through public plugin hooks", () => {
     const persisted = readFileSync(join(rootDir, "state", "confirmation_guard.json"), "utf8");
     assert.match(persisted, /"payload_fingerprint": "[0-9a-f]{64}"/);
     assert.doesNotMatch(persisted, /阿里巴巴|千问61儿童节|返点：25%以上/);
+  });
+
+  it("accepts a corrected Ready Preview payload after a deterministic local argument denial", async () => {
+    const invalid = qwenPayload({ contentForm: "图文" });
+    invalid.rawMessagesJson.originalBrief += "\n内容形式：图文";
+    invalid.rawMessagesJson.atoms.push(mapped("内容形式：图文", "contentForm"));
+    invalid.rawMessagesJson.coverageCheck = {
+      atomCount: 13, mappedCount: 12, preservedCount: 1, unresolvedCount: 0,
+    };
+    beginPromptTurn(rootDir, { gate: "ready" }, invalid);
+
+    const blocked = await guard("mcp__ypmcn__validate_requirement", { payload: invalid });
+    assert.equal(blocked.block, true);
+    assert.match(blocked.blockReason, /(?:INVALID_INPUT|BLOCKED_REQUIREMENT_INCOMPLETE).*contentForm/);
+    assert.match(blocked.blockReason, /REQUIREMENT_ARGUMENT_CORRECTION_REQUIRED/);
+    assert.equal(blocked.correctionRequired, true);
+    assert.equal(blocked.retrySameTurn, true);
+
+    const corrected = structuredClone(invalid);
+    delete corrected.contentForm;
+    corrected.rawMessagesJson.atoms[12] = {
+      sourceText: "内容形式：图文",
+      disposition: "preserved",
+      preservedText: "内容形式：图文",
+      confidence: 1,
+      inferred: false,
+    };
+    corrected.rawMessagesJson.coverageCheck = {
+      atomCount: 13, mappedCount: 11, preservedCount: 2, unresolvedCount: 0,
+    };
+    assert.equal(await guard("mcp__ypmcn__validate_requirement", { payload: corrected }), undefined);
+  });
+
+  it("accepts another corrected validate_requirement call after Provider input rejection", async () => {
+    const payload = qwenPayload();
+    beginPromptTurn(rootDir, { gate: "ready" }, payload);
+    assert.equal(await guard("mcp__ypmcn__validate_requirement", { payload }), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload },
+      result: {
+        success: false,
+        data: null,
+        error: { code: "CANONICAL_INPUT_CONFLICT", message: "audit atoms must use canonical order" },
+      },
+    }, {});
+
+    const corrected = structuredClone(payload);
+    corrected.rawMessagesJson.atoms.reverse();
+    assert.equal(await guard("mcp__ypmcn__validate_requirement", { payload: corrected }), undefined);
   });
 
   it("requires search_creators.id to equal the latest successful validate_requirement.data.id", async () => {

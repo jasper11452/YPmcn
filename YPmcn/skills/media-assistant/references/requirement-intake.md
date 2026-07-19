@@ -22,3 +22,7 @@
 - 每个 atom 只映射一个真实字段或逐字 preserved；`sourceText` 必须非空，可引用原始 Brief 或本轮 AskUserQuestion 的明确补充答案，不能为了满足审计而篡改 `originalBrief`。`rawMessagesJson` 保存完整原文、非空 atoms 与计数一致且 `unresolvedCount=0` 的 coverage。
 
 `ready` 时展示并原样调用 `{"payload": {..., "status": "ready"}}`。新建省略 `id/demandVersion`；补充版本只沿用上一成功响应的 `demandId`。仅实际返回成功、需求主键、`status=ready`、`workflow_state` 和 `allowed_actions` 后推进；未知写结果先对账。
+
+## 参数自修复
+
+若 Hook 或 Provider 明确返回字段、类型、范围、映射、canonical input 或审计计数冲突，且用户已确认内容能唯一确定正确参数，说明本次没有形成成功写入。保持 `originalBrief` 和所有已确认业务语义不变，只修报错位置并在同一轮重新调用 `validate_requirement`；后续出现新的确定性参数错误就继续修，直到实际成功。不得把 Agent 的解析或序列化错误转嫁为用户确认，也不得要求用户发送“继续”。只有修复需要用户输入中不存在的业务选择时才弹一次参数确认；超时、连接错误、服务端通用错误和写结果未知不进入本循环。

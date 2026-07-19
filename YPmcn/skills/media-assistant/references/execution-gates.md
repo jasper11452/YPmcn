@@ -22,4 +22,4 @@
 - 外发成功后按实际返回身份执行 `sync → ingest_mcn_submissions → sync`；无真实回收 items 不 ingest，不轮询。只有真实外发、全部回收和 `candidate_pool_enriched` 才可 `rank_creators`。
 - 详情 Tool 只读且不推进流程；`audit_manual_adjustment` 仅用于有操作者和原因的明确人工调整。批次成功后才导出；客户有具体反馈后才记录，不猜状态。
 
-Hook 的 `before_tool_call`、`after_tool_call`、`session_end` 只做无会话依赖的安全守卫，不推进数据库 phase，也不记录完整 payload。任何 `block=true` 或 `details.status="blocked"` 都立即停止；只有实际远程 response/trace 才能归因 MCP/Provider。
+Hook 的 `before_tool_call`、`after_tool_call`、`session_end` 只做无会话依赖的安全守卫，不推进数据库 phase，也不记录完整 payload。除 `validate_requirement` 可由已确认信息唯一修正的参数校验阻断必须同轮修正重调外，任何 `block=true` 或 `details.status="blocked"` 都立即停止；只有实际远程 response/trace 才能归因 MCP/Provider。

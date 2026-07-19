@@ -2,6 +2,7 @@ import { validateToolParams } from "./contract/validator.js";
 import {
   guardValidateRequirement,
   readyRequirementFailure,
+  recordReadyRequirementCorrection,
   settleReadyRequirement,
 } from "./runtime-hook-requirement.js";
 import {
@@ -37,7 +38,7 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
   const current = store(rootDir);
   const promptGateFailure = promptRequirementGate(raw, input, current);
   if (promptGateFailure) return promptGateFailure;
-  const readyFailure = readyRequirementFailure(tool, input, current);
+  const readyFailure = readyRequirementFailure(tool, input, current, isAskTool(raw));
   if (readyFailure) return readyFailure;
   if (SHELL_TOOLS.has(raw.toLowerCase())) {
     const command = [input.command, input.cmd, input.script, input.input].filter(text).join("\n");
@@ -51,11 +52,14 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
   const issues = validateToolParams(tool, input);
   if (issues.length > 0) {
     const first = issues[0];
-    return denyStructured(first.code, `${first.path}: ${first.message}`);
+    const failure = denyStructured(first.code, `${first.path}: ${first.message}`);
+    return tool === "validate_requirement"
+      ? recordReadyRequirementCorrection(input, current, failure)
+      : failure;
   }
   if (tool === "validate_requirement") {
     const requirementFailure = guardValidateRequirement(input, current);
-    if (requirementFailure) return requirementFailure;
+    if (requirementFailure) return recordReadyRequirementCorrection(input, current, requirementFailure);
   }
   return guardWorkflowTool(event, tool, input, current, rootDir);
 }

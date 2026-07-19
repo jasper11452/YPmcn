@@ -12,8 +12,8 @@ description: "Use for YPmcn requirement validation, sourcing, distribution, rank
 - 以根 `spec/manifest.json` 指向的正式契约和运行时 `tools/list` 为准；只传 live schema 声明的字段。必需 Tool 缺失、契约冲突或证据不足即 `integration_required`。
 - `workflow_state` 与 `allowed_actions` 是状态权威。连续步骤复用实际成功响应；仅在接手、上下文丢失、冲突、写结果未知或不可逆外发前查询状态。
 - 逐项核对 ID 血缘，只复制当前工作流中实际成功响应或已验证状态返回的 ID；不得猜测、串用或用虚构 ID 探测详情。
-- 只有实际 MCP 返回算成功证据。普通失败不改参数、不换 Tool、不自动重试；写结果未知先对账。`recovered`、`closed` 后不得重复写入。
-- Hook 任意阻断后立即停止，不改写 payload、ID 或已映射字段。`details.deniedReason="plugin-before-tool-call"` 表示未到 MCP/Provider；没有远程证据时来源写“未知”。用户要求失败即停时绝不重试。
+- 只有实际 MCP 返回算成功证据。`validate_requirement` 参数校验失败且用户已确认信息足以唯一修复时，保持原始需求语义，只修报错字段、序列化、映射或审计计数，并在同一轮持续重新调用直到成功；需要新增业务选择时才询问。普通服务失败不改参数、不换 Tool、不自动重试，写结果未知先对账；`recovered`、`closed` 后不得重复写入。
+- 除上述 `validate_requirement` 参数自修复外，Hook 任意阻断后立即停止，不改写 payload、ID 或已映射字段。`details.deniedReason="plugin-before-tool-call"` 表示未到 MCP/Provider；没有远程证据时来源写“未知”。用户要求失败即停时绝不重试。
 
 ## 主链
 
