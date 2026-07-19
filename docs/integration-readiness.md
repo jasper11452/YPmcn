@@ -85,7 +85,7 @@ npm run verify:provider:prod
 | 机构权威来自 `core_supplier` | `development-observed` 快照 | 当前 FK/唯一键和真实 supplier 映射样本 |
 | 单达人预算不污染项目总预算 | 当前 MCP proxy 未强制 | validate 集成测试及历史数据核查 |
 | 11 个写 Tool 持久化幂等 | 真实 ledger 仍为 0 行；独立后端工作树已接入 10 个本地写入口和外部创建入口，覆盖同 key 重放、hash 冲突、回滚及 unknown 禁止重试 | 部署后真实 ledger 行、并发和断线对账测试 |
-| sync 读取发送方并维护 inquiry | `core_project/core_distribution/core_notificationlog` 查询已在真实库只读执行；本地源码按推荐项 `item_id + attempt_no` upsert inquiry，重复 sync 单测通过 | 部署后真实 project/supplier 首次 sync、回收再 sync 与跨 session 恢复 |
+| sync 读取发送方并维护 inquiry | `core_project/core_distribution/core_notificationlog` 查询已在真实库只读执行；本地源码按推荐项 `mcn_recommendation_id + attempt_no` upsert inquiry，重复 sync 单测通过 | 部署后真实 project/supplier 首次 sync、回收再 sync 与跨 session 恢复 |
 
 本次已保存等价的 `information_schema.COLUMNS/STATISTICS` 只读证据。当前最小实现没有改任何表：本地事务直接复用 ledger，外部创建转发稳定 `Idempotency-Key`，超时记为 unknown 且不盲重发。由于外部 API 文档未承诺持久化该键，完整外部 exactly-once 仍需其接受并按键查询；不修改已敲定的 `customer_demands` 或 `field_match_mapping`。
 

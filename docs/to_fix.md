@@ -2,14 +2,15 @@
 
 > 测试日期：2026-07-18  
 > 环境：OpenClaw + YPmcn 3.0.8  
-> 说明：本文件只保留尚未修复或仅部分修复的问题；已经完成并有源码、测试或实机证据的问题已删除。
+> 说明：本文件以 2026-07-19 最新 Live E2E 为准；已修复项只在仍影响复测边界时保留证据。
 
 ## 当前阻塞项
 
 1. `search_creators` 仍出现 `vector_config_missing`，价格放宽到 `[0,99999999]` 后仍匹配不到达人。
-2. 搜索响应、恢复状态和 Hook 判断不一致，风险、门禁和状态版本没有形成权威闭环。
-3. OpenClaw 暴露 resources/prompts，但插件正式契约只允许 15 个业务 Tool。
-4. Provider 写入前没有校验业务 ID 是否真实存在、互相关联，也没有完整的服务端幂等与对账保护。
+2. Provider 代码与 `mcn_recommendation_items` 实际表结构漂移，MCN 排名、状态恢复和达人精排均被未知列错误阻断。
+3. 搜索响应、恢复状态和 Hook 判断不一致，风险、门禁和状态版本没有形成权威闭环。
+4. OpenClaw 暴露 resources/prompts，但插件正式契约只允许 15 个业务 Tool。
+5. Provider 写入前没有校验业务 ID 是否真实存在、互相关联，也没有完整的服务端幂等与对账保护。
 
 Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provider 和数据库侧修复。
 
@@ -20,6 +21,7 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 | 问题 | 状态 | 当前证据 | 剩余问题 | 处理方式 |
 |---|---|---|---|---|
 | Gateway 协议不匹配 | 暂不修 | `GatewayClientRequestError: protocol mismatch`；用户 PATH 中 OpenClaw 为 `2026.6.6`，18789 端口 Gateway 使用不同协议版本 | 用户手工环境仍可能无法通过 Gateway 模式运行 | OpenClaw 只用于测试时使用可工作的隔离 CLI/模式；正式使用前统一 CLI 与 Gateway 版本 |
+| YP Action 安装原生 Plugin 时不导入包内 MCP | 宿主待修，当前显式配置 | 2026-07-19 在无预存 MCP 的 YP Action `2026.7.1` 安装 YPmcn `3.1.5`：Plugin/Skill 成功，安装目录含 `.mcp.json`，但 MCP Store 不自动增加服务；显式创建 `ypmcn-mcp` 后 Gateway 加载成功 | YP Action 安装器没有读取 `.mcp.json`，也没有 Plugin 与 MCP 的更新、卸载归属 | 宿主实现经过校验的导入/更新/卸载；修复前按《高效联调测试指南》§4.1 显式创建，禁止 Plugin 安装脚本或直改 SQLite |
 | 默认模型鉴权失败 | 未修复，测试已绕过 | `HTTP 401 invalid_api_key`；原模型 `openai/gpt-5.5` | 默认 OpenAI 凭证仍失效 | 测试暂用 `deepseek/deepseek-v4-flash`；正式环境更新凭证或默认模型配置 |
 | 插件信任来源不明确 | 暂不修 | 手工环境曾报告 `plugins.allow is empty`、`loaded without install/load-path provenance` | 用户手工安装环境没有统一的 allowlist 和可审计安装来源 | 正式部署时补 `plugins.allow` 并统一安装来源；仓库自动 smoke 的隔离安全基线不能替代手工环境配置 |
 | 标准 Brief 确认前调用宿主/非契约工具 | 待修 | 三次独立解析中有一次先调用宿主 `read`，随后调用 `prompts_get(name="AskUserQuestion")` 并被 Hook 返回 `INTEGRATION_REQUIRED` | injected fast path 没有稳定阻止 Agent 读取 Skill 或把宿主原生 AskUserQuestion 误当成 MCP prompt capability，未满足确认前零 Tool 调用 | 标准 Brief 直接使用 injected fast path；禁止读取 Skill、调用 resources/prompts 或其他 Tool；需要弹窗时只用宿主原生 AskUserQuestion |
@@ -41,6 +43,10 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 |---|---|---|---|---|
 | 手工 OpenClaw 环境安全审计未通过 | 手工环境待处理 | 历史 deep audit：`critical=1, warn=5, info=1`；仓库隔离 smoke 已达到 `summary.critical=0` | 自动测试安全基线不会修改用户全局认证、trusted proxies、插件来源和工具策略 | 在目标手工/正式环境单独配置并复跑 deep audit |
 | Capability 与正式 allowlist 不一致 | 待修 | `resources_list`、`prompts_list`、`prompts_get` 返回 `INTEGRATION_REQUIRED: Tool ... is not declared by the target contract` | MCP initialize 暴露的 capability、宿主 wrapper、`spec/mcp.json` 和 Hook allowlist 不是同一契约来源 | 不支持时停止注册对应 capability/wrapper；支持时增加独立 capability 契约和测试 |
+| YP Action 的 Ask 确认结果形状未被 Hook 识别 | 已修复 | 3.1.5 Live E2E 中，宿主返回“完整问题文本: 确认供给方案”后 Hook 正确识别，并在同一轮调用 `rank_mcns`；回归同时覆盖结构化与扁平结果、拒绝和超时 | Provider 后端错误仍可能让业务链停止，但不会再把用户确认误判为拒绝 | 保留 marker、同指纹、固定选项和尾部精确标签校验，禁止模糊肯定词授权 |
+| 需求确认弹窗不换行、术语过多 | 已修复 | 3.1.9 已安装并启用；只读 Live 会话 `457f15e0-ff39-4818-a46e-e25e676571aa` 一次渲染三题向导，问题均为简短单句，选项带说明并提供“其他”输入；价格题完整显示项目总预算与 L1/L2/L3 四项，未被 Hook 拦截或隐式重建 | 供给/外发属于绑定确认，仍使用带内部 marker 的独立紧凑模板 | 保留 2–4 个独立业务选项、单句问题和宿主结果形状回归；新增问题不得恢复长摘要或内部术语 |
+| 明确的 L1 官方报价被误判为缺失 | 已修复 | 3.1.6 解析器接受“单达人 L1 官方报价：4万元以内”，直接映射 `kolOfficialPriceL1=[0,40000]`，明确截止同时保持 `2026-07-20 18:00:00`；安装后只读 UI 会话 `55d827cc-9d13-41f8-8c5d-93164e875abd` 复测为 ready 且未弹窗 | 未覆盖的新自然语言写法仍应 fail closed | 保留原文 atom 和确定性解析回归；仅对明确档位映射 |
+| 未绑定真实数据的供给确认可被模型直接弹出 | 已修复 | 3.1.6 会拒绝无 `[YP_SUPPLY_PLAN_CONFIRMATION:...]` marker 的“供给确认/确认供给方案”弹窗；同一只读 UI 会话实测在弹窗显示前返回 `BLOCKED_CONFIRMATION_MISMATCH` | Provider 仍需返回完整十字段，OpenClaw 长结果仍可能截断 | 供给确认只能由 `rank_mcns` Hook 基于同 requirement、同请求指纹和已存 plan 生成 |
 
 ### Hook 不能替代的 Provider 校验
 
@@ -54,9 +60,10 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 
 | 问题 | 状态 | 当前证据 | 剩余问题 | 处理方式 |
 |---|---|---|---|---|
-| `search_creators` 供给方案字段不全 | 部分修复 | Skill/Hook 已要求并校验完整供给方案；生产响应曾缺少 `target_submission_count`、`estimated_valid_return_count`、`estimated_gap_count`、`recommended_mcn_count`、`mcn_covered_creator_count` | 消费端可以 fail closed，但不能让 Provider 返回缺失字段；`search_creators` 正式输出仍是开放对象 | Provider 返回全部十个供给字段，并在 `spec/mcp.json` 中建立可验证的正式输出 schema |
+| `search_creators` 供给方案字段不全 | 部分修复，Live E2E 阻塞 | 最新需求 `1784430089674707` 返回真实候选 377、需求 1、供给倍数 377、5 家机构，trace `41318ff4-48dc-4440-9f3b-9cd04ea954b1`；受控核验 trace `6d0bdc7d-7ab6-4471-9696-70a0177f7598`，仍缺五个计划字段 | 本次仅按用户授权用明确标记的 `synthetic_test_only` 数值隔离下一故障，不是生产修复 | Provider 返回全部十个供给字段并声明输出 schema；部署后用全新项目重跑 |
+| 排名与状态工具使用不存在的 MCN 推荐列 | P0，Live E2E 阻塞 | 最新 3.1.5 UI 链已完成真实需求写入、搜索和绑定确认；`rank_mcns` 随后仍因 pymysql 未知列 `mcn_run_id` 返回 `INTERNAL_ERROR`，trace `728bc307-dcd9-46cc-aa4e-4a44e92a22e4`，并通过原生“服务异常”弹窗安全结束 | Provider ORM/SQL 与实际数据库迁移版本不一致；未生成排名，不能继续企微外发 | 对齐迁移、ORM 和实际表，补 schema 启动检查与事务回滚测试，再用新测试需求单次重跑 |
 | resources 契约不一致 | 待修 | Probe 显示 `resources: true`，调用 `resources_list` 却不在正式契约中 | 宿主宣告可用，插件又拒绝调用 | 不支持就停止暴露；支持就补 resources capability 契约、wrapper 和测试 |
-| 字段选择器地址不可达 | 待修 | `select_inquiry_form_fields` 到达 MCP 后返回 `success=false`；页面为 `http://127.0.0.1:8000/demand-field-selector` | 远程 MCP 返回的回环地址指向宿主本机，而宿主没有该页面 | 使用可配置且可访问的 URL，或返回字段 schema 让宿主渲染原生表单 |
+| 字段选择器地址不可达 | 待修 | 2026-07-19 受控直连再次返回 `success=false`；页面仍为 `http://127.0.0.1:8000/demand-field-selector`，实时工具描述也只声明“打开网页并等待提交” | 远程 MCP 返回的回环地址指向宿主本机，既没有可访问页面，也没有可供宿主安全生成 `columns` 的字段清单 | 使用可配置且可访问的 URL，或返回字段 schema 让宿主渲染原生表单 |
 | `run_id` 类型未闭环 | 待生产确认 | 本地契约当前只接受正整数字符串；虚构 ID 分别出现 `INVALID_INPUT`、`INVALID_FILTER_VALUE`、`RUN_NOT_FOUND` | 本地校验与 provenance 已完成，但尚无真实成功 `rank_creators.run_id` 证明上游类型 | 用真实成功响应统一 Provider、Spec、Hook 和下游工具类型 |
 | prompts 契约不一致 | 待修 | `prompts_list`、`prompts_get` 不在正式契约中 | 与 resources 相同，capability 宣告和可调用面不一致 | 不支持就停止暴露；支持就补 prompts capability 契约、wrapper 和测试 |
 
@@ -71,6 +78,7 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 
 | 问题 | 优先级 | 当前证据 | 剩余问题 | 处理方式 |
 |---|---|---|---|---|
+| `mcn_recommendation_items` Schema 漂移 | P0 | `rank_mcns` 只读排序成功，证明计算路径可用；INSERT 仍需要实际表不存在的 `mcn_run_id`，`get_workflow_state`、`rank_creators` SELECT 需要不存在的 `item_id`；trace 见上节 | MCN 排名不能持久化、工作流不能恢复、达人精排不能开始；失败写入是否已完整回滚也无法由当前状态工具核验 | 先核对生产 migration head 和实际 `SHOW CREATE TABLE`，统一列名/主键/外键，再增加启动期 schema compatibility check 与事务回滚断言 |
 | 向量配置缺失、硬筛为 0 | P0 | `vector_config_missing`、`total_matched=0`、`supply_risk_level="high_risk"`；价格排除 443 条、返点排除 283 条 | 生产搜索没有可用向量配置，硬筛又把现有供给全部排除 | 检查向量配置，并核对报价、返点字段的数据分布和业务口径 |
 | 宽价格仍排除全部达人 | P0 | `kolOfficialPriceL1="[0,99999999]"` 仍产生 `FIELD_NOT_MATCHED:kolOfficialPriceL1`（443 条）和 `total_matched=0` | 很可能存在字段缺失、单位/格式不一致或范围比较逻辑错误 | 抽样检查真实值、NULL 比例、人民币单位和比较方向，并区分字段缺失与超出范围 |
 | 搜索响应没有权威工作流状态 | P0 | `success=true`、`candidate_pool_written=true`，但 `workflow_state=null`、`allowed_actions=[]` | 写池响应没有返回与数据库一致的 phase、state version 和 allowed actions | 所有成功写池响应返回同一事务提交后的唯一状态快照；0 候选明确返回 blocked/high-risk |
@@ -88,6 +96,8 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 ### 数据处理说明
 
 - `sync_id=1` 是错误测试记录；当前没有安全删除契约，因此未擅自清理，也未用于后续测试。
+- 2026-07-19 的 `rank_mcns` 只直连调用一次，收到数据库错误后未重试；由于 `get_workflow_state` 同样受 Schema 漂移阻断，必须由 Provider 日志/数据库事务记录核对该失败写入是否完整回滚。
+- 后续合成供给方案只用于验证 `rank_mcns(write_mcn_recommendation_items=false)`；测试后确认状态已清空。该成功响应返回的 `mcn_run_id=0ca789b7d3ba4261a15e9b34c7fa3cf2` 没有持久化，禁止传给任何下游工具。
 - `get_workflow_state` 能派生 `candidate_pool_ready` 不代表状态正确；风险、门禁和 state version 仍必须与搜索事务一致。
 - `manual_source_creators` 使用真实 requirement ID 到达远程 MCP 后返回 `INQUIRY_NOT_FOUND`（trace `48f2a61b-2c19-4b85-b391-630adfa094ff`），未重试、无写入。
 
@@ -97,14 +107,15 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 
 | 顺序 | 要修什么 | 验收标准 |
 |---|---|---|
-| 1 | 修复宽价格仍为 0，并补齐向量配置 | 宽范围能命中符合条件的真实达人；向量可用或按契约明确降级，排除原因可解释 |
-| 2 | 修复搜索写池、风险门禁和状态版本的原子持久化 | 搜索响应与随后 `get_workflow_state` 的 phase、risk、pending gate、version、allowed actions 完全一致 |
-| 3 | Provider 增加服务端 ID 完整性和幂等校验 | 不存在、跨需求或无关联 ID 均无法写入；重复请求不会产生重复记录 |
-| 4 | 补齐并正式声明 `search_creators` 供给方案输出 | 十个供给字段均由 Provider 返回并通过输出 schema/契约测试 |
-| 5 | 统一 resources/prompts 与正式契约 | initialize capability、宿主 wrapper、Spec 和 Hook allowlist 来自同一声明且调用结果一致 |
-| 6 | 修复字段选择器 URL | 目标宿主可实际打开页面，或能用返回 schema 渲染原生表单 |
-| 7 | 用真实成功链路闭环 `run_id` 类型 | `rank_creators` 真实返回值能通过 Spec、Hook 和全部下游工具 |
-| 8 | 引入确定性 requirement 解析/预览 | taxonomy、targetField、atom 明细、gate 和 summary 在重复运行中稳定一致，标准 Brief 确认前不调用任何 Tool |
+| 1 | 对齐 `mcn_recommendation_items` 迁移、ORM 和实际表 | `rank_mcns` 可原子落库，`get_workflow_state` 与 `rank_creators` 不再出现未知列；失败事务有可验证回滚 |
+| 2 | 修复宽价格仍为 0，并补齐向量配置 | 宽范围能命中符合条件的真实达人；向量可用或按契约明确降级，排除原因可解释 |
+| 3 | 修复搜索写池、风险门禁和状态版本的原子持久化 | 搜索响应与随后 `get_workflow_state` 的 phase、risk、pending gate、version、allowed actions 完全一致 |
+| 4 | Provider 增加服务端 ID 完整性和幂等校验 | 不存在、跨需求或无关联 ID 均无法写入；重复请求不会产生重复记录 |
+| 5 | 补齐并正式声明 `search_creators` 供给方案输出 | 十个供给字段均由 Provider 返回并通过输出 schema/契约测试 |
+| 6 | 统一 resources/prompts 与正式契约 | initialize capability、宿主 wrapper、Spec 和 Hook allowlist 来自同一声明且调用结果一致 |
+| 7 | 修复字段选择器 URL | 目标宿主可实际打开页面，或能用返回 schema 渲染原生表单 |
+| 8 | 用真实成功链路闭环 `run_id` 类型 | `rank_creators` 真实返回值能通过 Spec、Hook 和全部下游工具 |
+| 9 | 引入确定性 requirement 解析/预览 | taxonomy、targetField、atom 明细、gate 和 summary 在重复运行中稳定一致，标准 Brief 确认前不调用任何 Tool |
 
 ## 与开发需求清单的对应关系
 

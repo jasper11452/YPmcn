@@ -304,9 +304,20 @@
       ]
     },
     "mcn_recommendation_items": {
-      "rowCountObserved": 116,
+      "rowCountObserved": 0,
       "primaryKey": [
-        "item_id"
+        "mcn_recommendation_id"
+      ],
+      "comment": "rank_mcns 输出的逐 MCN 排序结果，包含供需关系、建议手扒比例和建议询价列表",
+      "columns": [
+        { "name": "mcn_recommendation_id", "type": "char(32)", "key": "PRI", "comment": "当前MCN推荐主键" },
+        { "name": "mcn_run_id", "type": "char(32)", "comment": "本次推荐批次ID" },
+        { "name": "requirement_id", "type": "char(32)", "comment": "需求ID，外键关联 customer_demands" },
+        { "name": "supplier_id", "type": "char(32)", "comment": "供应商ID，外键关联 core_supplier" },
+        { "name": "mcn_covered_creator_count", "type": "int", "comment": "可覆盖达人数量" },
+        { "name": "rank_no", "type": "int", "comment": "排序名次" },
+        { "name": "recommend_reason", "type": "text", "comment": "推荐原因" },
+        { "name": "created_at", "type": "datetime", "comment": "创建时间" }
       ]
     },
     "mcn_inquiries": {

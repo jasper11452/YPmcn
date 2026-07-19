@@ -57,6 +57,17 @@ const supplyPlan = (overrides = {}) => ({
   ...overrides,
 });
 
+const requirementQuestion = (_confirmed, pending) => `${pending}？`;
+
+const requirementOption = (label, description = "选择后按此信息继续") => ({ label, description });
+
+const supplyPlanQuestion = (id, plan) => [
+  `【真实数据】需求人数=${plan.demand_count}｜候选达人=${plan.database_candidate_count}｜供给倍数=${plan.supply_demand_ratio}`,
+  `【计算计划】目标提报=${plan.target_submission_count}｜预计有效=${plan.estimated_valid_return_count}｜预计缺口=${plan.estimated_gap_count}`,
+  `【推荐组合】推荐MCN=${plan.recommended_mcn_count}｜MCN覆盖达人=${plan.mcn_covered_creator_count}｜人工补充=${plan.recommended_manual_creator_count}｜MCN人工比例=${plan.mcn_manual_creator_ratio}｜建议手扒占比=${Number((plan.recommended_manual_creator_count / (plan.mcn_covered_creator_count + plan.recommended_manual_creator_count) * 100).toFixed(2))}%`,
+  `【影响】确认后写入MCN排序${id ? `｜[YP_SUPPLY_PLAN_CONFIRMATION:${id}]` : ""}`,
+].join("\n");
+
 before(() => {
   mkdirSync(dirname(templateFile), { recursive: true });
   copyFileSync(fileURLToPath(new URL("../skills/media-assistant/assets/wecom_inquiry_template.txt", import.meta.url)), templateFile);
@@ -91,20 +102,17 @@ async function requestConfirmation(params = distributionParams()) {
   return { id: confirmationId(blocked), params };
 }
 
-async function answerConfirmation(id, answer = "确认发送") {
+async function answerConfirmation(id, answer = "确认发送", flattened = false) {
   const state = JSON.parse(readFileSync(stateFile, "utf8"));
   const summary = state.confirmations[id].safe_summary;
   const params = {
     questions: [{
       question: [
-        `外发确认。[YP_CONFIRMATION:${id}]`,
-        `project_name=${summary.project_name}`,
-        `supplier_count=${summary.supplier_count}`,
-        `deadline=${summary.deadline}`,
-        `column_names=${JSON.stringify(summary.column_names)}`,
-        `message_template_id=${summary.message_template_id}`,
-        `message_template_sha256=${summary.message_template_sha256}`,
-      ].join("；"),
+        `【外发对象】项目名=${summary.project_name}｜机构数=${summary.supplier_count}`,
+        `【外发内容】截止时间=${summary.deadline}｜表单字段=${JSON.stringify(summary.column_names)}`,
+        `【固定模板】消息模板=${summary.message_template_id}`,
+        `【影响】确认后真实企微外发｜[YP_CONFIRMATION:${id}]`,
+      ].join("\n"),
       options: [{ label: "确认发送" }, { label: "需要修改" }],
     }],
   };
@@ -112,19 +120,18 @@ async function answerConfirmation(id, answer = "确认发送") {
   await hooks.get("after_tool_call")({
     toolName: "AskUserQuestion",
     params,
-    result: { status: "submitted", answers: [{ selected_labels: [answer] }] },
+    result: flattened
+      ? `${params.questions[0].question}: ${answer}`
+      : { status: "submitted", answers: [{ selected_labels: [answer] }] },
   }, {});
 }
 
-async function answerSupplyPlanConfirmation(id, answer = "确认供给方案") {
+async function answerSupplyPlanConfirmation(id, answer = "确认供给方案", flattened = false) {
   const state = JSON.parse(readFileSync(stateFile, "utf8"));
   const plan = state.confirmations[id].safe_summary;
   const params = {
     questions: [{
-      question: [
-        `供给方案。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
-        ...Object.entries(plan).map(([field, value]) => `${field}=${value}`),
-      ].join("；"),
+      question: supplyPlanQuestion(id, plan),
       options: [{ label: "确认供给方案" }, { label: "调整方案" }],
     }],
   };
@@ -132,7 +139,9 @@ async function answerSupplyPlanConfirmation(id, answer = "确认供给方案") {
   await hooks.get("after_tool_call")({
     toolName: "AskUserQuestion",
     params,
-    result: { status: "submitted", answers: [{ selected_labels: [answer] }] },
+    result: flattened
+      ? `${params.questions[0].question}: ${answer}`
+      : { status: "submitted", answers: [{ selected_labels: [answer] }] },
   }, {});
 }
 
@@ -244,23 +253,37 @@ describe("YP Action native hook guard", () => {
     assert.match(result.prependSystemContext, /INVALID_INPUT\/INTEGRATION_REQUIRED/);
     assert.match(result.prependSystemContext, /reinterpret one identifier as another lookup mode/);
     assert.match(result.prependSystemContext, /including timeout_seconds/);
+    assert.match(result.prependSystemContext, /Never end a recoverable failure with a plain “blocked” paragraph/);
+    assert.match(result.prependSystemContext, /title it “服务异常”/);
+    assert.match(result.prependSystemContext, /“查询状态” and “停止”/);
+    assert.match(result.prependSystemContext, /never ask the user to type “继续”/);
     assert.match(result.prependSystemContext, /Do not read mcporter or another Skill/);
   });
 
   it("accepts complete requirement clarification answers from native host result shapes", async () => {
     const questions = ["平台", "数量", "预算"].map((field) => ({
-      header: "需求确认",
-      question: `已确认：其余字段；需确认：${field}；影响：决定需求是否可写入。`,
-      options: [{ label: `${field}选项A` }, { label: `${field}选项B` }],
+      header: `${field}选择`,
+      question: requirementQuestion("其他信息无误", `${field}采用哪个选项`),
+      multiSelect: false,
+      options: field === "预算"
+        ? ["项目总预算", "单人图文", "单人视频", "单人长视频"].map((label) => requirementOption(label))
+        : [requirementOption(`${field}选项A`), requirementOption(`${field}选项B`)],
     }));
     const answerArray = questions.map((question) => ({ selected_labels: [question.options[0].label] }));
     const answerMap = Object.fromEntries(questions.map((question) => [question.question, question.options[0].label]));
     const resultShapes = [
       { status: "submitted", answers: answerArray },
+      {
+        status: "submitted",
+        answers: questions.map((question, index) => index === 2
+          ? { answer: "用户输入的自定义预算" }
+          : { selected_labels: [question.options[0].label] }),
+      },
       { status: "submitted", answers: answerMap },
       { result: { status: "submitted", answers: answerMap } },
       { structuredContent: { status: "submitted", answers: answerMap } },
       { content: [{ text: JSON.stringify({ status: "submitted", answers: answerMap }) }] },
+      questions.map((question) => `${question.question}: ${question.options[0].label}`).join("\n"),
     ];
 
     for (const result of resultShapes) {
@@ -279,9 +302,10 @@ describe("YP Action native hook guard", () => {
     await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     const params = {
       questions: [{
-        header: "需求确认",
-        question: "已确认：平台；需确认：数量；影响：决定需求是否可写入。",
-        options: [{ label: "5位" }, { label: "10位" }],
+        header: "达人数量",
+        question: requirementQuestion("推广平台为小红书", "需要5位还是10位达人"),
+        multiSelect: false,
+        options: [requirementOption("5位达人"), requirementOption("10位达人")],
       }],
     };
     assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
@@ -296,6 +320,108 @@ describe("YP Action native hook guard", () => {
     }, {});
     assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
     assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
+  });
+
+  it("keeps a denied native clarification pending", async () => {
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
+    const params = {
+      questions: [{
+        header: "报价口径",
+        question: requirementQuestion("平台和人数无误", "4万元是单达人报价吗"),
+        multiSelect: false,
+        options: [requirementOption("是单达人报价"), requirementOption("是项目总预算")],
+      }],
+    };
+    assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "AskUserQuestion",
+      params,
+      result: "User denied the operation.",
+    }, {});
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload() },
+    }, {});
+    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
+  });
+
+  it("rejects a dense one-paragraph requirement popup", async () => {
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: {
+        questions: [{
+          header: "需求确认",
+          question: "已确认: brandName=悦普测试, product=YP Action, platform=xiaohongshu, projectStartStart=2026-07-30 00:00:00, projectStartEnd=2026-07-31 23:59:59。需确认: quantityTotal=1、submissionDeadlineAt=2026-07-20 18:00:00、creatorPriceTier=L1 [0,40000]。影响: 当前 gate=missing_required，三项全部确认前不得调用任何 Tool。",
+          options: [{ label: "三项全部确认" }, { label: "需要修改" }],
+        }],
+      },
+    }, {});
+    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CONFIRMATION_MISMATCH/);
+    assert.match(blocked.blockReason, /one direct/);
+  });
+
+  it("rejects a source-formatted requirement popup that still becomes too long when host whitespace collapses", async () => {
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: {
+        questions: [{
+          header: "需求确认",
+          question: [
+            "【已确认】品牌=悦普测试、产品=YP Action、平台=xiaohongshu、档期=2026-07-30 00:00:00至2026-07-31 23:59:59、提报截止=2026-07-20 18:00:00、L1报价=[0,40000]",
+            "【需确认】达人数量=1、提报截止时间、官方报价层级",
+            "【影响】三项全部确认前不得调用任何业务工具，确认后才继续校验需求并写入数据库",
+          ].join("\n"),
+          options: [{ label: "三项全部确认" }, { label: "需要修改" }],
+        }],
+      },
+    }, {});
+    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CONFIRMATION_MISMATCH/);
+    assert.match(blocked.blockReason, /one direct/);
+  });
+
+  it("rejects a question that exposes internal terms or omits option guidance", async () => {
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: {
+        questions: [{
+          header: "截止时间",
+          question: "已确认：quantityTotal=1\n请确认：submissionDeadlineAt 是否正确？",
+          multiSelect: false,
+          options: [{ label: "按此截止" }, { label: "修改时间" }],
+        }],
+      },
+    }, {});
+    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CONFIRMATION_MISMATCH/);
+    assert.match(blocked.blockReason, /field names/);
+    assert.match(blocked.blockReason, /descriptions/);
+  });
+
+  it("does not relabel a host-wrapped local Hook denial as an MCP backend failure", async () => {
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
+    const params = { payload: requirementPayload() };
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params,
+    }, {});
+    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
+
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params,
+      error: blocked.blockReason,
+      result: {
+        status: "error",
+        tool: "ypmcn-mcp__validate_requirement",
+        error: blocked.blockReason,
+      },
+    }, {});
+
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.blocked_tool_turn, undefined);
+    assert.equal(state.prompt_requirement_gate.status, "pending");
   });
 
   it("formats a deterministic local requirement clock", () => {
@@ -364,7 +490,7 @@ describe("YP Action native hook guard", () => {
     assert.match(invalid.blockReason, /INVALID_INPUT/);
   });
 
-  it("stops the turn after any non-continuation Hook denial", async () => {
+  it("requires a user popup after a Hook denial and resumes the selected safe path in the same turn", async () => {
     await hooks.get("before_prompt_build")({ prompt: "恢复状态", messages: [] }, {});
     const invalid = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__get_workflow_state",
@@ -378,6 +504,24 @@ describe("YP Action native hook guard", () => {
     }, {});
     assert.match(retried.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT/);
     assert.match(retried.blockReason, /INVALID_INPUT/);
+
+    const recoveryParams = {
+      questions: [{
+        header: "参数确认",
+        question: "参数错误：get_workflow_state 缺少完整定位条件。请选择下一步。",
+        options: [{ label: "使用 trace_id 重试" }, { label: "停止" }],
+      }],
+    };
+    assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params: recoveryParams }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "AskUserQuestion",
+      params: recoveryParams,
+      result: `${recoveryParams.questions[0].question}: 使用 trace_id 重试`,
+    }, {});
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__get_workflow_state",
+      params: { trace_id: "demand-1" },
+    }, {}), undefined);
 
     await hooks.get("before_prompt_build")({ prompt: "具体守卫优先", messages: [] }, {});
     await hooks.get("before_tool_call")({
@@ -787,10 +931,7 @@ describe("YP Action native hook guard", () => {
     const blocked = await hooks.get("before_tool_call")({ toolName: "mcp__ypmcn__rank_mcns", params }, {});
     const id = confirmationId(blocked);
     const plan = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
-    const question = [
-      `供给方案。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
-      ...Object.entries({ ...plan, demand_count: 999 }).map(([field, value]) => `${field}=${value}`),
-    ].join("；");
+    const question = supplyPlanQuestion(id, { ...plan, demand_count: 999 });
     const forged = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
       params: { questions: [{ question, options: [{ label: "确认供给方案" }, { label: "调整方案" }] }] },
@@ -802,13 +943,46 @@ describe("YP Action native hook guard", () => {
       toolName: "AskUserQuestion",
       params: {
         questions: [{
-          question: question.replace("demand_count=999", "demand_count=10"),
+          question: question.replace("需求人数=999", "需求人数=10"),
           options: [{ label: "确认供给方案" }, { label: "调整方案" }, { label: "稍后" }],
         }],
       },
     }, {});
     assert.equal(extraOption.block, true);
     assert.match(extraOption.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+  });
+
+  it("blocks an unbound supply confirmation popup before it can show reconstructed values", async () => {
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: {
+        questions: [{
+          header: "供给确认",
+          question: "【真实数据】候选达人=223｜【计算计划】目标提报=20｜【推荐组合】推荐MCN=4｜【影响】确认后排序",
+          options: [{ label: "确认供给方案" }, { label: "调整方案" }],
+        }],
+      },
+    }, {});
+    assert.match(blocked.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+    assert.match(blocked.blockReason, /exact current Provider plan.*reconstructed or approximate values/);
+  });
+
+  it("rejects a dense one-paragraph supply confirmation even when values are exact", async () => {
+    const params = { id: "req-dense-plan-popup", platform: "xiaohongshu" };
+    await recordSearch(params.id);
+    const blocked = await hooks.get("before_tool_call")({ toolName: "mcp__ypmcn__rank_mcns", params }, {});
+    const id = confirmationId(blocked);
+    const plan = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
+    const question = [
+      `供给方案。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
+      ...Object.entries(plan).map(([field, value]) => `${field}=${value}`),
+    ].join("；");
+    const formatBlocked = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: { questions: [{ question, options: [{ label: "确认供给方案" }, { label: "调整方案" }] }] },
+    }, {});
+    assert.match(formatBlocked.blockReason, /BLOCKED_CONFIRMATION_FORMAT/);
+    assert.match(formatBlocked.blockReason, /【分区】/);
   });
 
   it("does not accept a supply confirmation that omits fixed calculation fields", async () => {
@@ -851,7 +1025,7 @@ describe("YP Action native hook guard", () => {
     }, {});
     assert.equal(blocked.block, true);
     assert.match(blocked.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
-    assert.match(blocked.blockReason, /supply_demand_ratio/);
+    assert.match(blocked.blockReason, /供给倍数/);
     const id = confirmationId(blocked);
     await answerSupplyPlanConfirmation(id);
     assert.equal(await hooks.get("before_tool_call")({
@@ -865,6 +1039,88 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-3",
     }, {});
     assert.match(replay.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
+  });
+
+  it("binds the supply confirmation immediately after search without probing rank_mcns", async () => {
+    const params = { id: "req-supply-direct-popup", platform: "xiaohongshu" };
+    await recordSearch(params.id);
+    const stateAfterSearch = JSON.parse(readFileSync(stateFile, "utf8"));
+    const pending = Object.entries(stateAfterSearch.confirmations).find(([, receipt]) =>
+      receipt.kind === "supply_plan" && receipt.requirement_id === params.id && receipt.status === "pending"
+    );
+    assert.ok(pending, "search_creators should create the pending supply confirmation");
+    assert.equal(pending[1].request_fingerprint, null);
+
+    const askParams = {
+      questions: [{
+        header: "供给确认",
+        question: supplyPlanQuestion(undefined, pending[1].safe_summary),
+        options: [{ label: "确认供给方案" }, { label: "调整方案" }],
+      }],
+    };
+    assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params: askParams }, {}), undefined);
+    assert.match(askParams.questions[0].question, /YP_SUPPLY_PLAN_CONFIRMATION/);
+    await hooks.get("after_tool_call")({
+      toolName: "AskUserQuestion",
+      params: askParams,
+      result: { status: "submitted", answers: [{ selected_labels: ["确认供给方案"] }] },
+    }, {});
+
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params,
+      toolCallId: "call-rank-after-direct-popup",
+    }, {}), undefined);
+  });
+
+  it("does not allow optional rank parameters from a search-bound confirmation", async () => {
+    const params = { id: "req-supply-direct-popup-options", platform: "xiaohongshu" };
+    await recordSearch(params.id);
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    const pending = Object.entries(state.confirmations).find(([, receipt]) =>
+      receipt.kind === "supply_plan" && receipt.requirement_id === params.id
+    );
+    const askParams = {
+      questions: [{
+        header: "供给确认",
+        question: supplyPlanQuestion(undefined, pending[1].safe_summary),
+        options: [{ label: "确认供给方案" }, { label: "调整方案" }],
+      }],
+    };
+    await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params: askParams }, {});
+    await hooks.get("after_tool_call")({
+      toolName: "AskUserQuestion",
+      params: askParams,
+      result: { status: "submitted", answers: [{ selected_labels: ["确认供给方案"] }] },
+    }, {});
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params: { ...params, minimum_mcn_count: 8 },
+    }, {});
+    assert.match(blocked.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+  });
+
+  it("accepts YP Action flattened supply confirmation and raw JSON MCP success results", async () => {
+    const params = { id: "req-supply-yp-action-shape", platform: "xiaohongshu" };
+    await recordSearch(params.id);
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-yp-action-1",
+    }, {});
+    const id = confirmationId(blocked);
+    await answerSupplyPlanConfirmation(id, "确认供给方案", true);
+
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-yp-action-2",
+    }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params,
+      toolCallId: "call-rank-yp-action-2",
+      result: JSON.stringify({ success: true, data: { mcn_run_id: "mcn-run-yp-action" }, error: null }),
+    }, {});
+
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.confirmations[id].status, "consumed");
   });
 
   it("invalidates supply-plan confirmation when rank parameters change", async () => {
@@ -910,6 +1166,17 @@ describe("YP Action native hook guard", () => {
     assert.match(replay.blockReason, /WORKFLOW_STATE_REFRESH_REQUIRED/);
   });
 
+  it("accepts the flattened YP Action external-send confirmation result", async () => {
+    const params = distributionParams({ projectName: "YP Action 外发确认形状" });
+    const { id } = await requestConfirmation(params);
+    await answerConfirmation(id, "确认发送", true);
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params,
+      toolCallId: "call-send-yp-action-shape",
+    }, {}), undefined);
+  });
+
   it("requires a fresh authoritative workflow state for the same project before external send", async () => {
     const params = distributionParams({ projectName: "状态门禁项目" });
     const missing = await hooks.get("before_tool_call")({
@@ -938,14 +1205,11 @@ describe("YP Action native hook guard", () => {
     const { id } = await requestConfirmation(distributionParams({ projectName: "真实外发项目" }));
     const summary = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
     const question = [
-      `外发确认。[YP_CONFIRMATION:${id}]`,
-      "project_name=伪造项目",
-      `supplier_count=${summary.supplier_count}`,
-      `deadline=${summary.deadline}`,
-      `column_names=${JSON.stringify(summary.column_names)}`,
-      `message_template_id=${summary.message_template_id}`,
-      `message_template_sha256=${summary.message_template_sha256}`,
-    ].join("；");
+      `【外发对象】项目名=伪造项目｜机构数=${summary.supplier_count}`,
+      `【外发内容】截止时间=${summary.deadline}｜表单字段=${JSON.stringify(summary.column_names)}`,
+      `【固定模板】消息模板=${summary.message_template_id}`,
+      `【影响】确认后真实企微外发｜[YP_CONFIRMATION:${id}]`,
+    ].join("\n");
     const forged = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
       params: { questions: [{ question, options: [{ label: "确认发送" }, { label: "需要修改" }] }] },
@@ -957,7 +1221,7 @@ describe("YP Action native hook guard", () => {
       toolName: "AskUserQuestion",
       params: {
         questions: [{
-          question: question.replace("project_name=伪造项目", "project_name=真实外发项目"),
+          question: question.replace("项目名=伪造项目", "项目名=真实外发项目"),
           options: [{ label: "确认发送" }, { label: "需要修改" }, { label: "取消" }],
         }],
       },

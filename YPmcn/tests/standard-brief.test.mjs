@@ -97,6 +97,29 @@ describe("deterministic standard Brief parser", () => {
     });
   });
 
+  it("accepts an explicit single-creator L1 official-price label without asking again", () => {
+    const brief = [
+      "品牌：悦普测试",
+      "产品：YP Action",
+      "项目：E2E-YPmcn-20260719-UX04",
+      "平台：小红书",
+      "档期：2026-07-30至2026-07-31",
+      "数量：1位达人",
+      "提报截止：2026-07-20 18:00",
+      "单达人 L1 官方报价：4万元以内",
+      "返点：25%以上",
+      "账号类型：母婴类",
+    ].join("\n");
+    const preview = parseStandardBrief(brief, new Date("2026-07-19T02:00:00Z"), "Asia/Shanghai");
+
+    assert.equal(preview.gate, "ready");
+    assert.deepEqual(preview.missingRequired, []);
+    assert.deepEqual(preview.semanticAmbiguities, []);
+    assert.equal(preview.projection.submissionDeadlineAt, "2026-07-20 18:00:00");
+    assert.equal(preview.projection.kolOfficialPriceL1, "[0,40000]");
+    assert.equal(preview.atoms.find((atom) => atom.field === "creatorPriceTier")?.sourceText, "单达人 L1 官方报价：4万元以内");
+  });
+
   it("selects the last complete structured Brief instead of a field label quoted in operator instructions", () => {
     const brief = [
       "品牌：阿里巴巴",

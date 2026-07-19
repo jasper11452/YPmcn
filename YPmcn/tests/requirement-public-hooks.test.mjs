@@ -129,8 +129,8 @@ describe("requirement behavior through public plugin hooks", () => {
     assert.equal(preview.projection.quantityTotal, 5);
     assert.equal(preview.projection.rebate, "[0.3,1]");
     assert.deepEqual(preview.summary, { atomCount: 11, mappedCount: 9, preservedCount: 1, unresolvedCount: 1 });
-    assert.match(result.prependContext, /YPmcn mandatory unresolved-Brief response: do not call any Tool/);
-    assert.match(result.prependContext, /<YPmcnExactReply>[\s\S]*"brandName": "阿里巴巴"[\s\S]*"unresolvedCount": 1[\s\S]*<\/YPmcnExactReply>/);
+    assert.match(result.prependContext, /YPmcn mandatory unresolved-Brief interaction: call native AskUserQuestion now/);
+    assert.match(result.prependContext, /<YPmcnClarificationAuthority>[\s\S]*"brandName": "阿里巴巴"[\s\S]*"unresolvedCount": 1[\s\S]*<\/YPmcnClarificationAuthority>/);
   });
 
   it("makes the live yearless Alibaba Brief ready without taxonomy clarification", async () => {
@@ -149,7 +149,7 @@ describe("requirement behavior through public plugin hooks", () => {
     assert.equal(payload.status, "ready");
     assert.equal(payload.rawMessagesJson.originalBrief, LIVE_BRIEF);
     assert.equal(payload.rawMessagesJson.atoms.length, 11);
-    assert.doesNotMatch(result.prependContext, /YPmcn mandatory unresolved-Brief response/);
+    assert.doesNotMatch(result.prependContext, /YPmcn mandatory unresolved-Brief interaction/);
   });
 
   it("binds validate_requirement to the Ready Preview and stops every same-turn reconstruction retry", async () => {
@@ -207,7 +207,7 @@ describe("requirement behavior through public plugin hooks", () => {
     assert.equal(await guard("mcp__ypmcn__search_creators", { id: "requirement-row-id" }), undefined);
   });
 
-  it("stops the turn after an explicit validate/search MCP failure", async () => {
+  it("shows a same-turn recovery popup after an explicit MCP failure", async () => {
     const result = await newTurn(LIVE_BRIEF);
     const payload = authoritativePayload(result);
     assert.equal(await guard("mcp__ypmcn__validate_requirement", { payload }), undefined);
@@ -225,17 +225,41 @@ describe("requirement behavior through public plugin hooks", () => {
 
     const retried = await guard("mcp__ypmcn__search_creators", { id: "failed-search-requirement-id" });
     assert.match(retried.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*DEMAND_NOT_FOUND/);
+
+    const recovery = {
+      questions: [{
+        header: "服务异常",
+        question: "后端错误，请稍后再试（DEMAND_NOT_FOUND）。请选择下一步。",
+        options: [{ label: "重试一次" }, { label: "停止" }],
+      }],
+    };
+    assert.equal(await guard("AskUserQuestion", recovery), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "AskUserQuestion",
+      params: recovery,
+      result: `${recovery.questions[0].question}: 重试一次`,
+    }, {});
+    assert.equal(await guard("mcp__ypmcn__search_creators", { id: "failed-search-requirement-id" }), undefined);
   });
 
-  it("short-circuits unresolved standard Briefs with one deterministic zero-Tool reply", async () => {
+  it("routes unresolved standard Briefs to a native popup instead of a text-only stop", async () => {
     const result = await beforeAgentReply(`请按权威预览解析，确认前不要调用任何 Tool。${EXACT_SEMICOLON_BRIEF}`);
-    assert.equal(result.handled, true);
-    assert.equal(result.reason, "ypmcn_requirement_semantic_ambiguity");
-    assert.match(result.reply.text, /"gate": "semantic_ambiguity"/);
-    assert.match(result.reply.text, /"brandName": "阿里巴巴"/);
-    assert.match(result.reply.text, /"unresolvedCount": 1/);
-    assert.match(result.reply.text, /确认完成前不得调用任何 Tool/);
-    assert.doesNotMatch(result.reply.text, /请按权威预览解析/);
+    assert.equal(result, undefined);
+    const prompt = await newTurn(EXACT_SEMICOLON_BRIEF);
+    assert.match(prompt.prependContext, /call native AskUserQuestion now/);
+
+    assert.equal(await guard("AskUserQuestion", {
+      questions: [{
+        header: "报价口径",
+        question: "4万元指哪种报价？",
+        multiSelect: false,
+        options: [
+          { label: "项目总预算", description: "整个项目合计不超过4万元" },
+          { label: "单达人图文", description: "每位达人图文报价不超过4万元" },
+          { label: "单达人视频", description: "每位达人视频报价不超过4万元" },
+        ],
+      }],
+    }), undefined);
 
     const blocked = await guard("ypmcn-mcp__prompts_get", { name: "AskUserQuestion" });
     assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
@@ -356,23 +380,28 @@ describe("requirement behavior through public plugin hooks", () => {
     assert.match(draftBlocked.blockReason, /BLOCKED_REQUIREMENT_INCOMPLETE.*status must be ready/);
   });
 
-  it("publishes the zero-Tool clarification and deterministic output contract while allowing native confirmation", async () => {
+  it("publishes the popup clarification and deterministic output contract", async () => {
     const prompt = await newTurn("账号类型和价格需要澄清");
     const contract = prompt.prependSystemContext;
     assert.match(contract, /Use only installed YPmcn MCP tools/);
     assert.match(contract, /do not read Skill files, probe schemas, inspect config, call get_workflow_state, or try another business tool first/);
-    assert.match(contract, /missing_required and semantic_ambiguity.*stop without status "ready" and without calling validate_requirement/);
-    assert.match(contract, /Requirement clarification must use one self-contained AskUserQuestion titled “需求确认”/);
-    assert.match(contract, /question body is exactly three labeled parts: 已确认, 需确认, 影响/);
+    assert.match(contract, /missing_required and semantic_ambiguity.*inside that popup.*without status "ready" and without calling validate_requirement/);
+    assert.match(contract, /Requirement clarification must immediately use one self-contained native AskUserQuestion popup/);
+    assert.match(contract, /one direct 4–42 character question/);
+    assert.match(contract, /automatically shows the typed “其他” input/);
     assert.match(contract, /Preview atom details, gate, and summary must be rendered from one in-memory atom list/);
     assert.match(contract, /summary\.unresolvedCount counts missing_required plus semantic_ambiguity rows/);
     assert.match(contract, /ready must show the exact tool arguments as \{"payload": \{\.\.\., "status": "ready"\}\}/);
 
     assert.equal(await guard("AskUserQuestion", {
       questions: [{
-        header: "需求确认",
-        question: "已确认：平台；需确认：价格口径；影响：确认后才能校验需求。",
-        options: [{ label: "L1单达人价格" }, { label: "项目总预算" }],
+        header: "报价口径",
+        question: "4万元指哪种报价？",
+        multiSelect: false,
+        options: [
+          { label: "单达人图文", description: "每位达人图文报价不超过4万元" },
+          { label: "项目总预算", description: "整个项目合计不超过4万元" },
+        ],
       }],
     }), undefined, "the host-native confirmation tool remains available");
   });
@@ -395,7 +424,7 @@ describe("requirement behavior through public plugin hooks", () => {
 
     const params = {
       projectName: "千问61儿童节生图模板",
-      deadline: "2026-07-19T11:30:00+08:00",
+      deadline: "2099-07-19T11:30:00+08:00",
       columns: [{ field_key: "creator_name", field_name: "达人名称" }],
       supplierIds: ["supplier-qwen"],
       prefillRows: [],

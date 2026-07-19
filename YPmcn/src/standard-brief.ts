@@ -33,7 +33,8 @@ export type StandardBriefPreview = {
 type LocatedAtom = StandardBriefPreviewAtom & { start: number; end: number };
 
 const REQUIRED_FIELDS = ["platform", "quantityTotal", "submissionDeadlineAt", "creatorPriceTier"] as const;
-const FIELD_LABEL = "(?:品牌|产品|项目|(?:发布|传播)?平台|档期|价格|单价|预算|报价|返点(?:要求)?|返佣|内容|账号类型|达人类型|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?(?:时间)?)";
+const PRICE_FIELD_LABEL = "(?:(?:单达人|达人)?[ \\t]*(?:L[ \\t]*[123][ \\t]*)?(?:官方)?(?:价格|单价|预算|报价))";
+const FIELD_LABEL = `(?:品牌|产品|项目|(?:发布|传播)?平台|档期|${PRICE_FIELD_LABEL}|返点(?:要求)?|返佣|内容|账号类型|达人类型|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?(?:时间)?)`;
 const BRIEF_BLOCK_LABEL = `(?:${FIELD_LABEL}|合作形式|参考账号)`;
 
 type BriefCandidate = {
@@ -281,7 +282,7 @@ export function parseStandardBrief(
     };
   }, true);
 
-  addMatch(brief, matches, /(?:单达人|达人)?(?:价格|单价|预算|报价)\s*[：:]?\s*(?:L\s*[123]\s*)?(?:单达人|达人)?\s*(?:(?<lower>\d+(?:\.\d+)?)\s*(?<lowerUnit>[kKwW万千]?)\s*[-~～—至到]\s*(?<upper>\d+(?:\.\d+)?)\s*(?<upperUnit>[kKwW万千]?)|(?<exact>\d+(?:\.\d+)?)\s*(?<exactUnit>[kKwW万千]?))\s*元?\s*(?<upperOnly>以内|以下|封顶|之内)?/gi, (match) => {
+  addMatch(brief, matches, /(?:单达人|达人)?[ \t]*(?:L[ \t]*[123][ \t]*)?(?:官方)?(?:价格|单价|预算|报价)[ \t]*[：:]?[ \t]*(?:L[ \t]*[123][ \t]*)?(?:单达人|达人)?[ \t]*(?:(?<lower>\d+(?:\.\d+)?)[ \t]*(?<lowerUnit>[kKwW万千]?)[ \t]*[-~～—至到][ \t]*(?<upper>\d+(?:\.\d+)?)[ \t]*(?<upperUnit>[kKwW万千]?)|(?<exact>\d+(?:\.\d+)?)[ \t]*(?<exactUnit>[kKwW万千]?))[ \t]*元?[ \t]*(?<upperOnly>以内|以下|封顶|之内)?/gi, (match) => {
     const range = priceRange(match);
     if (!range) return undefined;
     const targetField = priceTarget(match[0], brief);

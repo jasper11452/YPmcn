@@ -17,17 +17,34 @@ description: "Use for YPmcn requirement validation, sourcing, distribution, rank
 
 ## 主链
 
-`validate_requirement → search_creators → 供给确认 → rank_mcns → MCN 确认 → select_inquiry_form_fields → message 确认 → 可选 manual_source_creators → create_with_distributions → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
+`validate_requirement → search_creators → 供给比例确认 → rank_mcns → MCN 确认 → select_inquiry_form_fields → message 确认 → 可选 manual_source_creators → create_with_distributions → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
 
 外发前必须完成 supply、MCN、message 三项确认并通过 `confirm_distribution_send` session action 写入；缺任一项即停止。精排还必须有真实外发、回收完成、`candidate_pool_enriched` 和动作授权。
+宿主若注入标准 Brief 的权威 preview，直接使用：未决时只提问并停止；`ready` 后首个业务 Tool 固定为 `validate_requirement`。
+## 用户引导
 
-宿主若注入标准 Brief 的权威 preview，直接使用：未决时只提问并停止；`ready` 后首个业务 Tool 固定为 `validate_requirement`，参数逐字复用 preview，不再读取 reference。
+用户首次使用时不知道要填什么。当用户输入太模糊（不满足 `isStandardBrief` 或解析出大量 `missing_required`）时，必须主动展示需求模板，**先输出这段模板再弹窗**：
+
+```
+请按以下模板补充需求信息（可复制粘贴修改）：
+
+【平台】小红书 / 抖音
+【达人数量】XX 位
+【单达人预算】XX 元（告知是图文还是视频）
+【返点要求】XX%（可选）
+【账号类型】母婴 / 美妆 / 美食 / 穿搭 / 科技 / 其他
+【提报截止】X月X日 XX:XX
+【发布档期】X月X日 - X月X日（可选）
+【内容要求】图文为主 / 视频为主 / 其他
+```
+
+用一次 AskUserQuestion 收集缺失字段，每题聚焦一个字段，选项覆盖常见值 + "其他"供自由输入。
 
 ## 按需读取
 
 - Brief 解析：[`requirement-intake.md`](references/requirement-intake.md)
 - 状态、确认、恢复：[`execution-gates.md`](references/execution-gates.md)
 - 询价字段：[`form-field-mapping.md`](references/form-field-mapping.md)
-- 对客消息与导出：[`frontend-response.md`](references/frontend-response.md)
+- 回复格式：[`frontend-response.md`](references/frontend-response.md)
 
 每次只读当前场景所需文件。

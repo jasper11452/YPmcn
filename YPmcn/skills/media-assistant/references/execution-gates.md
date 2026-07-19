@@ -10,7 +10,7 @@
 
 ## 人工门禁
 
-`search_creators` 后必须展示实际 `supply_plan` 的十项字段；缺项即停止，不计算机构数与达人账号数之比。只有带原 marker 且答案精确为“确认供给方案”才可原参数调用 `rank_mcns`。随后等待用户确认实际 MCN 列表。
+`search_creators` 后的下一个 Tool 必须是原生 `AskUserQuestion`，不得先调用或试探 `rank_mcns`。确认页必须展示实际 `supply_plan` 的十项字段、同量纲的机构覆盖/手扒账号比例，以及由两类账号数计算的建议手扒占比；缺项即停止，禁止从分页、候选数组长度或“约 N+”文案估算。确认页固定使用“供给确认”标题和“确认供给方案 / 调整方案”选项，Hook 会把精确匹配当前搜索结果的首次弹窗绑定到内部 marker。只有答案精确为“确认供给方案”才可调用最小参数 `rank_mcns({id, platform})`；随后等待用户确认实际 MCN 列表。
 
 选择询价字段后展示实际 description、机构名单和固定消息预览。外发前重新查询同一项目状态并确认动作授权；supply、MCN、message 三项确认必须由 `confirm_distribution_send` session action 记录。首次外发 Hook 返回的 marker 和绑定摘要必须原样展示，只有“确认发送”才以完全相同参数继续；修改、拒绝、超时、过期或参数变化均重新确认或停止。session action 不可用时返回 `integration_required`，不得自行设计替代接口。
 

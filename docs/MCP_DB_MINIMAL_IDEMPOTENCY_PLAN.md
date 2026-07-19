@@ -4,7 +4,7 @@
 
 最小方案先只改服务端中间层：所有 MCP 写 Tool 复用现有 `mcp_tool_call_ledger`；本地数据库写与 ledger 同事务；`create_with_distributions` 把同一个幂等键传给外部 API；`sync_mcn_inquiry_status` 直接读取同库发送方权威状态并 upsert 现有 `mcn_inquiries`。不新建 workflow 大表，也不预先改业务表；只有外部 API 明确不消费幂等键时，才给其项目表补一个请求标识。
 
-当前独立后端工作树已完成“不改表”部分：10 个本地写入口和外部创建入口共 11 个写入口接入 ledger；本地业务写与 ledger 终态同事务；外部创建转发稳定 `Idempotency-Key`，网络未知结果持久化为 `unknown`；sync 读取 `core_project/core_distribution/core_notificationlog` 并按已推荐 MCN 的 `item_id + attempt_no` upsert inquiry；`get_workflow_state` 可按需求身份或 trace 聚合。上述内容已通过本地测试和真实库只读 ORM 校验，但尚未部署到远程开发机。
+当前独立后端工作树已完成“不改表”部分：10 个本地写入口和外部创建入口共 11 个写入口接入 ledger；本地业务写与 ledger 终态同事务；外部创建转发稳定 `Idempotency-Key`，网络未知结果持久化为 `unknown`；sync 读取 `core_project/core_distribution/core_notificationlog` 并按已推荐 MCN 的 `mcn_recommendation_id + attempt_no` upsert inquiry；`get_workflow_state` 可按需求身份或 trace 聚合。上述内容已通过本地测试和真实库只读 ORM 校验，但尚未部署到远程开发机。
 
 ## 2026-07-18 真实开发库证据
 
