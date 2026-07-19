@@ -457,7 +457,7 @@
       "forbidden": [],
       "agentRequired": ["description"],
       "agentSemanticRequirements": {
-        "description": "valid JSON string assembled from the confirmed requirement",
+        "description": "recipient-ready plain-text WeChat message organized by AI from the confirmed user requirement; may contain line breaks and must not be JSON",
         "columns": "user-confirmed field object list",
         "supplierIds": "confirmed institution ID array",
         "aliases": {

@@ -22,7 +22,7 @@
 | 评估面 | 结果 | 结论 |
 | --- | --- | --- |
 | 正式契约收口 | **PASS** | P0 与首批 P1 已有唯一 Spec 落点、JSON Schema、loader 与契约测试。 |
-| 插件与本地门禁 | **PARTIAL** | Skill、打包和 Native Node Hook 已进入当前执行面；Hook 用本地 JSON 记录编排状态，并只对企微外发做 Native Approval，不能替代服务端参数与写幂等。 |
+| 插件与本地门禁 | **PARTIAL** | Skill、打包和 Native Node Hook 已进入当前执行面；Hook 用本地 JSON 记录编排状态，并只对企微外发做 AskUserQuestion 参数绑定确认，不能替代服务端参数与写幂等。 |
 | 独立只读审查 | **待本变更冻结后执行** | OpenCode 必须复验冻结 SHA，并确认 Git 与 plan 目录无写入。 |
 | 开发 provider 契约 | **READ-ONLY PASS** | 开发与生产现统一使用公开 SSE endpoint；2026-07-19 实时 `tools/list` 确认 15 个目标业务 Tool 齐全且输入 schema 无差异。 |
 | 生产 provider 契约 | **READ-ONLY PASS** | 同一统一 endpoint 的 2026-07-18 实时只读检查通过；这不等于写行为或 Live E2E 通过。 |
@@ -37,7 +37,7 @@
 
 | 检查 | 命令 | 能证明什么 |
 | --- | --- | --- |
-| OpenClaw 插件、契约与 Native Node Hook | `npm run test:fast` | 非外发 Tool 放行、本地 JSON 转换、企微外发 Native Approval、业务契约和本地 vector MCP 协议 smoke |
+| OpenClaw 插件、契约与 Native Node Hook | `npm run test:fast` | 非外发 Tool 放行、本地 JSON 转换、企微外发 AskUserQuestion 两阶段确认、业务契约和本地 vector MCP 协议 smoke |
 | OpenClaw 源码装载 | `npm run test:openclaw` | YP 内置 OpenClaw 能装载 Plugin/Skill/四个 typed Hook，并能注册 SSE 配置 |
 | 全仓库离线门禁 | `npm run verify` | Spec、文档、安装图、密钥扫描、Skill 引用、向量组件和发布包一致性 |
 | provider checker（开发） | `npm run verify:provider` | 仅对当前开发 endpoint 执行 initialize 与 `tools/list`；网络和服务必须真实可达 |
@@ -48,7 +48,7 @@
 
 这些命令在当前 SHA 通过时，只能同时证明：
 
-- `create_with_distributions` 在 Provider 执行前必须通过绑定原调用的 Native Approval；Allow 由宿主续传该调用，其他结果不发送。
+- `create_with_distributions` 首次调用只生成绑定完整参数指纹的多行 AskUserQuestion；只有“确认发送”才允许同轮以完全相同参数执行一次，其他结果不发送。
 - 禁止 shell/curl 绕过企微外发 Tool；普通读写 Tool 不进入本地权限门禁。
 - Native Node Hook 的本地 phase/next_action 只是 Agent 编排权威；它不能伪造 Provider 成功、授予服务端动作或替代写幂等账本。
 - 目标恢复顺序仍为 `sync → ingest → sync`；独立后端工作树已覆盖真实表查询、同一推荐项 inquiry upsert 与 `returned_not_ingested` 单测，只有部署后再通过新 session 聚合 Live E2E 才算真正恢复。

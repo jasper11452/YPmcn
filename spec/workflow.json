@@ -93,7 +93,7 @@
     }
   },
   "policies": {
-    "outwardSendConfirmation": "native before_tool_call approval bound to the exact pending create_with_distributions invocation; approval resumes that invocation",
+    "outwardSendConfirmation": "first create_with_distributions invocation is blocked locally with exact AskUserQuestion arguments; only a confirmed answer authorizes one subsequent invocation with the same parameter fingerprint",
     "fieldSelectionBinding": "selected columns remain preparation evidence until a real distribution is committed",
     "unsupportedProviderArguments": ["candidate_pool_id", "mcn_recommendation_id", "preview_only", "remindAt", "trigger"],
     "stateRefresh": "read local JSON on every prompt; use get_workflow_state only for context loss or unknown write reconciliation",
@@ -141,7 +141,7 @@
       "id": "distribution-created",
       "from": "inquiry_fields_ready",
       "trigger": {"type": "tool", "name": "create_with_distributions"},
-      "guards": ["supply, MCN, and field choices are present in local orchestration state", "native warning approval is bound to the exact pending Tool call", "requirement_id, supplierIds, columns, and JSON-string description resolve one requirement"],
+      "guards": ["supply, MCN, and field choices are present in local orchestration state", "the exact multiline AskUserQuestion prompt and subsequent create_with_distributions parameters match the one-time confirmation receipt", "requirement_id, supplierIds, columns, and a plain-text WeChat-message description resolve one requirement"],
       "evidence": ["actual successful external distribution response recorded in local JSON"],
       "nextPhase": "waiting_mcn_return"
     },

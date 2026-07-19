@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { loadErrorCatalog } from "./contract/loader.js";
 
 export type Json = Record<string, any>;
-export type ConfirmationStatus = "pending" | "in_flight" | "consumed" | "unknown" | "denied";
+export type ConfirmationStatus = "pending" | "approved" | "in_flight" | "consumed" | "unknown" | "denied";
 export type GuardStore = { path: string; data: Json };
 const STATE_SCOPE = new AsyncLocalStorage<string>();
 
@@ -66,23 +66,6 @@ export function fingerprint(value: unknown): string {
   return createHash("sha256").update(canonical(value), "utf8").digest("hex");
 }
 
-function normalizeBindingValue(value: unknown): unknown {
-  if (typeof value === "string") return value.normalize("NFKC").trim().replace(/\s+/g, " ");
-  if (Array.isArray(value)) return value.map(normalizeBindingValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Json)
-        .filter(([, item]) => item !== null && item !== undefined)
-        .map(([key, item]) => [key, normalizeBindingValue(item)]),
-    );
-  }
-  return value;
-}
-
-export function bindingFingerprint(value: unknown): string {
-  return fingerprint(normalizeBindingValue(value));
-}
-
 export function sha256Text(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -108,8 +91,8 @@ export function denyStructured(code: string, context: string): Json {
 export function store(rootDir: string): GuardStore {
   const path = statePath(rootDir);
   const data = load(path);
-  let changed = data.schema_version !== 13;
-  data.schema_version = 13;
+  let changed = data.schema_version !== 14;
+  data.schema_version = 14;
   if (!data.confirmations || typeof data.confirmations !== "object" || Array.isArray(data.confirmations)) {
     data.confirmations = {};
     changed = true;

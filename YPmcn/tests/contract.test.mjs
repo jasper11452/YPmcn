@@ -30,7 +30,7 @@ function validDistribution(overrides = {}) {
     requirement_id: "req-1",
     columns: [{ key: "kwUid" }],
     supplierIds: ["supplier-1"],
-    description: JSON.stringify({ title: "项目 A", platform: "小红书" }),
+    description: "您好，现招募小红书达人参与项目 A。\n请协助推荐合适人选，谢谢。",
     ...overrides,
   };
 }
@@ -155,8 +155,16 @@ describe("current Endpoint input validation", () => {
       "$.columns[0]",
     );
     assert.equal(
-      validateToolParams("create_with_distributions", validDistribution({ description: "not-json" }))[0].path,
+      validateToolParams("create_with_distributions", validDistribution({
+        description: JSON.stringify({ title: "项目 A", platform: "小红书" }),
+      }))[0].path,
       "$.description",
+    );
+    assert.match(
+      validateToolParams("create_with_distributions", validDistribution({
+        description: "```json\n{\"title\":\"项目 A\"}\n```",
+      }))[0].message,
+      /not a code block/,
     );
   });
 

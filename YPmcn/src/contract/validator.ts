@@ -273,15 +273,17 @@ function validateSemanticRequirements(
   }
   if (tool === "create_with_distributions") {
     if (typeof params.description !== "string" || params.description.trim().length === 0) {
-      return [issue("INVALID_INPUT", "$.description", "description must be a non-empty JSON string.")];
+      return [issue("INVALID_INPUT", "$.description", "description must be a non-empty plain-text WeChat message.")];
+    }
+    const trimmed = params.description.trim();
+    if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
+      return [issue("INVALID_INPUT", "$.description", "description must be direct plain text, not a code block.")];
     }
     try {
-      const message = JSON.parse(params.description);
-      if (!isRecord(message)) {
-        return [issue("INVALID_INPUT", "$.description", "description JSON must encode an object.")];
-      }
+      JSON.parse(trimmed);
+      return [issue("INVALID_INPUT", "$.description", "description must be direct plain text, not JSON.")];
     } catch {
-      return [issue("INVALID_INPUT", "$.description", "description must contain valid JSON.")];
+      return [];
     }
   }
   if (tool === "sync_mcn_inquiry_status") {

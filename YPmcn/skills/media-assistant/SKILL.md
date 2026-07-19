@@ -13,13 +13,13 @@ description: "Use for YPmcn requirement validation, sourcing, distribution, rank
 - 本地 `state/confirmation_guard.json` 的 `workflow.phase/next_action` 是编排权威；Provider 状态只作业务事实与未知写对账，不得覆盖本地 phase。连续步骤复用实际成功响应。
 - 逐项核对 ID 血缘，只复制当前工作流中实际成功响应或已验证状态返回的 ID；不得猜测、串用或用虚构 ID 探测详情。
 - 只有实际 MCP 返回算成功证据。`validate_requirement` 参数校验失败且用户已确认信息足以唯一修复时，保持原始需求语义，只修报错字段、序列化、映射或审计计数，并在同一轮持续重新调用直到成功；需要新增业务选择时才询问。普通服务失败不改参数、不换 Tool、不自动重试，写结果未知先对账；`recovered`、`closed` 后不得重复写入。
-- 每次调用前必须先读 `references/tools/<tool>.json`。Hook 只硬拦 shell/curl 外发绕过，并用 Native Approval 警告绑定原始企微调用；其他 Tool 不做严格门禁。本地状态只按实际成功结果推进；没有远程证据时来源写“未知”。
+- 每次调用前必须先读 `references/tools/<tool>.json`。Hook 只硬拦 shell/curl 外发绕过，并用 AskUserQuestion 多行警告绑定企微参数指纹；其他 Tool 不做严格门禁。本地状态只按实际成功结果推进；没有远程证据时来源写“未知”。
 
 ## 主链
 
-`validate_requirement → 自动 search_creators → 固定供需结果与用户确认 → rank_mcns 赛马 → MCN 确认 → select_inquiry_form_fields → 可选 manual_source_creators → Native Approval 后 create_with_distributions → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
+`validate_requirement → 自动 search_creators → 固定供需结果与用户确认 → rank_mcns 赛马 → MCN 确认 → select_inquiry_form_fields → 可选 manual_source_creators → create_with_distributions 本地预检 → AskUserQuestion 确认 → 同参数 create_with_distributions → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
 
-任一弹窗的已提交选择都是执行指令，必须同轮继续所选动作，不能只回复已确认。企微 Tool 只传 live key `requirement_id`、`supplierIds`、`columns` 和需求整理出的 JSON 字符串 `description`；业务说法 `requirement_ID/colums` 不可作为参数名。Native Approval 确认后宿主自动续传原调用。
+任一弹窗的已提交选择都是执行指令，必须同轮继续所选动作，不能只回复已确认。企微 Tool 只传 live key `requirement_id`、`supplierIds`、`columns` 和 `description`；AI 仅根据已确认用户需求将 `description` 整理为可直接发送的微信纯文本，可按需换行，禁止 JSON、代码块或杜撰。业务说法 `requirement_ID/colums` 不可作为参数名。首次调用只做本地预检：Hook 从最近一次成功的 `rank_mcns` 结果核对 `supplierIds`，并在 `EXTERNAL_SEND_CONFIRMATION_REQUIRED` 中给出唯一允许的 AskUserQuestion 参数。必须原样调用该弹窗；它用多行正文逐项展示 MCN 名称、字段和完整消息。只有“确认发送”才可同轮以完全相同参数再次调用企微 Tool；拒绝、关闭、超时、弹窗被改写或参数变化均不得外发。
 宿主若注入标准 Brief preview，将其作为解析参考：未决值主动询问，完整后优先调用 `validate_requirement`，但 preview 不限制 Skill 读取或其他 Tool。
 ## 用户引导
 

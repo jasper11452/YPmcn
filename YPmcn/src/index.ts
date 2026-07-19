@@ -1,4 +1,5 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { callGatewayTool } from "openclaw/plugin-sdk/browser-setup-tools";
 import {
   afterTool,
   beforeTool,
@@ -6,7 +7,7 @@ import {
   isExternalSendAttempt,
   withStateScope,
 } from "./runtime-hooks.js";
-import { renderLocalWorkflowContext } from "./runtime-hook-workflow.js";
+import { normalize, renderLocalWorkflowContext } from "./runtime-hook-workflow.js";
 import {
   buildStandardBriefReadyPayload,
   isStandardBrief,
@@ -44,6 +45,27 @@ function hookStateScope(event: any, ctx?: any): string | undefined {
     ctx?.chatId, event?.chatId,
   ]
     .find((value) => typeof value === "string" && value.trim())?.trim();
+}
+
+const DEMAND_FIELD_SELECTOR_URL = "https://agenta.eshypdata.com/demand-field-selector";
+
+async function openHostUrl(url: string): Promise<void> {
+  await callGatewayTool(
+    "browser.request",
+    { timeoutMs: 15_000 },
+    {
+      method: "POST",
+      path: "/tabs/open",
+      body: { url },
+      timeoutMs: 15_000,
+    },
+    { scopes: ["operator.write"] },
+  );
+}
+
+function isInquiryFieldSelectionCall(event: any): boolean {
+  const raw = String(event?.toolName ?? event?.name ?? "").trim();
+  return normalize(raw) === "select_inquiry_form_fields";
 }
 
 export function buildRequirementRuntimeClock(now = new Date(), timeZone = localTimeZone()): string {
@@ -94,7 +116,7 @@ YPmcn continuous-workflow fast path:
 - Reuse the latest successful response and local state. get_workflow_state is reconciliation-only after context loss or an unknown write result; Provider phase text must not overwrite the local phase.
 - Omit optional and null fields unless the user or actual prior response supplies their value. Never send legacy fields or invent an ID.
 - validate_requirement has a mandatory argument-repair loop. When a local Hook or remote validation returns INVALID_INPUT, CANONICAL_INPUT_CONFLICT, VALUE_RANGE_INVALID, DEADLINE_ORDER_INVALID, CONSTRAINT_GRAMMAR_INVALID, BLOCKED_REQUIREMENT_INCOMPLETE, BLOCKED_REQUIREMENT_AUDIT_CONFLICT, or BLOCKED_REQUIREMENT_PREVIEW_MISMATCH, and the already-confirmed Brief uniquely determines the fix, preserve originalBrief and every confirmed business fact, correct only the reported payload field, serialization, mapping, or audit count, and call validate_requirement again in the same assistant turn. Repeat for each newly reported deterministic argument conflict until the Tool succeeds; do not ask the user, wait for “继续”, or stop merely because the Agent built invalid Tool arguments. If the fix requires a business choice not present in the user's confirmed input, use one parameter-confirmation popup instead of guessing, then resume this loop in the same interaction.
-- The argument-repair loop never applies to a timeout, connection error, integration/schema incompatibility, generic backend failure, unknown write outcome, unchanged blind retry, or any downstream business Tool. Outside that exception, a host Tool result with block=true / details.status="blocked" gets no automatic retry. Attribute the failure from Tool result provenance before showing it: details.deniedReason="plugin-before-tool-call" is a local Hook denial and means the request did not reach MCP/Provider, so never call it an MCP server rejection. Attribute a rejection to MCP/Provider only when the result contains actual remote MCP response evidence; if origin evidence is absent, report the origin as unknown. Do not add/change unrelated optional arguments (including timeout_seconds), reinterpret one identifier as another lookup mode, switch tools, or run diagnostics after failure.
+- The argument-repair loop never applies to a timeout, connection error, integration/schema incompatibility, generic backend failure, unknown write outcome, unchanged blind retry, or any downstream business Tool. Outside that exception, a host Tool result with block=true / details.status="blocked" gets no automatic retry. The sole expected continuation marker is EXTERNAL_SEND_CONFIRMATION_REQUIRED: it proves the first create_with_distributions invocation stopped locally before MCP/Provider, and must be handled only by the exact AskUserQuestion flow below. Attribute every other failure from Tool result provenance before showing it: details.deniedReason="plugin-before-tool-call" is a local Hook denial and means the request did not reach MCP/Provider, so never call it an MCP server rejection. Attribute a rejection to MCP/Provider only when the result contains actual remote MCP response evidence; if origin evidence is absent, report the origin as unknown. Do not add/change unrelated optional arguments (including timeout_seconds), reinterpret one identifier as another lookup mode, switch tools, or run diagnostics after failure.
 - Never end a recoverable failure with a plain “blocked” paragraph or require a new “继续” message. In the same assistant turn, call native AskUserQuestion: for missing/invalid user values that the confirmed Brief cannot determine, title it “参数确认”, identify the exact field and offer concrete choices plus typed input; for a definite remote backend failure, title it “服务异常”, state “后端错误，请稍后再试” with the real safe error code, and offer “重试一次” and “停止”; for an unknown write outcome, offer “查询状态” and “停止”, then reconcile state instead of retrying the write. A popup choice is explicit user input: continue only the selected safe path in the same turn. An unchanged retry is allowed at most once only when the prior result proves the write did not occur; if the same Tool fails again, do not retry it again and show a final “查看错误详情” / “结束” choice.
 - If the required YPmcn MCP tool is absent because the server did not connect, return integration_required immediately. Do not read mcporter or another Skill, inspect Gateway/config, use shell/curl, or search for an alternative tool.
 - Identity sources never mix: validate_requirement.data.id is the id for search_creators and rank_mcns and the requirement_id for create_with_distributions/rank_creators; demand_id+demand_version are reconciliation identities; project_id+mcn_id+requirement_id identify a distribution; inquiry_id identifies ingest; rank_creators.run_id identifies run detail, adjustment, submission, and feedback.
@@ -103,8 +125,8 @@ YPmcn continuous-workflow fast path:
 - rank_mcns is an MCN race, never a fixed five-MCN recommendation. Derive and pass minimum_mcn_count from the confirmed supply plan and actual available institutions; do not rely on the Provider default 5. After success, show the actual race size, coverage/gaps, and recommended institutions by institution name only. Never display supplier_id, mcn_id, recommendation IDs, or a hardcoded five-item list. Keep selected IDs only for downstream supplierIds.
 - If search_creators or rank_mcns fails, do not call the next business Tool. In the same turn use the native AskUserQuestion recovery rule above to clarify invalid input or let the user choose the safe error path.
 - After MCN choice, call select_inquiry_form_fields({}) exactly once unless a custom URL/timeout was explicitly supplied before the call. Show only the actual returned description and stop for field/message confirmation; on timeout, stop without retry.
-- create_with_distributions uses exactly requirement_id, supplierIds, columns, and description. requirement_id comes from validate_requirement.data.id; supplierIds are the confirmed institution ID array; columns are the user-confirmed field object list; description is a valid JSON string assembled from the confirmed requirement, with platform-specific price labels rather than L-level labels. The business names requirement_ID and colums map to the live keys requirement_id and columns; never send those misspelled aliases. Do not send retired projectName/deadline/prefillRows/prefillRowsBySupplier fields.
-- Call create_with_distributions once with the final parameters. The before_tool_call Hook presents a native warning popup bound to that exact pending call. If the user confirms, the host resumes and transmits that same Tool call automatically; do not reconstruct, retry, or acknowledge without sending. Deny/cancel/timeout does not call the Provider. Every later send requires its own warning.
+- create_with_distributions uses exactly requirement_id, supplierIds, columns, and description. requirement_id comes from validate_requirement.data.id; supplierIds are the confirmed institution ID array; columns are the user-confirmed field object list. AI must organize description from the confirmed user requirement as a recipient-ready WeChat/WeCom plain-text message, using natural wording and actual line breaks when helpful. Do not JSON-serialize it, wrap it in a code fence, expose internal field names, or invent facts; use platform-specific price labels rather than L-level labels. The business names requirement_ID and colums map to the live keys requirement_id and columns; never send those misspelled aliases. Do not send retired projectName/deadline/prefillRows/prefillRowsBySupplier fields.
+- Build the final create_with_distributions parameters once, then invoke it for the local confirmation preflight. The before_tool_call Hook resolves every supplierId against the latest successful rank_mcns result; if any name cannot be verified, stop without sending and return to MCN selection. Otherwise EXTERNAL_SEND_CONFIRMATION_REQUIRED means Provider was not called: immediately call AskUserQuestion with the exact JSON arguments embedded between <AskUserQuestionInput> tags, preserving every option and newline. The single question uses header “企微外发确认”, a multiline warning with MCN names, fields, and the full message, plus “确认发送” / “取消发送”. Only a returned “确认发送” authorizes one immediate second create_with_distributions invocation with exactly the same parameter values and structure; this is the confirmed continuation, not a blind retry. Cancel, deny, close, timeout, tool failure, modified popup arguments, or changed send parameters must not call Provider. Revised parameters start a fresh preflight and every later send needs a new confirmation.
 - manual_source_creators is optional pre-send enrichment only: call manual_source_creators({requirement_id}) after supply-plan confirmation only when real verifiable manual results are already associated with that requirement, and always before create_with_distributions. It never substitutes for WeCom send or recovery completion.
 - After distribution success, call sync_mcn_inquiry_status({requirement_id,project_id,mcn_id}) for identities returned by that write. While waiting, do not poll repeatedly. Recovery order is sync -> ingest_mcn_submissions({inquiry_id,items}) only when real returned/user-provided items exist -> sync. Never invent recovery items.
 - Only a successful WeCom distribution plus completed recovery may yield candidate_pool_enriched. Then and only when allowed_actions contains rank_creators, call rank_creators({requirement_id,limit}); use the explicitly confirmed shortlist size, otherwise the validated quantityTotal, otherwise ask once. Save the actual run_id.
@@ -115,16 +137,17 @@ type RuntimeHookHandlers = {
   beforeTool: typeof beforeTool;
   afterTool: typeof afterTool;
   endSession: typeof endSession;
+  openUrl: (url: string) => Promise<unknown> | unknown;
 };
 
 export function createYpmcnPlugin(
   overrides: Partial<RuntimeHookHandlers> = {},
 ): ReturnType<typeof definePluginEntry> {
-  const runtime = { beforeTool, afterTool, endSession, ...overrides };
+  const runtime = { beforeTool, afterTool, endSession, openUrl: openHostUrl, ...overrides };
   return definePluginEntry({
     id: "ypmcn-media-assistant",
     name: "YPmcn 媒介助手",
-    description: "提供媒介工作流提示、本地编排状态，并在真实企微外发前执行原生警告审批。",
+    description: "提供媒介工作流提示、本地编排状态，并在真实企微外发前执行 AskUserQuestion 多行确认。",
     register(api) {
     const rootDir = api.rootDir ?? process.cwd();
     api.on("before_prompt_build", async (event, ctx) => withStateScope(hookStateScope(event, ctx), () => {
@@ -160,11 +183,17 @@ export function createYpmcnPlugin(
       }
     }));
 
-    api.on("after_tool_call", async (event, ctx) => withStateScope(hookStateScope(event, ctx), () => {
+    api.on("after_tool_call", async (event, ctx) => withStateScope(hookStateScope(event, ctx), async () => {
       try {
         runtime.afterTool(event, ctx, rootDir);
       } catch (error) {
         api.logger.error(`after_tool_call receipt update failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (!isInquiryFieldSelectionCall(event)) return;
+      try {
+        await runtime.openUrl(DEMAND_FIELD_SELECTOR_URL);
+      } catch (error) {
+        api.logger.error(`failed to open inquiry field selector: ${error instanceof Error ? error.message : String(error)}`);
       }
     }));
 

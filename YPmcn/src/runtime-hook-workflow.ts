@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  bindingFingerprint,
   CONFIRMATION_TTL_MS,
+  denyStructured,
+  fingerprint,
   type ConfirmationStatus,
   type GuardStore,
   type Json,
@@ -13,13 +14,22 @@ import {
 } from "./runtime-hook-state.js";
 
 const PREFIXES = ["ypmcn__", "mcp__ypmcn__", "ypmcn-mcp__", "ypmcn-provider__"];
-const EXTERNAL_SEND_TITLE = "企微外发确认";
-const EXTERNAL_SEND_DESCRIPTION_MAX_LENGTH = 256;
+const EXTERNAL_SEND_HEADER = "企微外发确认";
+const EXTERNAL_SEND_CONFIRM_LABEL = "确认发送";
+const EXTERNAL_SEND_CANCEL_LABEL = "取消发送";
+const EXTERNAL_SEND_CONFIRMATION_MARKER = "EXTERNAL_SEND_CONFIRMATION_REQUIRED";
 const SEARCH_CONFIRMATION_HEADER = "供给确认";
 const MCN_CONFIRMATION_HEADER = "MCN确认";
 const FIELD_CONFIRMATION_HEADER = "字段确认";
-
-type ApprovalResolution = "allow-once" | "allow-always" | "deny" | "timeout" | "cancelled";
+const MCN_ID_KEYS = [
+  "supplier_id", "supplierId", "mcn_id", "mcnId", "institution_id", "institutionId",
+  "agency_id", "agencyId", "vendor_id", "vendorId",
+];
+const MCN_NAME_KEYS = [
+  "supplier_name", "supplierName", "mcn_name", "mcnName", "institution_name", "institutionName",
+  "agency_name", "agencyName", "organization_name", "organizationName", "display_name", "displayName",
+];
+const MCN_CONTEXT_KEY = /(?:mcn|supplier|institution|agency|vendor|recommend)/i;
 
 export function normalize(name: string): string | undefined {
   for (const prefix of PREFIXES) {
@@ -119,10 +129,39 @@ function answerValues(value: unknown): string[] {
   return collect(selectedLabels(root));
 }
 
-function firstQuestionHeader(input: Json): string | undefined {
+function firstQuestion(input: Json): Json | undefined {
   const questions = Array.isArray(input.questions) ? input.questions : [input];
   if (questions.length !== 1 || !questions[0] || typeof questions[0] !== "object") return undefined;
-  const question = questions[0] as Json;
+  return questions[0] as Json;
+}
+
+function questionOptionLabels(question: Json): string[] {
+  if (!Array.isArray(question.options)) return [];
+  return question.options.map((option) => {
+    if (text(option)) return option.trim();
+    return option && typeof option === "object" && text(option.label) ? option.label.trim() : undefined;
+  }).filter(text);
+}
+
+function answerForQuestion(event: Json, input: Json): string | undefined {
+  if (event.error) return undefined;
+  const question = firstQuestion(input);
+  if (!question || !text(question.question)) return undefined;
+  const questionText = question.question.trim();
+  const labels = questionOptionLabels(question);
+  for (const candidate of answerValues(event.result ?? event.message)) {
+    if (labels.includes(candidate)) return candidate;
+    const prefix = `${questionText}: `;
+    if (!candidate.startsWith(prefix)) continue;
+    const answer = candidate.slice(prefix.length).trim();
+    if (labels.includes(answer)) return answer;
+  }
+  return undefined;
+}
+
+function firstQuestionHeader(input: Json): string | undefined {
+  const question = firstQuestion(input);
+  if (!question) return undefined;
   return [question.header, question.title].find(text)?.trim();
 }
 
@@ -156,6 +195,52 @@ function resultNumber(root: unknown, keys: string[]): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
+function recordText(record: Json, keys: string[]): string | undefined {
+  const value = keys.map((key) => record[key]).find(text);
+  return text(value) ? value.normalize("NFKC").trim().replace(/\s+/g, " ") : undefined;
+}
+
+function collectMcnRecipientDirectory(root: unknown): Json[] {
+  const recipients = new Map<string, string | null>();
+  const queue: Array<{ value: unknown; contextKey: string }> = [{ value: unwrap(root), contextKey: "" }];
+  const seen = new Set<unknown>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+    const { value, contextKey } = current;
+    if (!value || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      queue.push(...value.map((item) => ({ value: item, contextKey })));
+      continue;
+    }
+
+    const record = value as Json;
+    const explicitId = recordText(record, MCN_ID_KEYS);
+    const contextual = MCN_CONTEXT_KEY.test(contextKey);
+    const supplierId = explicitId ?? (contextual ? recordText(record, ["id"]) : undefined);
+    const explicitName = recordText(record, MCN_NAME_KEYS);
+    const name = explicitName ?? (explicitId || contextual ? recordText(record, ["name"]) : undefined);
+    if (supplierId && name) {
+      const supplierIdSha256 = sha256Text(supplierId);
+      if (!recipients.has(supplierIdSha256)) recipients.set(supplierIdSha256, name);
+      else if (recipients.get(supplierIdSha256) !== name) recipients.set(supplierIdSha256, null);
+    }
+
+    queue.push(...Object.entries(record).map(([key, item]) => ({ value: item, contextKey: key })));
+  }
+
+  return [...recipients.entries()]
+    .filter((entry): entry is [string, string] => text(entry[1]))
+    .map(([supplier_id_sha256, name]) => ({ supplier_id_sha256, name }));
+}
+
+function clearMcnRecipientDirectory(workflow: Json): void {
+  delete workflow.mcn_recipient_directory;
+  delete workflow.mcn_directory_requirement_id_sha256;
+}
+
 function appendWorkflowEvent(data: Json, event: Json): void {
   const events = Array.isArray(data.workflow_events) ? data.workflow_events : [];
   events.push(event);
@@ -166,12 +251,11 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
   if (event.error) return;
   const header = firstQuestionHeader(input);
   if (![SEARCH_CONFIRMATION_HEADER, MCN_CONFIRMATION_HEADER, FIELD_CONFIRMATION_HEADER].includes(header ?? "")) return;
-  const answers = answerValues(event.result ?? event.message);
-  if (answers.length !== 1) return;
+  const answer = answerForQuestion(event, input);
+  if (!answer) return;
 
   const current = store(rootDir);
   const workflow = current.data.workflow as Json;
-  const answer = answers[0];
   workflow.last_user_command = answer;
   workflow.updated_at_ms = Date.now();
 
@@ -216,6 +300,7 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
   workflow.last_tool = tool;
   workflow.last_tool_status = ok ? "success" : "failed";
   workflow.updated_at_ms = now;
+  if (tool === "search_creators" || tool === "rank_mcns") clearMcnRecipientDirectory(workflow);
 
   if (!ok) {
     workflow.next_action = `recover_${tool}`;
@@ -248,12 +333,18 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
         if (suggested !== undefined) workflow.suggested_expansion_count = suggested;
         break;
       }
-      case "rank_mcns":
+      case "rank_mcns": {
         workflow.phase = "mcn_planning";
         workflow.next_action = "confirm_mcn_selection";
         workflow.waiting_for = "user";
         if (Number.isInteger(input.minimum_mcn_count)) workflow.mcn_race_size = input.minimum_mcn_count;
+        const recipients = collectMcnRecipientDirectory(root);
+        if (recipients.length > 0 && text(input.id)) {
+          workflow.mcn_recipient_directory = recipients;
+          workflow.mcn_directory_requirement_id_sha256 = sha256Text(input.id.trim());
+        }
         break;
+      }
       case "select_inquiry_form_fields":
         workflow.phase = "inquiry_fields_ready";
         workflow.next_action = "confirm_inquiry_fields";
@@ -325,11 +416,31 @@ export function renderLocalWorkflowContext(rootDir: string): string {
   ].join("\n");
 }
 
-function createSummary(input: Json): Json {
-  const description = text(input.description) ? input.description.trim() : "";
+function selectedRecipientNames(input: Json, workflow: Json): string[] | undefined {
+  if (!Array.isArray(input.supplierIds) || input.supplierIds.length === 0) return [];
+  if (!text(input.requirement_id) || !text(workflow.mcn_directory_requirement_id_sha256)) return undefined;
+  if (sha256Text(input.requirement_id.trim()) !== workflow.mcn_directory_requirement_id_sha256) return undefined;
+  if (!Array.isArray(workflow.mcn_recipient_directory)) return undefined;
+
+  const namesBySupplierHash = new Map<string, string>();
+  for (const recipient of workflow.mcn_recipient_directory) {
+    if (!recipient || typeof recipient !== "object") continue;
+    if (text(recipient.supplier_id_sha256) && text(recipient.name)) {
+      namesBySupplierHash.set(recipient.supplier_id_sha256.trim(), recipient.name.trim());
+    }
+  }
+  const names = input.supplierIds.map((supplierId: unknown) =>
+    text(supplierId) ? namesBySupplierHash.get(sha256Text(supplierId.trim())) : undefined
+  );
+  return names.every(text) ? names : undefined;
+}
+
+function createSummary(input: Json, workflow: Json): Json {
+  const description = text(input.description) ? input.description : "";
   return {
     requirement_id_sha256: text(input.requirement_id) ? sha256Text(input.requirement_id.trim()) : null,
     supplier_count: Array.isArray(input.supplierIds) ? input.supplierIds.length : 0,
+    recipient_names: selectedRecipientNames(input, workflow),
     column_names: Array.isArray(input.columns) ? input.columns.map(selectedColumnName).filter(text) : [],
     description_sha256: description ? sha256Text(description) : null,
   };
@@ -337,79 +448,141 @@ function createSummary(input: Json): Json {
 
 function descriptionPreview(value: unknown): string {
   if (!text(value)) return "（未提供企微消息）";
-  const parsed = parsedJsonObject(value);
-  const rendered = parsed ? JSON.stringify(parsed) : value.trim();
-  return rendered;
+  return value;
 }
 
-function truncateCodePoints(value: string, maximum: number): string {
-  const points = Array.from(value);
-  return points.length <= maximum ? value : `${points.slice(0, maximum - 1).join("")}…`;
+function externalSendQuestion(input: Json, summary: Json): string {
+  const recipientNames = Array.isArray(summary.recipient_names) ? summary.recipient_names.filter(text) : [];
+  const columnNames = Array.isArray(summary.column_names) ? summary.column_names.filter(text) : [];
+  return [
+    "⚠️ 不可逆企微外发",
+    "",
+    `确认后将立即向 ${summary.supplier_count} 家机构发送以下企微消息。`,
+    "",
+    `发送对象（${summary.supplier_count} 家）`,
+    ...(recipientNames.length > 0
+      ? recipientNames.map((name: string, index: number) => `${index + 1}. ${name}`)
+      : ["（无发送对象）"]),
+    "",
+    "回填字段",
+    ...(columnNames.length > 0 ? columnNames.map((name: string) => `- ${name}`) : ["- 未选择"]),
+    "",
+    "企微消息正文",
+    "────────",
+    descriptionPreview(input.description),
+    "────────",
+    "",
+    "是否确认立即发送？",
+  ].join("\n");
 }
 
-function approvalDescription(input: Json, summary: Json): string {
-  return truncateCodePoints([
-    `这是不可逆外发操作。确认后将立即向 ${summary.supplier_count} 家机构发送企微消息。`,
-    `回填字段：${summary.column_names.length > 0 ? summary.column_names.join("、") : "未选择"}`,
-    `消息内容：${descriptionPreview(input.description)}`,
-  ].join("\n"), EXTERNAL_SEND_DESCRIPTION_MAX_LENGTH);
-}
-
-function approvalResult(current: GuardStore, id: string, input: Json, summary: Json): Json {
+function externalSendAskInput(input: Json, summary: Json): Json {
   return {
-    requireApproval: {
-      title: EXTERNAL_SEND_TITLE,
-      description: approvalDescription(input, summary),
-      severity: "warning",
-      timeoutMs: CONFIRMATION_TTL_MS,
-      timeoutBehavior: "deny",
-      onResolution: (decision: ApprovalResolution) => {
-        const receipt = current.data.confirmations[id] as Json | undefined;
-        if (!receipt || receipt.status !== "pending") return;
-        receipt.status = decision === "allow-once" || decision === "allow-always"
-          ? "in_flight" satisfies ConfirmationStatus
-          : "denied" satisfies ConfirmationStatus;
-        receipt.resolution = decision;
-        receipt.updated_at_ms = Date.now();
-        current.data.confirmations[id] = receipt;
-        save(current.path, current.data);
-      },
-    },
+    questions: [{
+      header: EXTERNAL_SEND_HEADER,
+      question: externalSendQuestion(input, summary),
+      options: [
+        {
+          label: EXTERNAL_SEND_CONFIRM_LABEL,
+          description: `立即向上述 ${summary.supplier_count} 家机构发送这条企微消息`,
+        },
+        {
+          label: EXTERNAL_SEND_CANCEL_LABEL,
+          description: "停止本次外发，可先修改发送对象、字段或消息",
+        },
+      ],
+    }],
+  };
+}
+
+function confirmationRequiredResult(askInput: Json): Json {
+  return {
+    block: true,
+    blockReason: [
+      `${EXTERNAL_SEND_CONFIRMATION_MARKER}: Provider 尚未调用。`,
+      "立即调用宿主工具 AskUserQuestion，arguments 必须与下方 JSON 完全一致，不得改写问题、换行或选项：",
+      "<AskUserQuestionInput>",
+      JSON.stringify(askInput),
+      "</AskUserQuestionInput>",
+      `仅当结果为“${EXTERNAL_SEND_CONFIRM_LABEL}”时，立即用完全相同的 create_with_distributions 参数再调用一次；其他结果停止且不发送。`,
+    ].join("\n"),
   };
 }
 
 function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
-  const requestFingerprint = bindingFingerprint(input);
+  const requestFingerprint = fingerprint(input);
   const current = store(rootDir);
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.kind === "external_send" && receipt.status === "in_flight" &&
-    receipt.request_fingerprint === requestFingerprint && text(toolCallId) && receipt.tool_call_id === toolCallId
+    receipt.kind === "external_send" && receipt.confirmation_mode === "ask_user_question" &&
+    receipt.status === "in_flight" && receipt.request_fingerprint === requestFingerprint &&
+    receipt.tool_call_id === (toolCallId ?? null)
   );
   if (inFlight) return undefined;
 
-  const pending = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.kind === "external_send" && receipt.status === "pending" &&
-    receipt.request_fingerprint === requestFingerprint && receipt.tool_call_id === (toolCallId ?? null)
+  const approved = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
+    receipt.kind === "external_send" && receipt.confirmation_mode === "ask_user_question" &&
+    receipt.status === "approved" && receipt.request_fingerprint === requestFingerprint
   );
-  if (pending) return approvalResult(current, pending[0], input, pending[1].safe_summary);
+  if (approved) {
+    const [id, receipt] = approved;
+    receipt.status = "in_flight" satisfies ConfirmationStatus;
+    receipt.tool_call_id = toolCallId ?? null;
+    receipt.updated_at_ms = Date.now();
+    current.data.confirmations[id] = receipt;
+    current.data.latest_external_confirmation_id = id;
+    save(current.path, current.data);
+    return undefined;
+  }
+
+  const pending = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
+    receipt.kind === "external_send" && receipt.confirmation_mode === "ask_user_question" &&
+    receipt.status === "pending" && receipt.request_fingerprint === requestFingerprint
+  );
+  if (pending) {
+    const askInput = externalSendAskInput(input, pending[1].safe_summary);
+    if (pending[1].ask_input_fingerprint === fingerprint(askInput)) {
+      return confirmationRequiredResult(askInput);
+    }
+    pending[1].status = "denied" satisfies ConfirmationStatus;
+    pending[1].resolution = "prompt-changed";
+    pending[1].updated_at_ms = Date.now();
+    current.data.confirmations[pending[0]] = pending[1];
+  }
+
+  const now = Date.now();
+  for (const [id, receipt] of Object.entries<Json>(current.data.confirmations)) {
+    if (receipt.kind !== "external_send" || !["pending", "approved"].includes(receipt.status)) continue;
+    receipt.status = "denied" satisfies ConfirmationStatus;
+    receipt.resolution = "superseded";
+    receipt.updated_at_ms = now;
+    current.data.confirmations[id] = receipt;
+  }
 
   const id = randomUUID();
-  const now = Date.now();
-  const summary = createSummary(input);
+  const summary = createSummary(input, current.data.workflow as Json);
+  if (summary.supplier_count > 0 && !Array.isArray(summary.recipient_names)) {
+    save(current.path, current.data);
+    return denyStructured(
+      "INTEGRATION_REQUIRED",
+      "无法从最近一次成功的 MCN 赛马结果核对全部发送对象名称，请返回 MCN 方案修改或重新选择后再发送。",
+    );
+  }
+  const askInput = externalSendAskInput(input, summary);
   current.data.confirmations[id] = {
     kind: "external_send",
+    confirmation_mode: "ask_user_question",
     request_fingerprint: requestFingerprint,
     input_fingerprint: requestFingerprint,
+    ask_input_fingerprint: fingerprint(askInput),
     safe_summary: summary,
     status: "pending" satisfies ConfirmationStatus,
-    tool_call_id: toolCallId ?? null,
     created_at_ms: now,
     updated_at_ms: now,
     expires_at_ms: now + CONFIRMATION_TTL_MS,
   };
   current.data.latest_external_confirmation_id = id;
   save(current.path, current.data);
-  return approvalResult(current, id, input, summary);
+  return confirmationRequiredResult(askInput);
 }
 
 export function guardWorkflowTool(
@@ -426,18 +599,39 @@ export function guardWorkflowTool(
 
 function recordExternalSendResult(event: Json, input: Json, rootDir: string): void {
   const current = store(rootDir);
-  const requestFingerprint = bindingFingerprint(input);
+  const requestFingerprint = fingerprint(input);
   const afterToolCallId = text(event.toolCallId) ? event.toolCallId.trim() : undefined;
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) => {
-    if (receipt.kind !== "external_send" || receipt.status !== "in_flight") return false;
+    if (receipt.kind !== "external_send" || receipt.confirmation_mode !== "ask_user_question") return false;
+    if (receipt.status !== "in_flight" || receipt.input_fingerprint !== requestFingerprint) return false;
     if (afterToolCallId && text(receipt.tool_call_id)) return receipt.tool_call_id === afterToolCallId;
-    return receipt.input_fingerprint === requestFingerprint;
+    return true;
   });
   if (!inFlight) return;
   const [id, receipt] = inFlight;
   receipt.status = successful(event.error ? { isError: true } : event.result) ? "consumed" : "unknown";
   receipt.updated_at_ms = Date.now();
   delete receipt.tool_call_id;
+  current.data.confirmations[id] = receipt;
+  save(current.path, current.data);
+}
+
+function recordExternalSendDecision(event: Json, input: Json, rootDir: string): void {
+  const askInputFingerprint = fingerprint(input);
+  const current = store(rootDir);
+  const pending = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
+    receipt.kind === "external_send" && receipt.confirmation_mode === "ask_user_question" &&
+    receipt.status === "pending" && receipt.ask_input_fingerprint === askInputFingerprint
+  );
+  if (!pending) return;
+
+  const [id, receipt] = pending;
+  const answer = answerForQuestion(event, input);
+  receipt.status = !event.error && event.result?.isError !== true && answer === EXTERNAL_SEND_CONFIRM_LABEL
+    ? "approved" satisfies ConfirmationStatus
+    : "denied" satisfies ConfirmationStatus;
+  receipt.resolution = answer ?? "denied";
+  receipt.updated_at_ms = Date.now();
   current.data.confirmations[id] = receipt;
   save(current.path, current.data);
 }
@@ -450,6 +644,7 @@ export function recordWorkflowToolResult(
   rootDir: string,
 ): void {
   if (isAskTool(raw)) {
+    recordExternalSendDecision(event, input, rootDir);
     updateWorkflowForDecision(event, input, rootDir);
     return;
   }

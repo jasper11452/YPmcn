@@ -96,7 +96,8 @@ class SkillPackageContractTest(unittest.TestCase):
             "只修报错字段、序列化、映射或审计计数",
             "不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序",
             "preview 不限制 Skill 读取或其他 Tool",
-            "Native Approval",
+            "AskUserQuestion",
+            "EXTERNAL_SEND_CONFIRMATION_REQUIRED",
             "本地状态只按实际成功结果推进",
             "用户要求失败即停时绝不重试",
         ):
@@ -147,10 +148,14 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_send_and_recovery_docs_are_fail_closed(self):
         joined = "\n".join(read(path) for path in [SKILL, *REFERENCES.glob("*.md")])
         for required in (
-            "Native Approval",
+            "AskUserQuestion",
+            "EXTERNAL_SEND_CONFIRMATION_REQUIRED",
             "写结果未知",
             "只有实际 MCP 返回算成功证据",
-            "确认后宿主自动续传原调用",
+            "只有返回“确认发送”",
+            "真实换行逐项展示 MCN、字段和完整企微消息",
+            "任一名称无法核对即阻断",
+            "修改对象或消息后重新走预检",
         ):
             self.assertIn(required, joined)
         for pattern in (
@@ -431,8 +436,9 @@ class SkillPackageContractTest(unittest.TestCase):
         text = read(REFERENCES / "execution-gates.md")
         for required in (
             "`before_tool_call`",
-            "Native Approval",
-            "宿主自动续传同一调用",
+            "AskUserQuestion",
+            "EXTERNAL_SEND_CONFIRMATION_REQUIRED",
+            "第二次调用",
             "不做严格阻断",
         ):
             self.assertIn(required, text)

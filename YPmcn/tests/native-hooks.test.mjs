@@ -17,7 +17,7 @@ const distributionParams = (overrides = {}) => ({
   requirement_id: "requirement-1",
   columns: [{ field_key: "creator_name", field_name: "达人名称" }],
   supplierIds: ["supplier-1"],
-  description: JSON.stringify({ title: "测试项目", platform: "小红书", price: { 图文: "5000元以内" } }),
+  description: "您好，现招募小红书达人参与测试项目。\n图文报价：5000元以内\n请协助推荐合适人选，谢谢。",
   ...overrides,
 });
 
@@ -44,13 +44,55 @@ async function guard(toolName, params = {}, toolCallId, context = {}) {
   return hooks.get("before_tool_call")({ toolName, params, toolCallId }, context);
 }
 
-async function requestApproval(params = distributionParams(), context = {}, toolCallId = "call-send") {
+async function recordMcnRecipients(params, context = {}, recipientNames) {
+  if (!Array.isArray(params.supplierIds) || params.supplierIds.length === 0) return;
+  const names = recipientNames ?? params.supplierIds.map((_, index) => `测试MCN ${index + 1}`);
+  await recordTool(
+    "mcp__ypmcn__rank_mcns",
+    { id: params.requirement_id, platform: "xiaohongshu" },
+    {
+      success: true,
+      data: {
+        mcns: params.supplierIds.map((supplierId, index) => ({
+          supplier_id: supplierId,
+          supplier_name: names[index],
+        })),
+      },
+      error: null,
+    },
+    context,
+  );
+}
+
+function askInputFrom(result) {
+  assert.equal(result?.block, true);
+  assert.match(result.blockReason, /EXTERNAL_SEND_CONFIRMATION_REQUIRED/);
+  assert.equal(result.requireApproval, undefined);
+  const match = /<AskUserQuestionInput>\n([^\n]+)\n<\/AskUserQuestionInput>/.exec(result.blockReason);
+  assert.ok(match, "blocked send must include exact AskUserQuestion arguments");
+  const askInput = JSON.parse(match[1]);
+  assert.equal(askInput.questions.length, 1);
+  assert.equal(askInput.questions[0].header, "企微外发确认");
+  assert.deepEqual(askInput.questions[0].options.map(({ label }) => label), ["确认发送", "取消发送"]);
+  return askInput;
+}
+
+async function requestConfirmation(
+  params = distributionParams(),
+  context = {},
+  toolCallId = "call-send",
+  recipientNames,
+) {
+  await recordMcnRecipients(params, context, recipientNames);
   const result = await guard("mcp__ypmcn__create_with_distributions", params, toolCallId, context);
-  assert.equal(result?.block, undefined);
-  assert.equal(result?.requireApproval?.title, "企微外发确认");
-  assert.equal(result.requireApproval.severity, "warning");
-  assert.equal(typeof result.requireApproval.onResolution, "function");
-  return { result, params, toolCallId };
+  return { result, askInput: askInputFrom(result), params, toolCallId, context };
+}
+
+async function answerExternalConfirmation(prepared, answer = "确认发送") {
+  const question = prepared.askInput.questions[0].question;
+  await recordTool("AskUserQuestion", prepared.askInput, {
+    content: [{ type: "text", text: `${question}: ${answer}` }],
+  }, prepared.context);
 }
 
 async function recordTool(toolName, params, result, context = {}, toolCallId) {
@@ -70,7 +112,7 @@ describe("YP Action native hooks", () => {
     assert.equal(prompt.prependSystemContext, YPMCN_FAST_PATH);
     assert.match(prompt.prependContext, /authoritative local orchestration state/);
     assert.match(prompt.prependContext, /"next_action":"validate_requirement"/);
-    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 13);
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 14);
 
     for (const [toolName, params] of [
       ["read", { file_path: "/tmp/SKILL.md" }],
@@ -82,10 +124,12 @@ describe("YP Action native hooks", () => {
     }
   });
 
-  it("allows every declared business Tool except that send receives native approval", async () => {
+  it("allows every declared business Tool except that send requires AskUserQuestion confirmation", async () => {
     for (const name of [...contract.requiredTools, ...contract.optionalTools]) {
-      const result = await guard(`mcp__ypmcn__${name}`, name === "create_with_distributions" ? distributionParams() : {});
-      if (name === "create_with_distributions") assert.ok(result.requireApproval);
+      const params = name === "create_with_distributions" ? distributionParams() : {};
+      if (name === "create_with_distributions") await recordMcnRecipients(params);
+      const result = await guard(`mcp__ypmcn__${name}`, params);
+      if (name === "create_with_distributions") askInputFrom(result);
       else assert.equal(result, undefined, name);
     }
   });
@@ -99,88 +143,214 @@ describe("YP Action native hooks", () => {
     assert.equal(await guard("bash", { command: "rg create_with_distributions YPmcn/README.md" }), undefined);
   });
 
-  it("binds a native warning to the original pending call so approval can resume it directly", async () => {
-    const { result, params, toolCallId } = await requestApproval(distributionParams({
+  it("binds a multiline AskUserQuestion warning to the exact send parameters", async () => {
+    const prepared = await requestConfirmation(distributionParams({
       supplierIds: ["supplier-1", "supplier-2"],
-      description: JSON.stringify({ title: "真实企微消息" }),
-    }));
-    assert.match(result.requireApproval.description, /2 家机构/);
-    assert.match(result.requireApproval.description, /真实企微消息/);
-    assert.ok(Array.from(result.requireApproval.description).length <= 256);
+      description: "您好，想邀请贵司参与真实企微消息项目。\n请协助推荐合适达人。",
+    }), {}, "call-send", ["星图文化", "青禾传媒"]);
+    const question = prepared.askInput.questions[0].question;
+    assert.match(question, /^⚠️ 不可逆企微外发\n\n/);
+    assert.match(question, /确认后将立即向 2 家机构/);
+    assert.match(question, /发送对象（2 家）\n1\. 星图文化\n2\. 青禾传媒/);
+    assert.match(question, /回填字段\n- 达人名称/);
+    assert.match(question, /企微消息正文\n────────\n您好[^]*\n请协助推荐合适达人。\n────────/);
+    assert.match(question, /是否确认立即发送？$/);
 
-    await result.requireApproval.onResolution("allow-once");
-    const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    const receipt = state.confirmations[state.latest_external_confirmation_id];
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    let receipt = state.confirmations[state.latest_external_confirmation_id];
+    assert.equal(receipt.status, "pending");
+    assert.equal(receipt.confirmation_mode, "ask_user_question");
+
+    await answerExternalConfirmation(prepared);
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    receipt = state.confirmations[state.latest_external_confirmation_id];
+    assert.equal(receipt.status, "approved");
+
+    const executionToolCallId = "call-send-execute";
+    assert.equal(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      prepared.params,
+      executionToolCallId,
+    ), undefined);
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    receipt = state.confirmations[state.latest_external_confirmation_id];
     assert.equal(receipt.status, "in_flight");
-    assert.equal(receipt.tool_call_id, toolCallId);
+    assert.equal(receipt.tool_call_id, executionToolCallId);
 
-    // If the host re-enters before_tool_call while resuming, the exact call is allowed without a second popup.
-    assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, toolCallId), undefined);
     await recordTool(
       "mcp__ypmcn__create_with_distributions",
-      params,
+      prepared.params,
       { success: true, data: { project_id: "project-1" }, error: null },
       {},
-      toolCallId,
+      executionToolCallId,
     );
-    const consumed = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(consumed.confirmations[consumed.latest_external_confirmation_id].status, "consumed");
-    assert.equal(consumed.workflow.phase, "waiting_mcn_return");
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "consumed");
+    assert.equal(state.workflow.phase, "waiting_mcn_return");
   });
 
-  it("keeps long WeCom previews within the native approval description limit", async () => {
-    const { result } = await requestApproval(distributionParams({
-      description: JSON.stringify({ content: "长消息".repeat(300) }),
+  it("keeps the full multiline WeCom message in the scrollable AskUserQuestion body", async () => {
+    const message = `您好，现有以下合作需求：\n${"长消息".repeat(300)}\n以上为完整消息结尾。`;
+    const prepared = await requestConfirmation(distributionParams({
+      description: message,
     }), {}, "call-long-preview");
-    assert.equal(Array.from(result.requireApproval.description).length, 256);
-    assert.match(result.requireApproval.description, /…$/);
+    const question = prepared.askInput.questions[0].question;
+    assert.ok(Array.from(question).length > 256);
+    assert.ok(question.includes(message));
+    assert.doesNotMatch(question, /消息结尾。…/);
   });
 
-  it("does not authorize deny, timeout, or a changed request", async () => {
-    for (const [index, decision] of ["deny", "timeout", "cancelled"].entries()) {
-      const { result, params } = await requestApproval(
-        distributionParams({ requirement_id: `requirement-${index}` }),
-        {},
-        `call-${index}`,
-      );
-      await result.requireApproval.onResolution(decision);
-      const retry = await guard("mcp__ypmcn__create_with_distributions", params, `call-${index}-retry`);
-      assert.ok(retry.requireApproval, decision);
-    }
+  it("resolves selected MCN names from supported rank result shapes and blocks unverified recipients", async () => {
+    const params = distributionParams({ supplierIds: ["supplier-1", "supplier-2"] });
+    await recordTool(
+      "mcp__ypmcn__rank_mcns",
+      { id: params.requirement_id, platform: "xiaohongshu" },
+      {
+        success: true,
+        data: {
+          recommendations: [
+            { supplier: { id: "supplier-1", name: "星图文化" } },
+            { mcnId: "supplier-2", mcnName: "青禾传媒" },
+          ],
+        },
+        error: null,
+      },
+    );
 
-    const first = await requestApproval(distributionParams(), {}, "call-original");
-    await first.result.requireApproval.onResolution("allow-once");
+    const confirmation = await guard("mcp__ypmcn__create_with_distributions", params, "call-shaped-result");
+    assert.match(askInputFrom(confirmation).questions[0].question, /1\. 星图文化\n2\. 青禾传媒/);
+
+    const unknownRecipient = await guard(
+      "mcp__ypmcn__create_with_distributions",
+      { ...params, supplierIds: ["supplier-1", "supplier-unverified"] },
+      "call-unverified-recipient",
+    );
+    assert.equal(unknownRecipient.block, true);
+    assert.match(unknownRecipient.blockReason, /INTEGRATION_REQUIRED/);
+    assert.match(unknownRecipient.blockReason, /核对全部发送对象名称/);
+
+    const staleRequirement = await guard(
+      "mcp__ypmcn__create_with_distributions",
+      { ...params, requirement_id: "requirement-other" },
+      "call-stale-requirement",
+    );
+    assert.equal(staleRequirement.block, true);
+  });
+
+  it("keeps a rejected AskUserQuestion send unsent and allows a revised confirmation", async () => {
+    const prepared = await requestConfirmation(distributionParams({
+      supplierIds: ["supplier-1", "supplier-2"],
+    }), {}, "call-reject-and-edit", ["星图文化", "青禾传媒"]);
+    await answerExternalConfirmation(prepared, "取消发送");
+
+    const deniedState = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(deniedState.confirmations[deniedState.latest_external_confirmation_id].status, "denied");
+
+    const revised = await guard(
+      "mcp__ypmcn__create_with_distributions",
+      {
+        ...prepared.params,
+        supplierIds: ["supplier-2"],
+        description: "您好，这是修改后的企微消息。",
+      },
+      "call-revised-send",
+    );
+    const revisedQuestion = askInputFrom(revised).questions[0].question;
+    assert.match(revisedQuestion, /发送对象（1 家）\n1\. 青禾传媒/);
+    assert.match(revisedQuestion, /修改后的企微消息/);
+  });
+
+  it("does not authorize cancellation, host denial, tool error, a modified popup, or changed parameters", async () => {
+    const cancelled = await requestConfirmation(distributionParams({ requirement_id: "requirement-cancel" }));
+    await answerExternalConfirmation(cancelled, "取消发送");
+    askInputFrom(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      cancelled.params,
+      "call-cancel-retry",
+    ));
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    const denied = await requestConfirmation(distributionParams({ requirement_id: "requirement-denied" }));
+    await recordTool("AskUserQuestion", denied.askInput, {
+      content: [{ type: "text", text: "User denied the operation." }],
+    });
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "denied");
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    const failedTool = await requestConfirmation(distributionParams({ requirement_id: "requirement-tool-error" }));
+    await recordTool("AskUserQuestion", failedTool.askInput, {
+      isError: true,
+      answers: [{ selected_labels: ["确认发送"] }],
+    });
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "denied");
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    const modifiedPopup = await requestConfirmation(distributionParams({ requirement_id: "requirement-modified" }));
+    const changedAskInput = structuredClone(modifiedPopup.askInput);
+    changedAskInput.questions[0].question += "\n额外内容";
+    await recordTool("AskUserQuestion", changedAskInput, {
+      content: [{ type: "text", text: `${changedAskInput.questions[0].question}: 确认发送` }],
+    });
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "pending");
+    askInputFrom(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      modifiedPopup.params,
+      "call-modified-retry",
+    ));
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    const first = await requestConfirmation(distributionParams({
+      supplierIds: ["supplier-1", "supplier-2"],
+    }), {}, "call-original", ["星图文化", "青禾传媒"]);
+    await answerExternalConfirmation(first);
     const changed = await guard(
       "mcp__ypmcn__create_with_distributions",
-      { ...first.params, supplierIds: ["supplier-other"] },
-      "call-original",
+      { ...first.params, supplierIds: ["supplier-2"] },
+      "call-changed",
     );
-    assert.ok(changed.requireApproval);
+    const changedQuestion = askInputFrom(changed).questions[0].question;
+    assert.match(changedQuestion, /发送对象（1 家）\n1\. 青禾传媒/);
+    assert.doesNotMatch(changedQuestion, /1\. 星图文化/);
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.ok(Object.values(state.confirmations).some((item) =>
+      item.status === "denied" && item.resolution === "superseded"
+    ));
+    askInputFrom(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      first.params,
+      "call-stale-original",
+    ));
   });
 
-  it("requires a fresh approval after success or unknown result", async () => {
+  it("requires a fresh AskUserQuestion confirmation after success or unknown result", async () => {
     for (const [index, eventResult] of [
       [0, { success: true, data: {}, error: null }],
       [1, undefined],
     ]) {
       const params = distributionParams({ requirement_id: `requirement-replay-${index}` });
-      const prepared = await requestApproval(params, {}, `call-replay-${index}`);
-      await prepared.result.requireApproval.onResolution("allow-once");
+      const prepared = await requestConfirmation(params, {}, `call-replay-${index}`);
+      await answerExternalConfirmation(prepared);
+      const executionId = `call-replay-${index}-execute`;
+      assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, executionId), undefined);
       if (eventResult) {
-        await recordTool("mcp__ypmcn__create_with_distributions", params, eventResult, {}, `call-replay-${index}`);
+        await recordTool("mcp__ypmcn__create_with_distributions", params, eventResult, {}, executionId);
       } else {
         await hooks.get("after_tool_call")({
           toolName: "mcp__ypmcn__create_with_distributions",
           params,
-          toolCallId: `call-replay-${index}`,
+          toolCallId: executionId,
           error: "connection lost",
         }, {});
       }
-      assert.ok((await guard(
+      askInputFrom(await guard(
         "mcp__ypmcn__create_with_distributions",
         params,
         `call-replay-${index}-next`,
-      )).requireApproval);
+      ));
+      rmSync(join(tempDir, "state"), { recursive: true, force: true });
     }
   });
 
@@ -245,13 +415,64 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.next_action, "recover_validate_requirement");
   });
 
-  it("isolates workflow and approval state by host session", async () => {
+  it("opens the hosted field selector after select_inquiry_form_fields succeeds or fails", async () => {
+    const localHooks = new Map();
+    const openedUrls = [];
+    createYpmcnPlugin({
+      openUrl(url) { openedUrls.push(url); },
+    }).register({
+      rootDir: tempDir,
+      logger: { error() {} },
+      on(name, handler) { localHooks.set(name, handler); },
+    });
+
+    for (const event of [
+      {
+        toolName: "mcp__ypmcn__select_inquiry_form_fields",
+        params: {},
+        result: { success: true, data: { description: "creator_name：达人名称" }, error: null },
+      },
+      {
+        toolName: "mcp__ypmcn__select_inquiry_form_fields",
+        params: {},
+        error: "connection lost",
+      },
+    ]) {
+      await localHooks.get("after_tool_call")(event, {});
+    }
+
+    assert.deepEqual(openedUrls, [
+      "https://agenta.eshypdata.com/demand-field-selector",
+      "https://agenta.eshypdata.com/demand-field-selector",
+    ]);
+  });
+
+  it("does not alter Tool handling when the host cannot open the field selector", async () => {
+    const localHooks = new Map();
+    const errors = [];
+    createYpmcnPlugin({
+      openUrl() { throw new Error("browser unavailable"); },
+    }).register({
+      rootDir: tempDir,
+      logger: { error(message) { errors.push(message); } },
+      on(name, handler) { localHooks.set(name, handler); },
+    });
+
+    assert.equal(await localHooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__select_inquiry_form_fields",
+      params: {},
+      result: { success: false, error: { code: "TIMEOUT" } },
+    }, {}), undefined);
+    assert.deepEqual(errors, ["failed to open inquiry field selector: browser unavailable"]);
+  });
+
+  it("isolates workflow and AskUserQuestion confirmation state by host session", async () => {
     const first = { sessionKey: "session-one" };
     const second = { sessionKey: "session-two" };
     await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, first);
     await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, second);
-    const approval = await requestApproval(distributionParams(), first, "call-session-one");
-    await approval.result.requireApproval.onResolution("allow-once");
+    const confirmation = await requestConfirmation(distributionParams(), first, "call-session-one");
+    await answerExternalConfirmation(confirmation);
     assert.ok(readFileSync(sessionStateFile("session-one"), "utf8"));
     assert.ok(readFileSync(sessionStateFile("session-two"), "utf8"));
     const secondState = JSON.parse(readFileSync(sessionStateFile("session-two"), "utf8"));
@@ -259,18 +480,19 @@ describe("YP Action native hooks", () => {
   });
 
   it("stores fingerprints and workflow metadata without persisting the message body", async () => {
-    await requestApproval(distributionParams({
-      description: JSON.stringify({ private_note: "should-not-be-stored" }),
+    await requestConfirmation(distributionParams({
+      description: "您好，这是一条 should-not-be-stored 的私密企微消息。",
     }));
     const persisted = readFileSync(stateFile, "utf8");
     assert.match(persisted, /"input_fingerprint": "[0-9a-f]{64}"/);
     assert.match(persisted, /"workflow"/);
+    assert.doesNotMatch(persisted, /supplier-1/);
     assert.doesNotMatch(persisted, /should-not-be-stored/);
   });
 
-  it("still presents approval when provider arguments are incomplete because ordinary schema validation is not a Hook gate", async () => {
+  it("still requests confirmation when provider arguments are incomplete because schema validation is not a Hook gate", async () => {
     const result = await guard("mcp__ypmcn__create_with_distributions", {}, "call-provider-validation");
-    assert.ok(result.requireApproval);
+    askInputFrom(result);
   });
 
   it("fails open for ordinary tools and closed for external send when the guard itself throws", async () => {

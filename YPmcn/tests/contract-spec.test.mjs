@@ -140,8 +140,12 @@ describe("current Endpoint MCP contract", () => {
     assert.match(profile.tools.get_recommendation_run_detail.semanticRequirement, /positive integer/);
   });
 
-  it("adds the Agent-required JSON message without misreporting the live Provider required list", () => {
+  it("adds the Agent-required plain-text message without misreporting the live Provider required list", () => {
     assert.deepEqual(profile.tools.create_with_distributions.agentRequired, ["description"]);
+    assert.match(
+      profile.tools.create_with_distributions.agentSemanticRequirements.description,
+      /plain-text WeChat message.*line breaks.*must not be JSON/,
+    );
     assert.equal(
       profile.tools.create_with_distributions.agentSemanticRequirements.aliases.requirement_ID,
       "requirement_id",
