@@ -106,7 +106,7 @@ export function denyStructured(code: string, context: string): Json {
 export function store(rootDir: string): GuardStore {
   const path = statePath(rootDir);
   const data = load(path);
-  data.schema_version = 10;
+  data.schema_version = 11;
   data.confirmations ??= {};
   if (!Array.isArray(data.trusted_ids)) data.trusted_ids = [];
   if (!data.supply_plans || typeof data.supply_plans !== "object" || Array.isArray(data.supply_plans)) {
@@ -118,9 +118,16 @@ export function store(rootDir: string): GuardStore {
   if (!data.workflow_states || typeof data.workflow_states !== "object" || Array.isArray(data.workflow_states)) {
     data.workflow_states = {};
   }
+  if (!data.field_selections || typeof data.field_selections !== "object" || Array.isArray(data.field_selections)) {
+    data.field_selections = {};
+  }
+  if (!Array.isArray(data.trusted_relations)) data.trusted_relations = [];
   let changed = false;
   const now = Date.now();
   for (const [id, receipt] of Object.entries<Json>(data.confirmations)) {
+    if (receipt?.kind === "external_send" && ["in_flight", "unknown"].includes(receipt.status)) {
+      continue;
+    }
     if (!receipt || Number(receipt.expires_at_ms ?? 0) <= now) {
       delete data.confirmations[id];
       changed = true;
@@ -144,6 +151,12 @@ export function store(rootDir: string): GuardStore {
       changed = true;
     }
   }
+  for (const [key, receipt] of Object.entries<Json>(data.field_selections)) {
+    if (!receipt || Number(receipt.expires_at_ms ?? 0) <= now) {
+      delete data.field_selections[key];
+      changed = true;
+    }
+  }
   if (data.prompt_requirement_gate && Number(data.prompt_requirement_gate.expires_at_ms ?? 0) <= now) {
     delete data.prompt_requirement_gate;
     changed = true;
@@ -163,6 +176,15 @@ export function store(rootDir: string): GuardStore {
   );
   if (trustedIds.length !== data.trusted_ids.length) {
     data.trusted_ids = trustedIds;
+    changed = true;
+  }
+  const trustedRelations = data.trusted_relations.filter((receipt: unknown) =>
+    receipt && typeof receipt === "object" &&
+    text((receipt as Json).requirement_id) && text((receipt as Json).project_id) &&
+    text((receipt as Json).mcn_id) && Number((receipt as Json).expires_at_ms ?? 0) > now
+  );
+  if (trustedRelations.length !== data.trusted_relations.length) {
+    data.trusted_relations = trustedRelations;
     changed = true;
   }
   if (changed) save(path, data);

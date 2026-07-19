@@ -17,6 +17,7 @@ import {
   promptRequirementGate,
   recordTrustedIds,
   recordWorkflowToolResult,
+  settlePromptRequirementGate,
   successfulValidateRequirement,
   validateMarkedAsk,
 } from "./runtime-hook-workflow.js";
@@ -66,7 +67,9 @@ export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
   const tool = normalize(raw);
   if (tool) recordTrustedIds(event, tool, rootDir);
   if (tool === "validate_requirement") {
-    settleReadyRequirement(input, rootDir, successfulValidateRequirement(event));
+    const succeeded = successfulValidateRequirement(event);
+    settleReadyRequirement(input, rootDir, succeeded);
+    settlePromptRequirementGate(rootDir, succeeded);
     return;
   }
   recordWorkflowToolResult(event, raw, tool, input, rootDir);

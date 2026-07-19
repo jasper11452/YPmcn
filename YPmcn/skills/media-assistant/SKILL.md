@@ -19,7 +19,7 @@ description: "Use for YPmcn requirement validation, sourcing, distribution, rank
 
 `validate_requirement → search_creators → rank_mcns → 供给方案与 MCN 确认 → select_inquiry_form_fields → message 确认 → 可选 manual_source_creators → create_with_distributions → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
 
-外发前必须完成 supply、MCN、message 三项确认并通过 `confirm_distribution_send` session action 写入；缺任一项即停止。精排还必须有真实外发、回收完成、`candidate_pool_enriched` 和动作授权。
+外发前必须完成 supply、MCN、message 三项确认；Native Ask 回执、最新字段选择和外发请求由 Hook 绑定校验，缺任一项即停止。精排还必须有真实外发、回收完成、`candidate_pool_enriched` 和动作授权。
 宿主若注入标准 Brief 的权威 preview，直接使用：未决时只提问并停止；`ready` 后首个业务 Tool 固定为 `validate_requirement`。
 ## 用户引导
 

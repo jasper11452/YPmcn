@@ -137,7 +137,7 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_send_and_recovery_docs_are_fail_closed(self):
         joined = "\n".join(read(path) for path in [SKILL, *REFERENCES.glob("*.md")])
         for required in (
-            "confirm_distribution_send",
+            "Native Ask",
             "写结果未知",
             "只有实际 MCP 返回算成功证据",
             "真实外发",

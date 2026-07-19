@@ -12,9 +12,9 @@
 
 `search_creators` 成功后的下一个 Tool 必须直接是 `rank_mcns({id, platform})`，同一轮连续执行；两者之间不得插入 `AskUserQuestion`、文字确认、状态查询或其他 Tool。`id` 复用 `validate_requirement.data.id`，`platform` 复用已确认平台，只添加用户明确要求且 live schema 支持的排名参数。`search_creators` 或 `rank_mcns` 报错时立即停止后续业务 Tool，并在同一轮调用原生 `AskUserQuestion`：缺参/非法值请求精确澄清，明确后端错误提供安全恢复选择，未知写结果先对账且禁止盲重试。
 
-`rank_mcns` 成功后再展示实际 MCN 列表、缺口和 Provider-backed 供给方案，等待用户完成 supply 与 MCN 选择；搜索时记录的供给摘要只用于该外发前确认，不得自行重算或编造。随后才选择询价字段并确认 message。外发前 supply、MCN、message 三项结果仍必须由 `confirm_distribution_send` session action 记录。
+`rank_mcns` 成功后再展示实际 MCN 列表、缺口和 Provider-backed 供给方案，等待用户完成 supply 与 MCN 选择；搜索时记录的供给摘要只用于该外发前确认，不得自行重算或编造。随后才选择询价字段并确认 message。Native Ask 回执、最新字段选择和机构来源由 Hook 绑定到同一需求。
 
-选择询价字段后展示实际 description、机构名单和固定消息预览。外发前重新查询同一项目状态并确认动作授权；supply、MCN、message 三项确认必须由 `confirm_distribution_send` session action 记录。首次外发 Hook 返回的 marker 和绑定摘要必须原样展示，只有“确认发送”才以完全相同参数继续；修改、拒绝、超时、过期或参数变化均重新确认或停止。session action 不可用时返回 `integration_required`，不得自行设计替代接口。
+选择询价字段后展示实际 description、机构名单和固定消息预览。外发前重新查询同一项目状态并确认动作授权；supply、MCN、message 三项确认通过 Native Ask 与 Hook 回执记录。首次外发 Hook 返回的 marker 和绑定摘要必须原样展示，只有“确认发送”才以完全相同参数继续；修改、拒绝或超时均重新确认或停止。未知外发结果在权威对账前持续阻塞，不能通过等待过期或修改参数重发。
 
 ## 工具边界与恢复
 

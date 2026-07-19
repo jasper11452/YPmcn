@@ -34,7 +34,14 @@ function isYpmcnRequirementIntent(prompt: string): boolean {
 }
 
 function hookStateScope(event: any, ctx?: any): string | undefined {
-  return [ctx?.sessionKey, event?.sessionKey, ctx?.sessionId, event?.sessionId]
+  return [
+    ctx?.sessionKey, event?.sessionKey,
+    ctx?.sessionId, event?.sessionId,
+    ctx?.conversationId, event?.conversationId,
+    ctx?.threadId, event?.threadId,
+    ctx?.channelId, event?.channelId,
+    ctx?.chatId, event?.chatId,
+  ]
     .find((value) => typeof value === "string" && value.trim())?.trim();
 }
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ypmcn.local/schemas/workflow-state.schema.json",
-  "title": "YPmcn Local Session Projection",
-  "description": "Fail-closed hook projection derived only from explicit actual tool evidence; it is not provider state or an advertised provider output.",
+  "title": "YPmcn Database-Derived Workflow Projection",
+  "description": "Workflow phase projection derived from committed provider database facts; provider output remains unadvertised.",
   "type": "object",
   "required": [
     "projection_status",
@@ -11,24 +11,21 @@
   ],
   "properties": {
     "projection_status": {
-      "const": "local-session-projection"
+      "const": "database-derived"
     },
     "phase": {
       "enum": [
         "requirement_draft",
         "requirement_ready",
-        "search_completed",
+        "candidate_pool_ready",
         "mcn_planning",
-        "field_selection_ready",
-        "distribution_sync_pending",
-        "waiting_return",
-        "recovering",
-        "recovery_sync_pending",
-        "recovered",
+        "waiting_mcn_return",
+        "candidate_pool_enriched",
         "recommendation_ready",
         "submission_batch_ready",
         "feedback_routing",
-        "blocked"
+        "blocked",
+        "closed"
       ]
     },
     "requirement_id": {

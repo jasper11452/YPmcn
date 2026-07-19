@@ -113,7 +113,18 @@ function clearSupplyConfirmations() {
 }
 
 async function requestConfirmation(params = distributionParams()) {
-  await recordWorkflowState(params.projectName);
+  const requirementId = `req-send-${createHash("sha256").update(params.projectName).digest("hex").slice(0, 12)}`;
+  await recordWorkflowState(params.projectName, ["search_creators", "create_with_distributions"], requirementId);
+  await recordSearch(requirementId);
+  await recordSuccessfulRank({ id: requirementId, platform: "xiaohongshu" }, requirementId);
+  const supplyConfirmationId = pendingSupplyConfirmationId(requirementId);
+  await answerSupplyPlanConfirmation(supplyConfirmationId);
+  await hooks.get("after_tool_call")({
+    toolName: "mcp__ypmcn__select_inquiry_form_fields",
+    params: {},
+    result: { success: true, data: { description: "creator_name：达人名称" }, error: null },
+  }, {});
+  await recordWorkflowState(params.projectName, ["create_with_distributions"], requirementId);
   const blocked = await hooks.get("before_tool_call")({
     toolName: "mcp__ypmcn__create_with_distributions",
     params,
@@ -191,12 +202,24 @@ async function recordSuccessfulRank(params, suffix) {
     toolName: "mcp__ypmcn__rank_mcns",
     params,
     toolCallId,
-    result: { success: true, data: { mcn_run_id: `mcn-run-${suffix}` }, error: null },
+    result: {
+      success: true,
+      data: {
+        mcn_run_id: `mcn-run-${suffix}`,
+        suppliers: [{ supplier_id: "supplier-1" }, { supplier_id: "supplier-2" }],
+      },
+      error: null,
+    },
   }, {});
 }
 
-async function recordWorkflowState(projectName, allowedActions = ["create_with_distributions"]) {
-  const params = { demand_id: `demand-${projectName}`, demand_version: 1 };
+async function recordWorkflowState(
+  projectName,
+  allowedActions = ["create_with_distributions"],
+  requirementId,
+  demandId = `demand-${projectName}`,
+) {
+  const params = { demand_id: demandId, demand_version: 1 };
   assert.equal(await hooks.get("before_tool_call")({
     toolName: "mcp__ypmcn__get_workflow_state",
     params,
@@ -206,7 +229,13 @@ async function recordWorkflowState(projectName, allowedActions = ["create_with_d
     params,
     result: {
       success: true,
-      data: { workflow_state: { project_name: projectName, allowed_actions: allowedActions } },
+      data: {
+        workflow_state: {
+          project_name: projectName,
+          allowed_actions: allowedActions,
+          ...(requirementId ? { requirement_id: requirementId } : {}),
+        },
+      },
       error: null,
     },
   }, {});
@@ -385,7 +414,7 @@ describe("YP Action native hook guard", () => {
     assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
   });
 
-  it("lets a denied native clarification exit without locking the turn", async () => {
+  it("keeps business writes blocked after denied native clarification", async () => {
     await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     const params = {
       questions: [{
@@ -405,7 +434,7 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__validate_requirement",
       params: { payload: requirementPayload() },
     }, {});
-    assert.doesNotMatch(next?.blockReason ?? "", /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
+    assert.match(next?.blockReason ?? "", /BLOCKED_REQUIREMENT_CLARIFICATION_CANCELLED/);
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.prompt_requirement_gate.status, "cancelled");
   });
@@ -776,6 +805,21 @@ describe("YP Action native hook guard", () => {
       params,
     }, {});
     assert.equal(trusted, undefined);
+
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params: distributionParams({ projectName: "other-project" }),
+      result: {
+        success: true,
+        data: { project_id: "other-project-id", distributions: [{ mcn_id: "other-mcn-id" }] },
+        error: null,
+      },
+    }, {});
+    const mixed = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__sync_mcn_inquiry_status",
+      params: { ...params, project_id: "other-project-id" },
+    }, {});
+    assert.match(mixed.blockReason, /ID_PROVENANCE_MISMATCH/);
   });
 
   it("requires trusted provenance for inquiry and recommendation run IDs", async () => {
@@ -1445,6 +1489,29 @@ describe("YP Action native hook guard", () => {
     assert.match(mismatch.blockReason, /BLOCKED_WORKFLOW_ACTION/);
   });
 
+  it("does not let workflow permission skip the external preparation chain", async () => {
+    const params = distributionParams({ projectName: "未完成外发链路" });
+    await recordWorkflowState(params.projectName, ["create_with_distributions"], "req-unprepared-send");
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params,
+      toolCallId: "call-unprepared-send",
+    }, {});
+    assert.match(blocked.blockReason, /INVALID_PHASE.*rank_mcns/);
+  });
+
+  it("fails closed when two demands share the same project name", async () => {
+    const params = distributionParams({ projectName: "同名项目" });
+    await recordWorkflowState(params.projectName, ["create_with_distributions"], "req-same-name-1", "demand-same-name-1");
+    await recordWorkflowState(params.projectName, ["create_with_distributions"], "req-same-name-2", "demand-same-name-2");
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params,
+      toolCallId: "call-ambiguous-project",
+    }, {});
+    assert.match(blocked.blockReason, /WORKFLOW_STATE_REFRESH_REQUIRED/);
+  });
+
   it("hydrates external summary values and allows explicit cancel options", async () => {
     const { id } = await requestConfirmation(distributionParams({ projectName: "真实外发项目" }));
     const summary = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
@@ -1587,6 +1654,36 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-reconcile-send-2",
     }, {});
     assert.match(retry.blockReason, /WRITE_RESULT_UNKNOWN/);
+  });
+
+  it("keeps an expired unknown send blocked even when parameters change", async () => {
+    const params = distributionParams({ projectName: "未知结果持久测试" });
+    const { id } = await requestConfirmation(params);
+    await answerConfirmation(id);
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-persistent-unknown-1",
+    }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params,
+      toolCallId: "call-persistent-unknown-1",
+      error: new Error("connection lost"),
+    }, {});
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    state.confirmations[id].expires_at_ms = Date.now() - 1;
+    writeFileSync(stateFile, JSON.stringify(state), "utf8");
+
+    await recordWorkflowState(params.projectName, ["create_with_distributions"]);
+    const changed = {
+      ...params,
+      supplierIds: ["supplier-1", "supplier-2"],
+      prefillRowsBySupplier: { "supplier-1": [], "supplier-2": [] },
+    };
+    const retry = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions", params: changed, toolCallId: "call-persistent-unknown-2",
+    }, {});
+    assert.match(retry.blockReason, /WRITE_RESULT_UNKNOWN.*changed parameters/);
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].status, "unknown");
   });
 
   it("reconciles an unknown rank outcome only for the same requirement", async () => {

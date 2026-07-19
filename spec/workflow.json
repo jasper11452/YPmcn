@@ -48,6 +48,7 @@
     "derivationOrder": [
       "closed-demand",
       "conflict-or-ledger-unknown-blocked",
+      "feedback-routing",
       "submission-batch-ready",
       "recommendation-ready",
       "candidate-pool-enriched",
@@ -127,7 +128,7 @@
       "id": "distribution-created",
       "from": "mcn_planning",
       "trigger": {"type": "tool", "name": "create_with_distributions"},
-      "guards": ["supply, MCN, and message confirmations are recorded through confirm_distribution_send", "one-time Ask confirmation matches the unchanged request fingerprint", "supplier and prefill rows resolve one requirement"],
+      "guards": ["supply, MCN, field selection, and message confirmations are bound by Native Ask receipts and Hook evidence", "one-time Ask confirmation matches the unchanged request fingerprint", "supplier and prefill rows resolve one requirement"],
       "implementationStatus": "target-blocked",
       "blockedBy": "current provider does not use mcp_tool_call_ledger for this Tool",
       "evidence": ["target-only: real external project and distribution identifiers persisted in the idempotency ledger; current provider does not produce this evidence"],

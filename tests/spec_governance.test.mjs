@@ -346,6 +346,13 @@ describe("Spec governance", () => {
     }
   });
 
+  it("keeps workflow phases identical to the registered workflow-state schema", () => {
+    const workflow = json("workflow.json");
+    const schema = json("schemas/workflow-state.schema.json");
+    assert.deepEqual(schema.properties.phase.enum, workflow.phases);
+    assert.ok(workflow.stateAuthority.derivationOrder.includes("feedback-routing"));
+  });
+
   it("pins the customer-content-free requirement dictionary by canonical hash", () => {
     const requirements = json("requirements.json");
     const dictionary = json(requirements.dictionary.path);

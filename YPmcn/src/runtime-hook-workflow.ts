@@ -210,6 +210,8 @@ function collectTrustedIds(
     projectId: "project_id",
     mcn_id: "mcn_id",
     mcnId: "mcn_id",
+    supplier_id: "supplier_id",
+    supplierId: "supplier_id",
     inquiry_id: "inquiry_id",
     inquiryId: "inquiry_id",
     run_id: "run_id",
@@ -268,6 +270,33 @@ export function recordTrustedIds(event: Json, tool: string, rootDir: string): vo
       });
     }
   }
+  if (tool === "create_with_distributions") {
+    const input = event.params && typeof event.params === "object" ? event.params as Json :
+      event.arguments && typeof event.arguments === "object" ? event.arguments as Json : {};
+    const workflow = text(input.projectName) ? storedWorkflowState(current.data, input.projectName) : undefined;
+    const requirementIds = valuesByKind.get("requirement_id") ?? new Set<string>();
+    const boundRequirementId = workflow?.requirement_id ?? latestRequirementId(current.data) ?? recoverRequirementId(current.data);
+    if (boundRequirementId) requirementIds.add(boundRequirementId);
+    const projectIds = valuesByKind.get("project_id") ?? new Set<string>();
+    const mcnIds = valuesByKind.get("mcn_id") ?? new Set<string>();
+    for (const requirementId of requirementIds) {
+      for (const projectId of projectIds) {
+        for (const mcnId of mcnIds) {
+          current.data.trusted_relations = current.data.trusted_relations.filter((receipt: Json) =>
+            receipt.requirement_id !== requirementId || receipt.project_id !== projectId || receipt.mcn_id !== mcnId
+          );
+          current.data.trusted_relations.push({
+            requirement_id: requirementId,
+            project_id: projectId,
+            mcn_id: mcnId,
+            source_tool: tool,
+            observed_at_ms: now,
+            expires_at_ms: now + TRUSTED_ID_TTL_MS,
+          });
+        }
+      }
+    }
+  }
   if (validatedRequirementId) {
     current.data.latest_requirement_id = {
       value: validatedRequirementId,
@@ -318,8 +347,13 @@ function actionName(value: string): string {
   return normalize(value) ?? value;
 }
 
-function workflowStateKey(projectName: string): string {
-  return fingerprint(projectName.trim());
+function workflowStateKey(binding: Pick<WorkflowStateBinding, "project_name" | "demand_id" | "demand_version" | "trace_id">): string {
+  return fingerprint({
+    project_name: binding.project_name.trim(),
+    demand_id: binding.demand_id,
+    demand_version: binding.demand_version,
+    trace_id: binding.trace_id,
+  });
 }
 
 function workflowStateCore(binding: Omit<WorkflowStateBinding, "fingerprint">): Json {
@@ -358,12 +392,19 @@ function responseWorkflowState(result: unknown, input: Json): WorkflowStateBindi
     requirement?.requirement_id, requirement?.requirementId, requirement?.id,
     root.requirement_id, root.requirementId,
   ].find(text)?.trim() ?? null;
+  const responseDemandId = [state.demand_id, state.demandId, data.demand_id, data.demandId,
+    root.demand_id, root.demandId].find(text)?.trim();
+  const responseDemandVersion = [state.demand_version, state.demandVersion, data.demand_version, data.demandVersion,
+    root.demand_version, root.demandVersion].find(Number.isSafeInteger) as number | undefined;
+  if (responseDemandId && text(input.demand_id) && responseDemandId !== input.demand_id.trim()) return undefined;
+  if (responseDemandVersion !== undefined && Number.isSafeInteger(input.demand_version) &&
+    responseDemandVersion !== input.demand_version) return undefined;
   const now = Date.now();
   const core = {
     project_name: projectName,
     allowed_actions: allowedActions,
-    demand_id: text(input.demand_id) ? input.demand_id.trim() : null,
-    demand_version: Number.isSafeInteger(input.demand_version) ? input.demand_version : null,
+    demand_id: responseDemandId ?? (text(input.demand_id) ? input.demand_id.trim() : null),
+    demand_version: responseDemandVersion ?? (Number.isSafeInteger(input.demand_version) ? input.demand_version : null),
     requirement_id: requirementId,
     trace_id: text(input.trace_id) ? input.trace_id.trim() : null,
     observed_at_ms: now,
@@ -423,7 +464,7 @@ function recordWorkflowState(event: Json, input: Json, rootDir: string): void {
         const sameTrace = binding.trace_id && previous.trace_id === binding.trace_id;
         if (sameDemand || sameTrace) delete current.data.workflow_states[key];
       }
-      current.data.workflow_states[workflowStateKey(binding.project_name)] = binding;
+      current.data.workflow_states[workflowStateKey(binding)] = binding;
       if (binding.requirement_id && binding.allowed_actions.includes("search_creators")) {
         const now = Date.now();
         current.data.trusted_ids = current.data.trusted_ids.filter((receipt: Json) =>
@@ -451,22 +492,27 @@ function recordWorkflowState(event: Json, input: Json, rootDir: string): void {
 }
 
 function storedWorkflowState(data: Json, projectName: string): WorkflowStateBinding | undefined {
-  const value = recordValue(data.workflow_states?.[workflowStateKey(projectName)]);
-  if (!value || value.project_name !== projectName.trim() || !Array.isArray(value.allowed_actions) ||
-    !value.allowed_actions.every(text) || !Number.isSafeInteger(value.observed_at_ms) ||
-    !Number.isSafeInteger(value.expires_at_ms) || value.expires_at_ms <= Date.now()) return undefined;
-  const core = {
-    project_name: value.project_name,
-    allowed_actions: [...value.allowed_actions],
-    demand_id: text(value.demand_id) ? value.demand_id : null,
-    demand_version: Number.isSafeInteger(value.demand_version) ? value.demand_version : null,
-    requirement_id: text(value.requirement_id) ? value.requirement_id : null,
-    trace_id: text(value.trace_id) ? value.trace_id : null,
-    observed_at_ms: value.observed_at_ms,
-    expires_at_ms: value.expires_at_ms,
-  };
-  if (value.fingerprint !== fingerprint(workflowStateCore(core))) return undefined;
-  return { ...core, fingerprint: value.fingerprint };
+  const candidates: WorkflowStateBinding[] = [];
+  for (const candidate of Object.values(data.workflow_states ?? {})) {
+    const value = recordValue(candidate);
+    if (!value || value.project_name !== projectName.trim() || !Array.isArray(value.allowed_actions) ||
+      !value.allowed_actions.every(text) || !Number.isSafeInteger(value.observed_at_ms) ||
+      !Number.isSafeInteger(value.expires_at_ms) || value.expires_at_ms <= Date.now()) continue;
+    const core = {
+      project_name: value.project_name,
+      allowed_actions: [...value.allowed_actions],
+      demand_id: text(value.demand_id) ? value.demand_id : null,
+      demand_version: Number.isSafeInteger(value.demand_version) ? value.demand_version : null,
+      requirement_id: text(value.requirement_id) ? value.requirement_id : null,
+      trace_id: text(value.trace_id) ? value.trace_id : null,
+      observed_at_ms: value.observed_at_ms,
+      expires_at_ms: value.expires_at_ms,
+    };
+    if (value.fingerprint === fingerprint(workflowStateCore(core))) {
+      candidates.push({ ...core, fingerprint: value.fingerprint });
+    }
+  }
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function nonNegativeInteger(value: unknown): value is number {
@@ -634,6 +680,57 @@ function storedSupplyPlan(data: Json, requirementId: string): SupplyPlanBinding 
 function rankCompletedForSupplyConfirmation(data: Json, requirementId: string): boolean {
   const receipt = data.search_receipts?.[requirementId] as Json | undefined;
   return receipt?.requirement_id === requirementId && receipt.status === "consumed";
+}
+
+function approvedSupplyPlan(data: Json, requirementId: string): boolean {
+  const plan = storedSupplyPlan(data, requirementId);
+  if (!plan) return false;
+  return Object.values<Json>(data.confirmations).some((receipt) =>
+    receipt?.status === "approved" && supplyPlanReceiptMatchesPlan(receipt, requirementId, plan)
+  );
+}
+
+function selectedColumnTokens(value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+  const column = value as Json;
+  return [column.name, column.field_name, column.key, column.field_key]
+    .filter(text)
+    .map((item) => item.trim());
+}
+
+function responseFieldNames(result: unknown): string[] {
+  const root = unwrap(result);
+  const data = recordValue(root?.data) ?? recordValue(root) ?? {};
+  const names = new Set<string>();
+  if (Array.isArray(data.items)) {
+    for (const item of data.items) {
+      for (const token of selectedColumnTokens(item)) names.add(token);
+    }
+  }
+  if (text(data.description)) {
+    for (const line of data.description.split(/\r?\n/)) {
+      const parts = line.split(/[：:]/, 2).map((part: string) => part.trim()).filter(Boolean);
+      for (const part of parts) names.add(part);
+    }
+  }
+  return [...names];
+}
+
+function recordFieldSelection(event: Json, rootDir: string): void {
+  if (event.error || !successful(event.result)) return;
+  const current = store(rootDir);
+  const requirementId = latestRequirementId(current.data) ?? recoverRequirementId(current.data);
+  if (!requirementId || !rankCompletedForSupplyConfirmation(current.data, requirementId)) return;
+  const columnNames = responseFieldNames(event.result);
+  if (columnNames.length === 0) return;
+  const now = Date.now();
+  current.data.field_selections[requirementId] = {
+    requirement_id: requirementId,
+    column_names: columnNames,
+    observed_at_ms: now,
+    expires_at_ms: now + SUPPLY_PLAN_TTL_MS,
+  };
+  save(current.path, current.data);
 }
 
 function supplyPlanReceiptMatches(
@@ -922,7 +1019,25 @@ export function promptRequirementGate(
   current: { path: string; data: Json },
 ): Json | undefined {
   const gate = current.data.prompt_requirement_gate;
-  if (!gate || typeof gate !== "object" || gate.status !== "pending") return undefined;
+  if (!gate || typeof gate !== "object") return undefined;
+  const tool = normalize(raw);
+  if (gate.status === "cancelled") {
+    return tool
+      ? deny(
+        "BLOCKED_REQUIREMENT_CLARIFICATION_CANCELLED",
+        "Requirement clarification was cancelled; do not continue the business workflow until a new user turn restarts clarification.",
+      )
+      : undefined;
+  }
+  if (gate.status === "clarified") {
+    return tool && tool !== "validate_requirement"
+      ? deny(
+        "BLOCKED_REQUIREMENT_VALIDATION_REQUIRED",
+        "Clarification is complete; validate_requirement is the only permitted business Tool until the requirement is validated.",
+      )
+      : undefined;
+  }
+  if (gate.status !== "pending") return undefined;
   if (!isAskTool(raw)) {
     return deny(
       "BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED",
@@ -941,6 +1056,16 @@ export function promptRequirementGate(
   current.data.prompt_requirement_gate = gate;
   save(current.path, current.data);
   return undefined;
+}
+
+export function settlePromptRequirementGate(rootDir: string, succeeded: boolean): void {
+  const current = store(rootDir);
+  const gate = current.data.prompt_requirement_gate;
+  if (!gate || typeof gate !== "object" || gate.status !== "clarified") return;
+  gate.status = succeeded ? "validated" : "clarified";
+  gate.updated_at_ms = Date.now();
+  current.data.prompt_requirement_gate = gate;
+  save(current.path, current.data);
 }
 
 export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
@@ -1070,7 +1195,7 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
 
   const workflowState = storedWorkflowState(current.data, input.projectName);
   const unresolved = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.kind === "external_send" && receipt.request_fingerprint === requestFingerprint &&
+    receipt.kind === "external_send" && receipt.safe_summary?.project_name === input.projectName.trim() &&
     ["in_flight", "unknown"].includes(receipt.status)
   );
   if (!workflowState) {
@@ -1084,6 +1209,39 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
   }
   if (!workflowState.allowed_actions.includes("create_with_distributions")) {
     return deny("BLOCKED_WORKFLOW_ACTION", "The latest authoritative workflow state does not allow create_with_distributions.");
+  }
+  if (unresolved) {
+    const receipt = unresolved[1];
+    const sameDemand = text(receipt.workflow_demand_id) && receipt.workflow_demand_id === workflowState.demand_id &&
+      receipt.workflow_demand_version === workflowState.demand_version;
+    const sameTrace = text(receipt.workflow_trace_id) && receipt.workflow_trace_id === workflowState.trace_id;
+    if (sameDemand || sameTrace || (!receipt.workflow_demand_id && !receipt.workflow_trace_id)) {
+      return deny(
+        "WRITE_RESULT_UNKNOWN",
+        `confirmation_id=${unresolved[0]}; the prior external send for this workflow is unresolved, so changed parameters cannot create a second send.`,
+      );
+    }
+  }
+
+  const requirementId = workflowState.requirement_id ?? latestRequirementId(current.data) ?? recoverRequirementId(current.data);
+  if (!requirementId || !rankCompletedForSupplyConfirmation(current.data, requirementId)) {
+    return deny("INVALID_PHASE", "External distribution requires a successful rank_mcns result for the same requirement.");
+  }
+  if (!approvedSupplyPlan(current.data, requirementId)) {
+    return deny("YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED", "Confirm the current Provider-backed supply plan before external distribution.");
+  }
+  const selection = current.data.field_selections?.[requirementId] as Json | undefined;
+  if (!selection || selection.requirement_id !== requirementId || !Array.isArray(selection.column_names) ||
+    Number(selection.expires_at_ms ?? 0) <= Date.now()) {
+    return deny("INVALID_PHASE", "Select and confirm inquiry fields after rank_mcns before external distribution.");
+  }
+  const allowedColumns = new Set(selection.column_names.filter(text).map((value: string) => value.trim()));
+  if (input.columns.some((column: unknown) => !selectedColumnTokens(column).some((token) => allowedColumns.has(token)))) {
+    return deny("BLOCKED_CONFIRMATION_MISMATCH", "Every external column must come from the latest select_inquiry_form_fields result.");
+  }
+  const untrustedSupplier = input.supplierIds.find((supplierId: unknown) => !hasTrustedId(rootDir, "supplier_id", supplierId));
+  if (untrustedSupplier !== undefined) {
+    return deny("ID_PROVENANCE_REQUIRED", "Every supplierId must come from a successful trusted YPmcn Tool response.");
   }
 
   const existing = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
@@ -1222,12 +1380,33 @@ export function guardWorkflowTool(
         `$.${untrusted} must come from a successful trusted YPmcn Tool response observed in the current TTL window.`,
       );
     }
+    const related = store(rootDir).data.trusted_relations.some((receipt: Json) =>
+      receipt.requirement_id === input.requirement_id && receipt.project_id === input.project_id &&
+      receipt.mcn_id === input.mcn_id
+    );
+    if (!related) {
+      return deny(
+        "ID_PROVENANCE_MISMATCH",
+        "requirement_id, project_id, and mcn_id must come from the same successful distribution result.",
+      );
+    }
   }
   if (tool === "ingest_mcn_submissions" && !hasTrustedId(rootDir, "inquiry_id", input.inquiry_id)) {
     return deny(
       "ID_PROVENANCE_REQUIRED",
       "$.inquiry_id must come from a successful trusted YPmcn Tool response observed in the current TTL window.",
     );
+  }
+  if (tool === "rank_creators") {
+    const hasDistribution = text(input.requirement_id) && store(rootDir).data.trusted_relations.some((receipt: Json) =>
+      receipt.requirement_id === input.requirement_id
+    );
+    if (!hasDistribution) {
+      return deny(
+        "INVALID_PHASE",
+        "rank_creators requires a successful external distribution associated with the same requirement.",
+      );
+    }
   }
   if ([
     "create_submission_batch",
@@ -1275,6 +1454,10 @@ export function recordWorkflowToolResult(
   }
   if (tool === "get_workflow_state") {
     recordWorkflowState(event, input, rootDir);
+    return;
+  }
+  if (tool === "select_inquiry_form_fields") {
+    recordFieldSelection(event, rootDir);
     return;
   }
   const current = store(rootDir);
@@ -1341,7 +1524,9 @@ export function recordWorkflowToolResult(
   delete receipt.tool_call_id;
   current.data.confirmations[id] = receipt;
   if (text(input.projectName)) {
-    delete current.data.workflow_states[workflowStateKey(input.projectName)];
+    for (const [key, binding] of Object.entries<Json>(current.data.workflow_states)) {
+      if (binding?.project_name === input.projectName.trim()) delete current.data.workflow_states[key];
+    }
   }
   save(current.path, current.data);
 }
