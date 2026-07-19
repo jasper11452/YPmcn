@@ -346,7 +346,7 @@ describe("requirement behavior through public plugin hooks", () => {
     }
   });
 
-  it("preserves natural-language account direction while requiring confirmation for a direct taxonomy mapping", async () => {
+  it("preserves price ambiguity while accepting explicit account taxonomy", async () => {
     await newTurn("ambiguous unit price");
     const price = qwenPayload();
     delete price.kolOfficialPriceL1;
@@ -370,8 +370,7 @@ describe("requirement behavior through public plugin hooks", () => {
     taxonomy.rawMessagesJson.originalBrief += "\n账号类型：母婴类、亲子相关";
     taxonomy.rawMessagesJson.atoms.push(mapped("账号类型：母婴类、亲子相关", "talentTypeLabel"));
     taxonomy.rawMessagesJson.coverageCheck = { atomCount: 13, mappedCount: 12, preservedCount: 1, unresolvedCount: 0 };
-    const taxonomyBlocked = await guard("mcp__ypmcn__validate_requirement", { payload: taxonomy });
-    assert.match(taxonomyBlocked.blockReason, /BLOCKED_TAXONOMY_CONFIRMATION_REQUIRED.*talentTypeLabel/);
+    assert.equal(await guard("mcp__ypmcn__validate_requirement", { payload: taxonomy }), undefined);
 
     await newTurn("semantic ambiguity must not be submitted");
     const draftBlocked = await guard("mcp__ypmcn__validate_requirement", {
@@ -387,8 +386,8 @@ describe("requirement behavior through public plugin hooks", () => {
     assert.match(contract, /do not read Skill files, probe schemas, inspect config, call get_workflow_state, or try another business tool first/);
     assert.match(contract, /missing_required and semantic_ambiguity.*inside that popup.*without status "ready" and without calling validate_requirement/);
     assert.match(contract, /Requirement clarification must immediately use one self-contained native AskUserQuestion popup/);
-    assert.match(contract, /one direct 4–42 character question/);
-    assert.match(contract, /automatically shows the typed “其他” input/);
+    assert.match(contract, /at most five concise questions/);
+    assert.match(contract, /host provides typed input/);
     assert.match(contract, /Preview atom details, gate, and summary must be rendered from one in-memory atom list/);
     assert.match(contract, /summary\.unresolvedCount counts missing_required plus semantic_ambiguity rows/);
     assert.match(contract, /ready must show the exact tool arguments as \{"payload": \{\.\.\., "status": "ready"\}\}/);
@@ -406,12 +405,11 @@ describe("requirement behavior through public plugin hooks", () => {
     }), undefined, "the host-native confirmation tool remains available");
   });
 
-  it("resets clarification/stop state only on a new prompt turn", async () => {
+  it("allows corrected read-only calls without requiring a new prompt turn", async () => {
     await newTurn("first turn");
     const invalid = await guard("mcp__ypmcn__get_workflow_state", { demand_id: "demand-qwen" });
     assert.match(invalid.blockReason, /INVALID_INPUT/);
-    const sameTurn = await guard("mcp__ypmcn__get_workflow_state", { trace_id: "trace-qwen" });
-    assert.match(sameTurn.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*INVALID_INPUT/);
+    assert.equal(await guard("mcp__ypmcn__get_workflow_state", { trace_id: "trace-qwen" }), undefined);
 
     await newTurn("用户补充后开启新一轮");
     assert.equal(await guard("mcp__ypmcn__get_workflow_state", { trace_id: "trace-qwen" }), undefined);

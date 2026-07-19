@@ -24,7 +24,7 @@ import {
   validateMarkedAsk,
 } from "./runtime-hook-workflow.js";
 
-export { beginPromptTurn, blockedToolTurnFailure, recordBlockedToolResult } from "./runtime-hook-state.js";
+export { beginPromptTurn, blockedToolTurnFailure, recordBlockedToolResult, withStateScope } from "./runtime-hook-state.js";
 
 const SHELL_TOOLS = new Set(["bash", "exec", "shell", "powershell", "pwsh"]);
 const PROVIDER_WRITE_TARGET = /create[-_]with[-_]distributions|\/api\/projects\/create-with-distributions/i;

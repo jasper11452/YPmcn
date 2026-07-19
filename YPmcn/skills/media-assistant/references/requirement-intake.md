@@ -19,6 +19,6 @@
 - 平台只用 `xiaohongshu|douyin`。小红书图文/视频对应 L1/L2；抖音 1–20、21–60、60 秒以上对应 L1/L2/L3。金额或档位不清即询问。
 - 范围传无空格 `"[min,max]"`：单价 `x→[x*0.9,x*1.1]`，上限 `x→[0,x]`，闭区间 `a-b→[a,b]`；比例先除以 100。仅下限除返点外必须询问；返点 `30%+→[0.3,1]`。
 - 相对时间用宿主 `currentLocalDateTime + timeZone` 唯一换算为 `YYYY-MM-DD HH:mm:ss`；不能唯一确定即询问。
-- 每个 atom 只映射一个真实字段或逐字 preserved；`sourceText` 必须是原文子串。`rawMessagesJson` 保存完整原文、非空 atoms 与计数一致且 `unresolvedCount=0` 的 coverage。
+- 每个 atom 只映射一个真实字段或逐字 preserved；`sourceText` 必须非空，可引用原始 Brief 或本轮 AskUserQuestion 的明确补充答案，不能为了满足审计而篡改 `originalBrief`。`rawMessagesJson` 保存完整原文、非空 atoms 与计数一致且 `unresolvedCount=0` 的 coverage。
 
 `ready` 时展示并原样调用 `{"payload": {..., "status": "ready"}}`。新建省略 `id/demandVersion`；补充版本只沿用上一成功响应的 `demandId`。仅实际返回成功、需求主键、`status=ready`、`workflow_state` 和 `allowed_actions` 后推进；未知写结果先对账。

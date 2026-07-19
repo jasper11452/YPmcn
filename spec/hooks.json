@@ -32,8 +32,13 @@
     }
   },
   "stateStore": {
-    "path": "YPmcn/state/confirmation_guard.json",
-    "ttl": "10m",
+    "path": "YPmcn/state/sessions/<sha256(sessionKey)>/confirmation_guard.json (legacy fallback: YPmcn/state/confirmation_guard.json when session context is unavailable)",
+    "ttl": {
+      "oneTimeConfirmations": "10m",
+      "readyRequirementBinding": "30m",
+      "workflowStateSupplyPlanAndTrustedIds": "60m",
+      "blockedWriteTurn": "2m"
+    },
     "format": "confirmation_guard_schema_v2",
     "storesBusinessPayload": false,
     "authoritative": false

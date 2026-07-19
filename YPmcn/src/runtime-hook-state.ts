@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, join } from "node:path";
 
 import { loadErrorCatalog } from "./contract/loader.js";
@@ -7,20 +8,28 @@ import { loadErrorCatalog } from "./contract/loader.js";
 export type Json = Record<string, any>;
 export type ConfirmationStatus = "pending" | "approved" | "in_flight" | "consumed" | "unknown" | "denied";
 export type GuardStore = { path: string; data: Json };
+const STATE_SCOPE = new AsyncLocalStorage<string>();
 
 export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
-export const WORKFLOW_STATE_TTL_MS = 10 * 60 * 1_000;
-export const SUPPLY_PLAN_TTL_MS = 10 * 60 * 1_000;
-export const TRUSTED_ID_TTL_MS = 10 * 60 * 1_000;
+export const WORKFLOW_STATE_TTL_MS = 60 * 60 * 1_000;
+export const SUPPLY_PLAN_TTL_MS = 60 * 60 * 1_000;
+export const TRUSTED_ID_TTL_MS = 60 * 60 * 1_000;
 const BLOCKED_TOOL_TURN_TTL_MS = 2 * 60 * 1_000;
-const READY_REQUIREMENT_TTL_MS = 10 * 60 * 1_000;
+const READY_REQUIREMENT_TTL_MS = 30 * 60 * 1_000;
 
 export function text(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
 
 function statePath(rootDir: string): string {
-  return join(rootDir, "state", "confirmation_guard.json");
+  const scope = STATE_SCOPE.getStore();
+  if (!scope) return join(rootDir, "state", "confirmation_guard.json");
+  const scopeHash = createHash("sha256").update(scope, "utf8").digest("hex").slice(0, 24);
+  return join(rootDir, "state", "sessions", scopeHash, "confirmation_guard.json");
+}
+
+export function withStateScope<T>(scope: string | undefined, callback: () => T): T {
+  return scope ? STATE_SCOPE.run(scope, callback) : callback();
 }
 
 function load(path: string): Json {
@@ -52,6 +61,23 @@ export function fingerprint(value: unknown): string {
   return createHash("sha256").update(canonical(value), "utf8").digest("hex");
 }
 
+function normalizeBindingValue(value: unknown): unknown {
+  if (typeof value === "string") return value.normalize("NFKC").trim().replace(/\s+/g, " ");
+  if (Array.isArray(value)) return value.map(normalizeBindingValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Json)
+        .filter(([, item]) => item !== null && item !== undefined)
+        .map(([key, item]) => [key, normalizeBindingValue(item)]),
+    );
+  }
+  return value;
+}
+
+export function bindingFingerprint(value: unknown): string {
+  return fingerprint(normalizeBindingValue(value));
+}
+
 export function sha256Text(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -63,7 +89,11 @@ export function deny(code: string, message: string): Json {
 export function denyStructured(code: string, context: string): Json {
   const definition = loadErrorCatalog().errors.find((entry) => entry.code === code);
   if (!definition) throw new Error(`unknown contract error code: ${code}`);
-  const message = typeof definition.message === "string" ? definition.message : context;
+  const message = text(context)
+    ? context
+    : typeof definition.message === "string"
+      ? definition.message
+      : code;
   return {
     block: true,
     blockReason: `${code}: ${message}`,
@@ -161,8 +191,8 @@ export function beginPromptTurn(rootDir: string, preview?: Json, readyPayload?: 
     current.data.ready_requirement_binding = {
       status: "pending",
       preview_fingerprint: fingerprint(preview),
-      payload_fingerprint: fingerprint(readyPayload),
-      audit_fingerprint: fingerprint(audit),
+      payload_fingerprint: bindingFingerprint(readyPayload),
+      audit_fingerprint: bindingFingerprint(audit),
       atom_count: Array.isArray(audit?.atoms) ? audit.atoms.length : 0,
       prompt_epoch: current.data.prompt_epoch,
       observed_at_ms: Date.now(),
@@ -195,11 +225,25 @@ export function recordBlockedToolResult(rootDir: string, result: Json | undefine
   save(current.path, current.data);
 }
 
-export function blockedToolTurnFailure(rootDir: string): Json | undefined {
+const BLOCKED_TURN_WRITE_TOOLS = new Set([
+  "validate_requirement", "search_creators", "rank_mcns", "manual_source_creators",
+  "create_with_distributions", "sync_mcn_inquiry_status", "ingest_mcn_submissions",
+  "rank_creators", "audit_manual_adjustment", "create_submission_batch", "record_client_feedback",
+]);
+
+function normalizedBusinessTool(name: string): string | undefined {
+  const prefixes = ["ypmcn__", "mcp__ypmcn__", "ypmcn-mcp__", "ypmcn-provider__"];
+  const prefix = prefixes.find((candidate) => name.startsWith(candidate));
+  return prefix ? name.slice(prefix.length) : undefined;
+}
+
+export function blockedToolTurnFailure(rootDir: string, rawToolName = ""): Json | undefined {
   const blocked = store(rootDir).data.blocked_tool_turn;
   if (!blocked || typeof blocked !== "object" || !text(blocked.code)) return undefined;
+  const tool = normalizedBusinessTool(rawToolName);
+  if (!tool || !BLOCKED_TURN_WRITE_TOOLS.has(tool)) return undefined;
   return deny(
     "BLOCKED_PREVIOUS_HOOK_RESULT",
-    `A previous Tool call in this user turn was blocked with ${blocked.code}. Do not retry automatically. The only permitted next Tool is native AskUserQuestion so the user can choose a correction, one explicit retry when safe, or stop; a completed choice unlocks the selected safe path in this same turn.`,
+    `A previous write-like Tool call in this user turn was blocked with ${blocked.code}. Do not retry that write automatically. Read-only Tools remain available; ask the user only when a business choice is actually required.`,
   );
 }

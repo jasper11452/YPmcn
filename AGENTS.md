@@ -3,36 +3,39 @@
 ## 适用范围
 
 - Git 根目录是唯一长期项目；`YPmcn/` 是可发布组件，向量能力由远程服务负责。
-- Claude Code 负责定义任务边界、选择执行角色、独立验证、最终验收和提交；Codex 不承担这些编排职责。
 
 ## 契约与优先级
 
 - 正式契约以 `spec/manifest.json` 的 `contracts` 映射为唯一入口，不得绕过 manifest 自行选择或遗漏 Spec。
 - Tool 与工作流分别以 `spec/mcp.json`、`spec/workflow.json` 为准。
 - 规则优先级：安全与数据完整性 > 正式 Spec > 本文件的角色硬限制 > 任务 acceptance 与 verification > 测试 > 当前实现 > Agent 推断。
-- 公开 Tool、字段、错误码、权限、迁移或不可逆副作用不明确时，返回 `BLOCKED`，不得自行发明契约。
+- 公开 Tool、字段、错误码、权限、迁移或不可逆副作用不明确时，不得自行发明契约。
 - 离线运行 `npm run verify`；生产 provider 只读检查运行 `npm run verify:provider`，`uv` 与 `reference-mcp` 结果不得冒充生产证据。
 
 ## 任务输入
 
-执行前确认任务已明确提供：
+执行前明确任务要求：
 
 ```yaml
 goal: "单一可观察结果"
-allowed_paths: ["允许修改的路径"]
-forbidden_paths: ["禁止修改的路径"]
 acceptance: ["二元、可验证的完成条件"]
 verification: ["必须运行的最小相关验证"]
 ```
 
 ## 修改规则
 
-- Bug 修复优先先复现，再做最小修复并运行相邻测试。
-- 普通文档、测试和内部实现修复不要求 Change Proposal 或 Impact Analysis。
-- 不记录客户 Brief、完整 payload、凭据或未脱敏内部状态。
+- 做最小修复并运行相邻测试。
 - 同类工具故障第二次出现时停止重试，改走最短可行路径或报告唯一阻塞项。
 - 测试未运行必须标记 `NOT RUN`；失败不得描述为通过。
 - `pre-commit` 会同步人类文档；手动使用 `npm run docs:sync`，只读检查使用 `npm run verify:docs`。
+
+## 推荐工作方式
+
+- 定位问题关联的内容
+- 提出修复方案
+- 拆解修复行动
+- 调用opencode，并行启动多个session执行修复
+- 验证修复结果
 
 ## YPmcn 不可放宽的硬门禁
 
@@ -55,8 +58,3 @@ verification: ["必须运行的最小相关验证"]
 ```
 
 不得声称已完成独立验证或最终提交。
-
-## 远程 MCP Server
-
-- 开发与生产统一使用：`https://mcp.eshypdata.com/sse`
-- 不再使用 Tailscale、开发机 SSH 或本地端口转发连接 MCP。

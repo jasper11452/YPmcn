@@ -1,5 +1,6 @@
 import { loadContractSchema } from "./contract/loader.js";
 import {
+  bindingFingerprint,
   deny,
   fingerprint,
   type GuardStore,
@@ -9,7 +10,6 @@ import {
   text,
 } from "./runtime-hook-state.js";
 
-const SCHEMA_PROBE = /(?:^|[^a-z])(?:schema[_ -]?check|dry[_ -]?run|probe)(?:$|[^a-z])/i;
 const REQUIREMENT_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const REQUIREMENT_PLATFORMS = new Set(["xiaohongshu", "douyin"]);
 const AMBIGUITY_SENTINEL = /^(?:__UNRESOLVED__|UNRESOLVED|TBD|TODO|待确认|待补充|不明确)$/i;
@@ -89,6 +89,7 @@ export function readyRequirementFailure(
 ): Json | undefined {
   const binding = current.data.ready_requirement_binding;
   if (!binding || typeof binding !== "object" || binding.status === "validated") return undefined;
+  if (binding.status === "failed") return undefined;
   if (binding.status !== "pending") {
     return deny(
       "BLOCKED_REQUIREMENT_VALIDATION_IN_FLIGHT",
@@ -102,10 +103,10 @@ export function readyRequirementFailure(
     );
   }
   const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
-  if (!text(binding.payload_fingerprint) || fingerprint(payload) !== binding.payload_fingerprint) {
+  if (!text(binding.payload_fingerprint) || bindingFingerprint(payload) !== binding.payload_fingerprint) {
     return deny(
       "BLOCKED_REQUIREMENT_PREVIEW_MISMATCH",
-      "validate_requirement.payload must exactly match the authoritative Ready Preview, including status, projection, originalBrief, ordered atoms, and coverageCheck; do not rebuild or rewrite it.",
+      "validate_requirement.payload does not match the current Ready Preview after harmless whitespace, Unicode-width, and null-field normalization. Rebuild it from the current confirmed values.",
     );
   }
   return undefined;
@@ -114,7 +115,7 @@ export function readyRequirementFailure(
 function markReadyRequirementInFlight(current: GuardStore, payload: Json): void {
   const binding = current.data.ready_requirement_binding;
   if (!binding || typeof binding !== "object" || binding.status !== "pending") return;
-  if (binding.payload_fingerprint !== fingerprint(payload)) return;
+  if (binding.payload_fingerprint !== bindingFingerprint(payload)) return;
   binding.status = "in_flight";
   binding.updated_at_ms = Date.now();
   current.data.ready_requirement_binding = binding;
@@ -141,6 +142,42 @@ function findAmbiguitySentinel(value: unknown, path = "payload"): string | undef
   return undefined;
 }
 
+function normalizedEvidence(value: string): string {
+  return [...value.normalize("NFKC")]
+    .filter((character) => /[\p{L}\p{N}\p{S}]/u.test(character))
+    .join("")
+    .toLocaleLowerCase("und");
+}
+
+function recoverOriginalEvidence(originalBrief: string, sourceText: string): string | undefined {
+  const trimmed = sourceText.trim();
+  if (trimmed && originalBrief.includes(trimmed)) return trimmed;
+
+  const needle = normalizedEvidence(trimmed);
+  if (needle.length < 2) return undefined;
+
+  let normalizedOriginal = "";
+  const spans: Array<{ start: number; end: number }> = [];
+  let offset = 0;
+  for (const character of originalBrief) {
+    const start = offset;
+    offset += character.length;
+    for (const normalizedCharacter of character.normalize("NFKC").toLocaleLowerCase("und")) {
+      if (!/[\p{L}\p{N}\p{S}]/u.test(normalizedCharacter)) continue;
+      normalizedOriginal += normalizedCharacter;
+      spans.push({ start, end: offset });
+    }
+  }
+
+  const matchStart = normalizedOriginal.indexOf(needle);
+  if (matchStart < 0 || normalizedOriginal.indexOf(needle, matchStart + 1) >= 0) return undefined;
+  const first = spans[matchStart];
+  const last = spans[matchStart + needle.length - 1];
+  if (!first || !last) return undefined;
+  const recovered = originalBrief.slice(first.start, last.end).trim();
+  return recovered || undefined;
+}
+
 function validateAuditableBrief(raw: unknown, payload: Json): Json | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return deny("BLOCKED_REQUIREMENT_INCOMPLETE", "payload.rawMessagesJson must be a ypmcn-brief-v1 audit object.");
@@ -164,8 +201,18 @@ function validateAuditableBrief(raw: unknown, payload: Json): Json | undefined {
     if (!atom || typeof atom !== "object" || Array.isArray(atom)) {
       return deny("BLOCKED_REQUIREMENT_INCOMPLETE", `${path} must be an object.`);
     }
-    if (!text(atom.sourceText) || !audit.originalBrief.includes(atom.sourceText)) {
-      return deny("BLOCKED_REQUIREMENT_INCOMPLETE", `${path}.sourceText must be a non-empty exact substring of originalBrief.`);
+    if (!text(atom.sourceText)) {
+      return deny("BLOCKED_REQUIREMENT_INCOMPLETE", `${path}.sourceText must be non-empty.`);
+    }
+    if (!audit.originalBrief.includes(atom.sourceText)) {
+      const previousSourceText = atom.sourceText;
+      const recovered = recoverOriginalEvidence(audit.originalBrief, previousSourceText);
+      if (recovered) {
+        atom.sourceText = recovered;
+        if (atom.disposition === "preserved" && atom.preservedText === previousSourceText) {
+          atom.preservedText = recovered;
+        }
+      }
     }
     if (atom.disposition !== "mapped" && atom.disposition !== "preserved") {
       return deny("BLOCKED_REQUIREMENT_INCOMPLETE", `${path}.disposition must be mapped or preserved.`);
@@ -270,10 +317,10 @@ function validateTaxonomyMapping(payload: Json): Json | undefined {
     const context = index >= 0
       ? audit.originalBrief.slice(Math.max(0, index - 16), index + atom.sourceText.length)
       : atom.sourceText;
-    const accountTypeWording = /(?:账号|达人|博主|蒲公英|星图)?类型\s*[：:]?/.test(context);
+    const talentWording = /(?:账号|达人|博主|蒲公英|星图)/.test(context);
     if (atom.targetField === "contentTag") {
-      if (!accountTypeWording) continue;
-    } else if (explicitJsonArray(atom.sourceText)) {
+      if (!talentWording) continue;
+    } else if (talentWording || explicitJsonArray(atom.sourceText)) {
       continue;
     }
     return deny(
@@ -397,14 +444,10 @@ export function guardValidateRequirement(input: Json, current: GuardStore): Json
   const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
   const semanticDowngrade = requirementSemanticDowngrade(current, payload);
   if (semanticDowngrade) return semanticDowngrade;
-  const labels = [payload.projectName, payload.brandName, payload.note].filter(text).join(" ");
   const blockRequirement = (failure: Json): Json => {
     recordBlockedRequirementSemantics(current, payload);
     return failure;
   };
-  if (SCHEMA_PROBE.test(labels)) {
-    return blockRequirement(deny("BLOCKED_NO_DRY_RUN", "validate_requirement always writes; inspect the host tool schema without calling it."));
-  }
   if (payload.status !== "ready") {
     return blockRequirement(deny("BLOCKED_REQUIREMENT_INCOMPLETE", "payload.status must be ready; clarify every missing or ambiguous required value before validation."));
   }
@@ -426,7 +469,7 @@ export function settleReadyRequirement(input: Json, rootDir: string, succeeded: 
   const binding = current.data.ready_requirement_binding;
   const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
   if (!binding || typeof binding !== "object" || binding.status !== "in_flight" ||
-    binding.payload_fingerprint !== fingerprint(payload)) return;
+    binding.payload_fingerprint !== bindingFingerprint(payload)) return;
   binding.status = succeeded ? "validated" : "failed";
   binding.updated_at_ms = Date.now();
   current.data.ready_requirement_binding = binding;

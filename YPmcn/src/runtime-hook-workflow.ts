@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  bindingFingerprint,
   canonical,
   CONFIRMATION_TTL_MS,
   deny,
@@ -28,12 +29,24 @@ const SUPPLY_PLAN_MARKER = /\[YP_SUPPLY_PLAN_CONFIRMATION:([0-9a-f-]{36})\]/i;
 const CONFIRM_SEND_LABEL = "确认发送";
 const CONFIRM_SUPPLY_PLAN_LABEL = "确认供给方案";
 const SUPPLY_PLAN_CONFIRMATION_HEADER = "供给确认";
+const EXTERNAL_SEND_CONFIRMATION_HEADER = "外发确认";
 const LOCAL_CONTINUATION_FAILURE_CODES = new Set([
   "BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED",
   "YP_CONFIRMATION_REQUIRED",
   "YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED",
   "WRITE_RESULT_UNKNOWN",
   "WORKFLOW_STATE_REFRESH_REQUIRED",
+]);
+const CONTINUOUS_WRITE_TOOLS = new Set([
+  "validate_requirement",
+  "search_creators",
+  "manual_source_creators",
+  "sync_mcn_inquiry_status",
+  "ingest_mcn_submissions",
+  "rank_creators",
+  "audit_manual_adjustment",
+  "create_submission_batch",
+  "record_client_feedback",
 ]);
 const ISO_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const SUPPLY_PLAN_FIELDS = [
@@ -322,8 +335,13 @@ function reconcileUnknownConfirmations(data: Json, binding: WorkflowStateBinding
       receipt.requirement_id === binding.requirement_id;
     if (!isExternalSend && !isSupplyPlan) continue;
 
-    const action = isExternalSend ? "create_with_distributions" : "rank_mcns";
-    receipt.status = binding.allowed_actions.includes(action) ? "approved" : "consumed";
+    // The current provider has no idempotency ledger for external distribution.
+    // Workflow permission alone cannot prove that an unknown send did not happen.
+    if (isExternalSend) {
+      receipt.status = "unknown";
+    } else {
+      receipt.status = binding.allowed_actions.includes("rank_mcns") ? "approved" : "consumed";
+    }
     receipt.workflow_state_fingerprint = binding.fingerprint;
     receipt.workflow_demand_id = binding.demand_id;
     receipt.workflow_demand_version = binding.demand_version;
@@ -390,12 +408,7 @@ function validateSupplyPlan(value: unknown): SupplyPlan | undefined {
   if (!nonNegativeInteger(source.recommended_manual_creator_count)) return undefined;
   if (typeof source.supply_demand_ratio !== "number" || !Number.isFinite(source.supply_demand_ratio)) return undefined;
 
-  const expectedSupplyRatio = source.database_candidate_count / source.demand_count;
-  if (source.supply_demand_ratio !== expectedSupplyRatio) return undefined;
-  const expectedGap = Math.max(0, source.target_submission_count - source.estimated_valid_return_count);
-  if (source.estimated_gap_count !== expectedGap) return undefined;
-  const expectedManual = Math.max(Math.ceil(source.demand_count * 0.2), expectedGap);
-  if (source.recommended_manual_creator_count !== expectedManual) return undefined;
+  if (source.supply_demand_ratio < 0) return undefined;
 
   if (typeof source.mcn_manual_creator_ratio !== "string") return undefined;
   const ratio = /^(\d+)\s*:\s*(\d+)$/.exec(source.mcn_manual_creator_ratio.trim());
@@ -462,14 +475,12 @@ function responseSupplyPlan(result: unknown): SupplyPlan | undefined {
       if (creatorId != null) coveredCreatorIds.add(String(creatorId));
     }
     const coveredCount = creators.length > 0 ? coveredCreatorIds.size : providerPlan.mcn_covered_creator_count;
-    const gap = Math.max(0, providerPlan.target_submission_count - providerPlan.estimated_valid_return_count);
-    const manualCount = Math.max(Math.ceil(demandCount * 0.2), gap);
+    const manualCount = providerPlan.recommended_manual_creator_count;
     return validateSupplyPlan({
       ...providerPlan,
       demand_count: demandCount,
       database_candidate_count: candidateCount,
       supply_demand_ratio: candidateCount / demandCount,
-      estimated_gap_count: gap,
       mcn_covered_creator_count: coveredCount,
       recommended_manual_creator_count: manualCount,
       mcn_manual_creator_ratio: `${coveredCount}:${manualCount}`,
@@ -763,51 +774,46 @@ function markerQuestion(input: Json, marker: { id: string; kind: "external_send"
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-function exactOptionLabels(question: Json, expected: readonly string[]): boolean {
-  if (!Array.isArray(question.options) || question.options.length !== expected.length) return false;
+function confirmationOptions(
+  question: Json,
+  required: readonly string[],
+  optional: readonly string[],
+): boolean {
+  if (!Array.isArray(question.options) || question.options.length < required.length || question.options.length > 6) return false;
   const labels = question.options.map((option: unknown) => {
     if (typeof option === "string") return option.trim();
     return option && typeof option === "object" && text((option as Json).label)
       ? (option as Json).label.trim()
-      : undefined;
+      : "";
   });
-  return labels.every((label, index) => label === expected[index]);
-}
-
-function readableMarkedConfirmation(body: string): boolean {
-  const normalized = body.replace(/\s+/g, " ").trim();
-  if (normalized.length > 320 || !normalized.includes("｜")) return false;
-  const headings = [...normalized.matchAll(/【([^】]{1,12})】/g)].map((match) => match[1]);
-  return headings.length >= 3 && headings.length <= 5 &&
-    new Set(headings).size === headings.length && headings.includes("影响");
+  const allowed = new Set([...required, ...optional]);
+  return new Set(labels).size === labels.length && required.every((label) => labels.includes(label)) &&
+    labels.every((label) => allowed.has(label));
 }
 
 function readableRequirementBody(body: string): boolean {
   const normalized = body.trim();
-  if (normalized.length < 4 || normalized.length > 42 || !/^.+？$/u.test(normalized) || /[\r\n]/.test(normalized)) return false;
-  const internalTerms = /(?:\bbrief\b|\bgate\b|\btool\b|status|quantityTotal|submissionDeadlineAt|creatorPriceTier|projectStart(?:Start|End)|kolOfficialPrice|rawMessagesJson|[A-Za-z]+_[A-Za-z_]+|[=\[\]{}]|【|】|｜|已确认|请确认)/i;
-  return !internalTerms.test(normalized);
+  return normalized.length >= 2 && normalized.length <= 120 && /[？?]$/u.test(normalized) && !/[\r\n]/.test(normalized);
 }
 
 function nativeRequirementClarification(input: Json): boolean {
-  if (!Array.isArray(input.questions) || input.questions.length < 1 || input.questions.length > 3) return false;
+  if (!Array.isArray(input.questions) || input.questions.length < 1 || input.questions.length > 5) return false;
   const headers = new Set<string>();
   const valid = input.questions.every((question: unknown) => {
     if (!question || typeof question !== "object") return false;
     const item = question as Json;
     const body = text(item.question) ? item.question : "";
     const title = [item.header, item.title].find(text)?.trim();
-    if (!title || !/^[\p{Script=Han}0-9]{2,8}$/u.test(title) || headers.has(title) || !readableRequirementBody(body)) return false;
+    if (!title || title.length > 16 || headers.has(title) || !readableRequirementBody(body)) return false;
     headers.add(title);
-    if (item.multiSelect !== false) return false;
-    if (!Array.isArray(item.options) || item.options.length < 2 || item.options.length > 4) return false;
+    if (item.multiSelect !== undefined && item.multiSelect !== false) return false;
+    if (!Array.isArray(item.options) || item.options.length < 2 || item.options.length > 6) return false;
     const labels = new Set<string>();
     return item.options.every((option: unknown) => {
-      if (!option || typeof option !== "object") return false;
-      const value = option as Json;
-      const label = text(value.label) ? value.label.trim() : "";
-      const description = text(value.description) ? value.description.trim() : "";
-      if (label.length < 2 || label.length > 12 || labels.has(label) || description.length < 2 || description.length > 36) {
+      const value = option && typeof option === "object" ? option as Json : undefined;
+      const label = typeof option === "string" ? option.trim() : text(value?.label) ? value.label.trim() : "";
+      const description = text(value?.description) ? value.description.trim() : "";
+      if (!label || label.length > 24 || labels.has(label) || description.length > 80) {
         return false;
       }
       labels.add(label);
@@ -833,7 +839,7 @@ export function promptRequirementGate(
   if (!nativeRequirementClarification(input)) {
     return deny(
       "BLOCKED_REQUIREMENT_CONFIRMATION_MISMATCH",
-      "Rebuild native AskUserQuestion as a user-facing form with 1-3 questions. Each question needs a unique 2-8 character Chinese topic header, multiSelect=false, and one direct 4-42 character question ending in '？', for example '本次需要提报多少位达人？'. YP Action collapses line breaks, so do not add background, '已确认/请确认', field names, Brief/gate/status/Tool terms, brackets, or impact text. Provide 2-4 option objects with unique 2-12 character labels and 2-36 character descriptions; include every distinct business choice and let YP Action provide the typed '其他' input. Use separate questions for separate decisions.",
+      "Use one native AskUserQuestion form with 1-5 concise single-choice questions that cover the unresolved values. Questions may use either Chinese or ASCII question marks; options may be strings or label/description objects.",
     );
   }
   gate.clarification_fingerprint = fingerprint(input);
@@ -842,61 +848,6 @@ export function promptRequirementGate(
   current.data.prompt_requirement_gate = gate;
   save(current.path, current.data);
   return undefined;
-}
-
-function labeledSegments(question: string, aliases: readonly string[]): string[] {
-  const names = aliases.map(escapeRegex).join("|");
-  const pattern = new RegExp(
-    `(?:^|[^A-Za-z0-9_])(?:${names})\\s*(?:=|:|：)\\s*([^;；\\n｜]+)`,
-    "gi",
-  );
-  return [...question.matchAll(pattern)].map((match) => match[1].trim());
-}
-
-function unquote(value: string): string {
-  let result = value.trim().replace(/[。.]$/, "").trim();
-  const pairs: Array<[string, string]> = [["\"", "\""], ["'", "'"], ["“", "”"], ["‘", "’"]];
-  for (const [open, close] of pairs) {
-    if (result.startsWith(open) && result.endsWith(close)) return result.slice(open.length, -close.length).trim();
-  }
-  return result;
-}
-
-function exactLabeledText(question: string, aliases: readonly string[], expected: string): boolean {
-  const matches = labeledSegments(question, aliases);
-  return matches.length === 1 && unquote(matches[0]) === expected;
-}
-
-function exactLabeledCount(question: string, aliases: readonly string[], expected: number): boolean {
-  const matches = labeledSegments(question, aliases);
-  return matches.length === 1 && /^\d+$/.test(unquote(matches[0])) && Number(unquote(matches[0])) === expected;
-}
-
-function exactLabeledColumns(question: string, expected: string[]): boolean {
-  const matches = labeledSegments(question, ["column_names", "已选列名", "表单字段"]);
-  if (matches.length !== 1) return false;
-  const raw = matches[0].trim();
-  let parsed: unknown;
-  if (raw.startsWith("[")) {
-    try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
-  }
-  const names: unknown[] = Array.isArray(parsed)
-    ? parsed
-    : raw.replace(/^\[|\]$/g, "").split(/\s*(?:,|，|、|\|)\s*/).filter(Boolean).map(unquote);
-  return names.length === expected.length && names.every((name, index) => name === expected[index]);
-}
-
-function questionMatchesExternalSummary(question: string, summary: Json): boolean {
-  if (!text(summary.project_name) || !text(summary.deadline)) return false;
-  if (summary.message_template_id !== WECOM_TEMPLATE_ID ||
-    typeof summary.message_template_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(summary.message_template_sha256)) return false;
-  if (!Number.isSafeInteger(summary.supplier_count) || summary.supplier_count <= 0) return false;
-  if (!Array.isArray(summary.column_names) || summary.column_names.length === 0 || !summary.column_names.every(text)) return false;
-  return exactLabeledText(question, ["project_name", "项目名", "项目名称"], summary.project_name) &&
-    exactLabeledCount(question, ["supplier_count", "机构数", "机构数量"], summary.supplier_count) &&
-    exactLabeledText(question, ["deadline", "截止时间"], summary.deadline) &&
-    exactLabeledColumns(question, summary.column_names) &&
-    exactLabeledText(question, ["message_template_id", "消息模板"], summary.message_template_id);
 }
 
 export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
@@ -913,7 +864,32 @@ export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
         : [];
       return title === SUPPLY_PLAN_CONFIRMATION_HEADER || labels.includes(CONFIRM_SUPPLY_PLAN_LABEL);
     });
-    if (supplyQuestions.length === 0) return undefined;
+    const externalQuestions = questions.filter((question: unknown) => {
+      if (!question || typeof question !== "object") return false;
+      const item = question as Json;
+      const title = [item.header, item.title].find(text)?.trim();
+      const labels = Array.isArray(item.options)
+        ? item.options.map((option: unknown) => typeof option === "string" ? option.trim() :
+          option && typeof option === "object" && text((option as Json).label) ? (option as Json).label.trim() : "")
+        : [];
+      return title === EXTERNAL_SEND_CONFIRMATION_HEADER || labels.includes(CONFIRM_SEND_LABEL);
+    });
+    if (supplyQuestions.length === 0 && externalQuestions.length === 0) return undefined;
+    if (supplyQuestions.length > 0 && externalQuestions.length > 0) {
+      return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply and external-send confirmations must be separate questions.");
+    }
+    if (externalQuestions.length > 0) {
+      if (externalQuestions.length !== 1) {
+        return deny("BLOCKED_CONFIRMATION_MISMATCH", "External-send confirmation must contain exactly one bound question.");
+      }
+      const latestId = text(data.latest_external_confirmation_id) ? data.latest_external_confirmation_id : undefined;
+      const receipt = latestId ? data.confirmations[latestId] as Json | undefined : undefined;
+      if (!latestId || !receipt || receipt.kind !== "external_send" || receipt.status !== "pending") {
+        return deny("INTEGRATION_REQUIRED", "External-send confirmation needs one current pending distribution request.");
+      }
+      externalQuestions[0].question = `${externalSummaryText(receipt.safe_summary)}｜[YP_CONFIRMATION:${latestId}]`;
+      marker = { id: latestId, kind: "external_send" };
+    } else {
     if (supplyQuestions.length !== 1) {
       return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply-plan confirmation must contain exactly one bound question.");
     }
@@ -931,6 +907,7 @@ export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
     }
     question.question = `${supplyPlanText(latestReceipt.safe_summary)}｜[YP_SUPPLY_PLAN_CONFIRMATION:${latestId}]`;
     marker = { id: latestId, kind: "supply_plan" };
+    }
   }
   const receipt = data.confirmations?.[marker.id] as Json | undefined;
   if (!receipt || receipt.kind !== marker.kind || receipt.status !== "pending") {
@@ -941,8 +918,8 @@ export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
     return deny("BLOCKED_CONFIRMATION_MISMATCH", "The marker must appear in exactly one AskUserQuestion question body.");
   }
   if (marker.kind === "supply_plan") {
-    if (!exactOptionLabels(question, [CONFIRM_SUPPLY_PLAN_LABEL, "调整方案"])) {
-      return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply-plan options must be exactly 确认供给方案 and 调整方案.");
+    if (!confirmationOptions(question, [CONFIRM_SUPPLY_PLAN_LABEL, "调整方案"], ["稍后再说", "取消"])) {
+      return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply-plan options must include 确认供给方案 and 调整方案; optional cancel/later choices are allowed.");
     }
     const requirementId = text(receipt.requirement_id) ? receipt.requirement_id : "";
     const plan = requirementId ? storedSupplyPlan(data, requirementId) : undefined;
@@ -955,19 +932,10 @@ export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
     return undefined;
   }
 
-  if (!readableMarkedConfirmation(question.question)) {
-    return deny(
-      "BLOCKED_CONFIRMATION_FORMAT",
-      "YP Action collapses ordinary whitespace. Keep the confirmation body within 320 characters and use 3-5 visible 【分区】 headings joined by ｜, including 【影响】; never dump raw fields in one paragraph.",
-    );
+  if (!confirmationOptions(question, [CONFIRM_SEND_LABEL, "需要修改"], ["自定义消息", "稍后再说", "取消"])) {
+    return deny("BLOCKED_CONFIRMATION_MISMATCH", "External-send options must include 确认发送 and 需要修改; custom-message and cancel/later choices are allowed.");
   }
-
-  if (!exactOptionLabels(question, [CONFIRM_SEND_LABEL, "需要修改"])) {
-    return deny("BLOCKED_CONFIRMATION_MISMATCH", "External-send options must be exactly 确认发送 and 需要修改.");
-  }
-  if (!questionMatchesExternalSummary(question.question, receipt.safe_summary ?? {})) {
-    return deny("BLOCKED_CONFIRMATION_MISMATCH", "The question must show the bound project name, supplier count, deadline, selected column names, and fixed WeCom template identity. The Hook binds the template hash internally instead of exposing it to the user.");
-  }
+  question.question = `${externalSummaryText(receipt.safe_summary ?? {})}｜[YP_CONFIRMATION:${marker.id}]`;
   return undefined;
 }
 
@@ -998,7 +966,7 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
   if (!template) {
     return deny("INTEGRATION_REQUIRED", "The packaged fixed WeCom inquiry template is missing or empty.");
   }
-  const requestFingerprint = fingerprint({ input, template });
+  const requestFingerprint = bindingFingerprint({ input, template });
   const current = store(rootDir);
 
   const workflowState = storedWorkflowState(current.data, input.projectName);
@@ -1040,7 +1008,7 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
     }
     return deny(
       "YP_CONFIRMATION_REQUIRED",
-      `confirmation_id=${id}; call AskUserQuestion with marker [YP_CONFIRMATION:${id}] and copy this compact user-facing summary: ${externalSummaryText(receipt.safe_summary)}. Keep the body within 320 characters. Options must be exactly “${CONFIRM_SEND_LABEL}” and “需要修改”; only the first authorizes an unchanged retry.`,
+      `confirmation_id=${id}; call AskUserQuestion with header “${EXTERNAL_SEND_CONFIRMATION_HEADER}”. The Hook binds and renders the authoritative summary. Include “${CONFIRM_SEND_LABEL}” and “需要修改”; optional “自定义消息”, “稍后再说”, or “取消” choices are allowed. Only “${CONFIRM_SEND_LABEL}” authorizes this request.`,
     );
   }
 
@@ -1049,7 +1017,7 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
   current.data.confirmations[id] = {
     kind: "external_send",
     request_fingerprint: requestFingerprint,
-    input_fingerprint: fingerprint(input),
+    input_fingerprint: bindingFingerprint(input),
     workflow_state_fingerprint: workflowState.fingerprint,
     workflow_demand_id: workflowState.demand_id,
     workflow_demand_version: workflowState.demand_version,
@@ -1060,16 +1028,17 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
     updated_at_ms: now,
     expires_at_ms: now + CONFIRMATION_TTL_MS,
   };
+  current.data.latest_external_confirmation_id = id;
   save(current.path, current.data);
   return deny(
     "YP_CONFIRMATION_REQUIRED",
-    `confirmation_id=${id}; call AskUserQuestion with marker [YP_CONFIRMATION:${id}] and copy this compact user-facing summary: ${externalSummaryText(current.data.confirmations[id].safe_summary)}. Keep the body within 320 characters. Options must be exactly “${CONFIRM_SEND_LABEL}” and “需要修改”.`,
+    `confirmation_id=${id}; call AskUserQuestion with header “${EXTERNAL_SEND_CONFIRMATION_HEADER}”. The Hook binds and renders the authoritative summary. Include “${CONFIRM_SEND_LABEL}” and “需要修改”; optional “自定义消息”, “稍后再说”, or “取消” choices are allowed.`,
   );
 }
 
 function authorizeSupplyPlan(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
   const requirementId = text(input.id) ? input.id : "";
-  const requestFingerprint = fingerprint(input);
+  const requestFingerprint = bindingFingerprint(input);
   const current = store(rootDir);
   const plan = requirementId ? storedSupplyPlan(current.data, requirementId) : undefined;
   if (!plan) {
@@ -1085,13 +1054,6 @@ function authorizeSupplyPlan(input: Json, rootDir: string, toolCallId?: string):
   if (approved) {
     const [id, receipt] = approved;
     if (receipt.request_fingerprint == null) {
-      const suppliedFields = Object.keys(input).sort();
-      if (suppliedFields.length !== 2 || suppliedFields[0] !== "id" || suppliedFields[1] !== "platform") {
-        return deny(
-          "BLOCKED_CONFIRMATION_MISMATCH",
-          "The confirmed supply plan authorizes only rank_mcns({id, platform}); optional ranking parameters require a new explicit plan confirmation.",
-        );
-      }
       receipt.request_fingerprint = requestFingerprint;
     }
     receipt.status = "in_flight" satisfies ConfirmationStatus;
@@ -1120,7 +1082,7 @@ function authorizeSupplyPlan(input: Json, rootDir: string, toolCallId?: string):
     }
     return deny(
       "YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED",
-      `confirmation_id=${id}; call AskUserQuestion with marker [YP_SUPPLY_PLAN_CONFIRMATION:${id}] and copy these exact bound values using the compact labels: ${supplyPlanText(plan.values)}. Preserve explicit Provider versus synthetic_test_only provenance in the section headings and keep the body within 320 characters. Options must be exactly “${CONFIRM_SUPPLY_PLAN_LABEL}” and “调整方案”; only the first authorizes the unchanged rank_mcns call.`,
+      `confirmation_id=${id}; call AskUserQuestion with header “${SUPPLY_PLAN_CONFIRMATION_HEADER}”. The Hook binds and renders the authoritative Provider plan. Include “${CONFIRM_SUPPLY_PLAN_LABEL}” and “调整方案”; optional “稍后再说” or “取消” choices are allowed. Only “${CONFIRM_SUPPLY_PLAN_LABEL}” authorizes ranking.`,
     );
   }
 
@@ -1140,7 +1102,7 @@ function authorizeSupplyPlan(input: Json, rootDir: string, toolCallId?: string):
   save(current.path, current.data);
   return deny(
     "YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED",
-    `confirmation_id=${id}; call AskUserQuestion with marker [YP_SUPPLY_PLAN_CONFIRMATION:${id}] and copy these exact bound values using the compact labels: ${supplyPlanText(plan.values)}. Preserve explicit Provider versus synthetic_test_only provenance in the section headings and keep the body within 320 characters. Options must be exactly “${CONFIRM_SUPPLY_PLAN_LABEL}” and “调整方案”.`,
+    `confirmation_id=${id}; call AskUserQuestion with header “${SUPPLY_PLAN_CONFIRMATION_HEADER}”. The Hook binds and renders the authoritative Provider plan. Include “${CONFIRM_SUPPLY_PLAN_LABEL}” and “调整方案”; optional “稍后再说” or “取消” choices are allowed.`,
   );
 }
 
@@ -1227,7 +1189,7 @@ function explicitToolFailureCode(event: Json): string | undefined {
 }
 
 export function recordFailedContinuousTool(event: Json, tool: string, rootDir: string): void {
-  if (tool === "create_with_distributions" || tool === "rank_mcns") return;
+  if (!CONTINUOUS_WRITE_TOOLS.has(tool)) return;
   const code = explicitToolFailureCode(event);
   if (!code) return;
   const currentBlock = store(rootDir).data.blocked_tool_turn;
@@ -1270,9 +1232,11 @@ export function recordWorkflowToolResult(
         promptGate.status = "clarified";
         promptGate.answer_fingerprint = fingerprint(clarificationAnswers);
         delete promptGate.last_result_error;
+      } else if (rejectedOutcome(result)) {
+        promptGate.status = "cancelled";
+        promptGate.last_result_error = "clarification_cancelled";
       } else {
-        promptGate.last_result_error = event.error ? "ask_user_question_failed" :
-          rejectedOutcome(result) ? "clarification_cancelled" : "clarification_result_unrecognized";
+        promptGate.last_result_error = event.error ? "ask_user_question_failed" : "clarification_result_unrecognized";
       }
       promptGate.updated_at_ms = Date.now();
       delete promptGate.clarification_in_flight;
@@ -1306,7 +1270,7 @@ export function recordWorkflowToolResult(
 
   if (tool !== "create_with_distributions" && tool !== "rank_mcns") return;
   const kind = tool === "create_with_distributions" ? "external_send" : "supply_plan";
-  const requestFingerprint = fingerprint(input);
+  const requestFingerprint = bindingFingerprint(input);
   const afterToolCallId = text(event.toolCallId) ? event.toolCallId.trim() : undefined;
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) => {
     if (receipt.kind !== kind || receipt.status !== "in_flight") return false;

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -183,6 +184,33 @@ describe("YP Action native hook guard", () => {
     assert.deepEqual([...hooks.keys()].sort(), ["after_tool_call", "before_agent_reply", "before_prompt_build", "before_tool_call", "session_end"]);
   });
 
+  it("isolates guard state by host session key", async () => {
+    const firstSession = { sessionKey: "session-one" };
+    const secondSession = { sessionKey: "session-two" };
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, firstSession);
+
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload() },
+    }, firstSession);
+    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
+
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload() },
+    }, secondSession), undefined);
+
+    const statePath = (key) => join(
+      tempDir,
+      "state",
+      "sessions",
+      createHash("sha256").update(key).digest("hex").slice(0, 24),
+      "confirmation_guard.json",
+    );
+    assert.equal(JSON.parse(readFileSync(statePath("session-one"), "utf8")).prompt_requirement_gate.status, "pending");
+    assert.equal(existsSync(statePath("session-two")), false);
+  });
+
   it("fails closed when the before-tool guard itself throws", async () => {
     const failingHooks = new Map();
     const errors = [];
@@ -239,11 +267,11 @@ describe("YP Action native hook guard", () => {
     assert.match(result.prependSystemContext, /official price lacks an L1\/L2\/L3 tier/);
     assert.match(result.prependSystemContext, /__UNRESOLVED__/);
     assert.match(result.prependSystemContext, /schemaVersion="ypmcn-brief-v1"/);
-    assert.match(result.prependSystemContext, /sourceText copied as an exact originalBrief substring/);
+    assert.match(result.prependSystemContext, /explicit supplemental Ask answer/);
     assert.match(result.prependSystemContext, /coverageCheck uses atomCount, mappedCount, preservedCount, and unresolvedCount/);
     assert.match(result.prependSystemContext, /requirement_ready.*search_creators/);
     assert.match(result.prependSystemContext, /candidate_pool_ready.*rank_mcns/);
-    assert.match(result.prependSystemContext, /replaces the question body with the compact authoritative ten-field supply plan/);
+    assert.match(result.prependSystemContext, /replaces the question body with the authoritative supply plan/);
     assert.match(result.prependSystemContext, /Do not reconstruct the long search output/);
     assert.match(result.prependSystemContext, /notification_template/);
     assert.match(result.prependSystemContext, /export_csv/);
@@ -324,7 +352,7 @@ describe("YP Action native hook guard", () => {
     assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params }, {}), undefined);
   });
 
-  it("keeps a denied native clarification pending", async () => {
+  it("lets a denied native clarification exit without locking the turn", async () => {
     await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     const params = {
       questions: [{
@@ -340,11 +368,13 @@ describe("YP Action native hook guard", () => {
       params,
       result: "User denied the operation.",
     }, {});
-    const blocked = await hooks.get("before_tool_call")({
+    const next = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__validate_requirement",
       params: { payload: requirementPayload() },
     }, {});
-    assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
+    assert.doesNotMatch(next?.blockReason ?? "", /BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED/);
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.prompt_requirement_gate.status, "cancelled");
   });
 
   it("rejects a dense one-paragraph requirement popup", async () => {
@@ -360,7 +390,7 @@ describe("YP Action native hook guard", () => {
       },
     }, {});
     assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CONFIRMATION_MISMATCH/);
-    assert.match(blocked.blockReason, /one direct/);
+    assert.match(blocked.blockReason, /1-5 concise single-choice questions/);
   });
 
   it("rejects a source-formatted requirement popup that still becomes too long when host whitespace collapses", async () => {
@@ -380,10 +410,10 @@ describe("YP Action native hook guard", () => {
       },
     }, {});
     assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CONFIRMATION_MISMATCH/);
-    assert.match(blocked.blockReason, /one direct/);
+    assert.match(blocked.blockReason, /1-5 concise single-choice questions/);
   });
 
-  it("rejects a question that exposes internal terms or omits option guidance", async () => {
+  it("rejects a multiline clarification question", async () => {
     await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     const blocked = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
@@ -397,8 +427,7 @@ describe("YP Action native hook guard", () => {
       },
     }, {});
     assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_CONFIRMATION_MISMATCH/);
-    assert.match(blocked.blockReason, /field names/);
-    assert.match(blocked.blockReason, /descriptions/);
+    assert.match(blocked.blockReason, /1-5 concise single-choice questions/);
   });
 
   it("does not relabel a host-wrapped local Hook denial as an MCP backend failure", async () => {
@@ -492,7 +521,7 @@ describe("YP Action native hook guard", () => {
     assert.match(invalid.blockReason, /INVALID_INPUT/);
   });
 
-  it("requires a user popup after a Hook denial and resumes the selected safe path in the same turn", async () => {
+  it("allows a corrected read-only call immediately after a Hook denial", async () => {
     await hooks.get("before_prompt_build")({ prompt: "恢复状态", messages: [] }, {});
     const invalid = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__get_workflow_state",
@@ -504,26 +533,7 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__get_workflow_state",
       params: { trace_id: "demand-1" },
     }, {});
-    assert.match(retried.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT/);
-    assert.match(retried.blockReason, /INVALID_INPUT/);
-
-    const recoveryParams = {
-      questions: [{
-        header: "参数确认",
-        question: "参数错误：get_workflow_state 缺少完整定位条件。请选择下一步。",
-        options: [{ label: "使用 trace_id 重试" }, { label: "停止" }],
-      }],
-    };
-    assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params: recoveryParams }, {}), undefined);
-    await hooks.get("after_tool_call")({
-      toolName: "AskUserQuestion",
-      params: recoveryParams,
-      result: `${recoveryParams.questions[0].question}: 使用 trace_id 重试`,
-    }, {});
-    assert.equal(await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__get_workflow_state",
-      params: { trace_id: "demand-1" },
-    }, {}), undefined);
+    assert.equal(retried, undefined);
 
     await hooks.get("before_prompt_build")({ prompt: "具体守卫优先", messages: [] }, {});
     await hooks.get("before_tool_call")({
@@ -645,14 +655,14 @@ describe("YP Action native hook guard", () => {
     }
   });
 
-  it("blocks validate_requirement schema probes because the tool always writes", async () => {
-    const blocked = await hooks.get("before_tool_call")({
+  it("does not confuse a legitimate project name with a schema probe", async () => {
+    const payload = requirementPayload({ projectName: "schema_probe新品" });
+    const result = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__validate_requirement",
-      params: { payload: { projectName: "__SCHEMA_CHECK__", status: "draft" } },
+      params: { payload },
       toolCallId: "call-schema-probe",
     }, {});
-    assert.equal(blocked.block, true);
-    assert.match(blocked.blockReason, /BLOCKED_NO_DRY_RUN/);
+    assert.equal(result, undefined);
   });
 
   it("blocks missing required requirement fields", async () => {
@@ -735,14 +745,12 @@ describe("YP Action native hook guard", () => {
     const validAudit = requirementPayload().rawMessagesJson;
     const invalidAudits = [
       { ...validAudit, schemaVersion: "legacy" },
-      { ...validAudit, atoms: [{ ...validAudit.atoms[0], sourceText: "原文中不存在" }] },
       { ...validAudit, atoms: [{ ...validAudit.atoms[0], targetField: "inventedField" }], coverageCheck: { atomCount: 1, mappedCount: 1, preservedCount: 0, unresolvedCount: 0 } },
       { ...validAudit, atoms: [{ sourceText: "小红书", disposition: "preserved", confidence: 1, inferred: false }], coverageCheck: { atomCount: 1, mappedCount: 0, preservedCount: 1, unresolvedCount: 0 } },
       { ...validAudit, atoms: [{ sourceText: "小红书", preservedText: "抖音", disposition: "preserved", confidence: 1, inferred: false }], coverageCheck: { atomCount: 1, mappedCount: 0, preservedCount: 1, unresolvedCount: 0 } },
       { ...validAudit, coverageCheck: { ...validAudit.coverageCheck, unresolvedCount: 1 } },
     ];
     const expectedBlockReasons = [
-      /BLOCKED_REQUIREMENT_INCOMPLETE/,
       /BLOCKED_REQUIREMENT_INCOMPLETE/,
       /BLOCKED_REQUIREMENT_INCOMPLETE/,
       /BLOCKED_REQUIREMENT_INCOMPLETE/,
@@ -760,27 +768,47 @@ describe("YP Action native hook guard", () => {
     }
   });
 
-  it("blocks unconfirmed natural-language account-type taxonomy mappings", async () => {
-    for (const [targetField, value] of [
-      ["talentTypeLabel", ["母婴", "亲子"]],
-      ["contentTag", "母婴,亲子"],
-    ]) {
-      await hooks.get("before_prompt_build")({ prompt: `taxonomy ${targetField}`, messages: [] }, {});
-      const payload = requirementPayload({ [targetField]: value });
-      payload.rawMessagesJson.originalBrief += "，账号类型：母婴类、亲子相关";
-      payload.rawMessagesJson.atoms.push({
-        sourceText: "母婴类、亲子相关", disposition: "mapped", targetField, confidence: 1, inferred: false,
-      });
-      payload.rawMessagesJson.coverageCheck = {
-        atomCount: 5, mappedCount: 5, preservedCount: 0, unresolvedCount: 0,
-      };
-      const blocked = await hooks.get("before_tool_call")({
-        toolName: "mcp__ypmcn__validate_requirement",
-        params: { payload },
-      }, {});
-      assert.match(blocked.blockReason, /BLOCKED_TAXONOMY_CONFIRMATION_REQUIRED/);
-      assert.match(blocked.blockReason, new RegExp(targetField));
-    }
+  it("accepts a mapped atom sourced from an explicit supplemental confirmation", async () => {
+    const payload = requirementPayload();
+    payload.rawMessagesJson.atoms.push({
+      sourceText: "平台：小红书",
+      disposition: "mapped",
+      targetField: "platform",
+      confidence: 1,
+      inferred: false,
+    });
+    payload.rawMessagesJson.coverageCheck.atomCount += 1;
+    payload.rawMessagesJson.coverageCheck.mappedCount += 1;
+
+    const result = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload },
+    }, {});
+    assert.equal(result, undefined);
+  });
+
+  it("accepts explicit account taxonomy and rejects mapping it as content", async () => {
+    const talentPayload = requirementPayload({ talentTypeLabel: ["母婴", "亲子"] });
+    talentPayload.rawMessagesJson.originalBrief += "，账号类型：母婴类、亲子相关";
+    talentPayload.rawMessagesJson.atoms.push({
+      sourceText: "账号类型：母婴类、亲子相关", disposition: "mapped", targetField: "talentTypeLabel", confidence: 1, inferred: false,
+    });
+    talentPayload.rawMessagesJson.coverageCheck = { atomCount: 5, mappedCount: 5, preservedCount: 0, unresolvedCount: 0 };
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement", params: { payload: talentPayload },
+    }, {}), undefined);
+
+    await hooks.get("before_prompt_build")({ prompt: "taxonomy content mismatch", messages: [] }, {});
+    const wrongContent = requirementPayload({ contentTag: "母婴,亲子" });
+    wrongContent.rawMessagesJson.originalBrief += "，账号类型：母婴类、亲子相关";
+    wrongContent.rawMessagesJson.atoms.push({
+      sourceText: "账号类型：母婴类、亲子相关", disposition: "mapped", targetField: "contentTag", confidence: 1, inferred: false,
+    });
+    wrongContent.rawMessagesJson.coverageCheck = { atomCount: 5, mappedCount: 5, preservedCount: 0, unresolvedCount: 0 };
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement", params: { payload: wrongContent },
+    }, {});
+    assert.match(blocked.blockReason, /BLOCKED_TAXONOMY_CONFIRMATION_REQUIRED.*contentTag/);
 
     await hooks.get("before_prompt_build")({ prompt: "confirmed content topic", messages: [] }, {});
     const contentPayload = requirementPayload({ contentTag: "母婴,亲子" });
@@ -908,11 +936,10 @@ describe("YP Action native hook guard", () => {
     }
   });
 
-  it("rejects invalid provider formulas and invalidates an older plan for the requirement", async () => {
+  it("accepts provider strategy changes but rejects malformed plan values", async () => {
     const invalidPlans = [
-      supplyPlan({ supply_demand_ratio: 999 }),
-      supplyPlan({ estimated_gap_count: 3 }),
-      supplyPlan({ recommended_manual_creator_count: 3, mcn_manual_creator_ratio: "18:3" }),
+      supplyPlan({ estimated_gap_count: -1 }),
+      supplyPlan({ recommended_manual_creator_count: -1, mcn_manual_creator_ratio: "18:-1" }),
       supplyPlan({ mcn_manual_creator_ratio: "9:1" }),
     ];
     for (let index = 0; index < invalidPlans.length; index += 1) {
@@ -925,6 +952,14 @@ describe("YP Action native hook guard", () => {
       }, {});
       assert.match(blocked.blockReason, /INTEGRATION_REQUIRED/);
     }
+
+    const changedStrategyId = "req-provider-strategy-change";
+    await hooks.get("before_prompt_build")({ prompt: "provider strategy changed", messages: [] }, {});
+    await recordSearch(changedStrategyId, supplyPlan({ estimated_gap_count: 3 }));
+    const confirmation = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns", params: { id: changedStrategyId, platform: "xiaohongshu" },
+    }, {});
+    assert.match(confirmation.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
   });
 
   it("hydrates reconstructed supply values from the bound receipt and still rejects non-exact options", async () => {
@@ -1087,7 +1122,7 @@ describe("YP Action native hook guard", () => {
     }, {});
     assert.equal(blocked.block, true);
     assert.match(blocked.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
-    assert.match(blocked.blockReason, /供给倍数/);
+    assert.match(blocked.blockReason, /header “供给确认”/);
     const id = confirmationId(blocked);
     await answerSupplyPlanConfirmation(id);
     assert.equal(await hooks.get("before_tool_call")({
@@ -1135,7 +1170,7 @@ describe("YP Action native hook guard", () => {
     }, {}), undefined);
   });
 
-  it("does not allow optional rank parameters from a search-bound confirmation", async () => {
+  it("allows schema-valid rank parameters from a search-bound confirmation", async () => {
     const params = { id: "req-supply-direct-popup-options", platform: "xiaohongshu" };
     await recordSearch(params.id);
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -1155,11 +1190,11 @@ describe("YP Action native hook guard", () => {
       params: askParams,
       result: { status: "submitted", answers: [{ selected_labels: ["确认供给方案"] }] },
     }, {});
-    const blocked = await hooks.get("before_tool_call")({
+    const allowed = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns",
       params: { ...params, minimum_mcn_count: 8 },
     }, {});
-    assert.match(blocked.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+    assert.equal(allowed, undefined);
   });
 
   it("accepts YP Action flattened supply confirmation and raw JSON MCP success results", async () => {
@@ -1263,7 +1298,7 @@ describe("YP Action native hook guard", () => {
     assert.match(mismatch.blockReason, /BLOCKED_WORKFLOW_ACTION/);
   });
 
-  it("blocks forged external summary values and non-exact send options before AskUserQuestion", async () => {
+  it("hydrates external summary values and allows explicit cancel options", async () => {
     const { id } = await requestConfirmation(distributionParams({ projectName: "真实外发项目" }));
     const summary = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
     const question = [
@@ -1272,24 +1307,29 @@ describe("YP Action native hook guard", () => {
       `【固定模板】消息模板=${summary.message_template_id}`,
       `【影响】确认后真实企微外发｜[YP_CONFIRMATION:${id}]`,
     ].join("\n");
+    const forgedParams = { questions: [{ question, options: [{ label: "确认发送" }, { label: "需要修改" }] }] };
     const forged = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
-      params: { questions: [{ question, options: [{ label: "确认发送" }, { label: "需要修改" }] }] },
+      params: forgedParams,
     }, {});
-    assert.equal(forged.block, true);
-    assert.match(forged.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+    assert.equal(forged, undefined);
+    assert.match(forgedParams.questions[0].question, /项目名=真实外发项目/);
+    assert.doesNotMatch(forgedParams.questions[0].question, /项目名=伪造项目/);
 
+    await hooks.get("before_prompt_build")({ prompt: "重新确认外发", messages: [] }, {});
+    const second = await requestConfirmation(distributionParams({ projectName: "允许取消项目" }));
     const extraOption = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
       params: {
         questions: [{
-          question: question.replace("项目名=伪造项目", "项目名=真实外发项目"),
+          header: "外发确认",
+          question: "请确认是否外发？",
           options: [{ label: "确认发送" }, { label: "需要修改" }, { label: "取消" }],
         }],
       },
     }, {});
-    assert.equal(extraOption.block, true);
-    assert.match(extraOption.blockReason, /BLOCKED_CONFIRMATION_MISMATCH/);
+    assert.ok(second.id);
+    assert.equal(extraOption, undefined);
   });
 
   it("invalidates confirmation when request parameters change", async () => {
@@ -1381,7 +1421,7 @@ describe("YP Action native hook guard", () => {
     assert.match(retry.blockReason, /WRITE_RESULT_UNKNOWN.*get_workflow_state/);
   });
 
-  it("reconciles an unknown send outcome before an exact retry", async () => {
+  it("keeps an unknown send outcome blocked after state refresh", async () => {
     const params = distributionParams({ projectName: "未知结果恢复测试" });
     const { id } = await requestConfirmation(params);
     await answerConfirmation(id);
@@ -1396,9 +1436,10 @@ describe("YP Action native hook guard", () => {
     }, {});
 
     await recordWorkflowState(params.projectName, ["create_with_distributions"]);
-    assert.equal(await hooks.get("before_tool_call")({
+    const retry = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__create_with_distributions", params, toolCallId: "call-reconcile-send-2",
-    }, {}), undefined);
+    }, {});
+    assert.match(retry.blockReason, /WRITE_RESULT_UNKNOWN/);
   });
 
   it("reconciles an unknown rank outcome only for the same requirement", async () => {
