@@ -11,7 +11,6 @@ import {
   type ConfirmationStatus,
   type GuardStore,
   type Json,
-  recordBlockedToolResult,
   save,
   sha256Text,
   store,
@@ -30,25 +29,6 @@ const CONFIRM_SEND_LABEL = "确认发送";
 const CONFIRM_SUPPLY_PLAN_LABEL = "确认供给方案";
 const SUPPLY_PLAN_CONFIRMATION_HEADER = "供给确认";
 const EXTERNAL_SEND_CONFIRMATION_HEADER = "外发确认";
-const LOCAL_CONTINUATION_FAILURE_CODES = new Set([
-  "BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED",
-  "YP_CONFIRMATION_REQUIRED",
-  "YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED",
-  "WRITE_RESULT_UNKNOWN",
-  "WORKFLOW_STATE_REFRESH_REQUIRED",
-]);
-const CONTINUOUS_WRITE_TOOLS = new Set([
-  "validate_requirement",
-  "search_creators",
-  "rank_mcns",
-  "manual_source_creators",
-  "sync_mcn_inquiry_status",
-  "ingest_mcn_submissions",
-  "rank_creators",
-  "audit_manual_adjustment",
-  "create_submission_batch",
-  "record_client_feedback",
-]);
 const ISO_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const SUPPLY_PLAN_FIELDS = [
   "demand_count",
@@ -1234,37 +1214,6 @@ export function guardWorkflowTool(
   return undefined;
 }
 
-function explicitToolFailureCode(event: Json): string | undefined {
-  const root = unwrap(event.result);
-  if (!event.error && (!root || typeof root !== "object" || (root.success !== false && root.isError !== true))) {
-    return undefined;
-  }
-  const error = event.error ?? root?.error;
-  const errorMessage = typeof error === "string"
-    ? error
-    : error && typeof error === "object" && text(error.message)
-      ? error.message
-      : undefined;
-  const messageCode = errorMessage?.trim().match(/^([A-Z][A-Z0-9_]+)\s*:/)?.[1];
-  const candidate = error && typeof error === "object"
-    ? error.code ?? error.error_code ?? error.name
-    : undefined;
-  const code = [messageCode, candidate, root?.code, root?.error_code].find(text);
-  return code ? code.trim().replace(/[^A-Za-z0-9_-]/g, "_") : "MCP_TOOL_FAILED";
-}
-
-export function recordFailedContinuousTool(event: Json, tool: string, rootDir: string): void {
-  if (!CONTINUOUS_WRITE_TOOLS.has(tool)) return;
-  const code = explicitToolFailureCode(event);
-  if (!code) return;
-  const currentBlock = store(rootDir).data.blocked_tool_turn;
-  if (LOCAL_CONTINUATION_FAILURE_CODES.has(code) || currentBlock?.code === code) return;
-  recordBlockedToolResult(
-    rootDir,
-    deny(code, `${tool} returned an explicit failure. Do not retry automatically or end with a plain blocked message; use native AskUserQuestion in this turn to show the error and let the user choose the safe next action.`),
-  );
-}
-
 export function recordWorkflowToolResult(
   event: Json,
   raw: string,
@@ -1298,11 +1247,6 @@ export function recordWorkflowToolResult(
   const current = store(rootDir);
 
   if (isAskTool(raw)) {
-    const askResult = event.result ?? event.message;
-    if (!event.error && !rejectedOutcome(askResult) && answerValues(askResult).length > 0) {
-      delete current.data.blocked_tool_turn;
-      save(current.path, current.data);
-    }
     const promptGate = current.data.prompt_requirement_gate;
     if (promptGate && typeof promptGate === "object" && promptGate.status === "pending" &&
       promptGate.clarification_in_flight === true && promptGate.clarification_fingerprint === fingerprint(input)) {

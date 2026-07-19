@@ -484,7 +484,6 @@ describe("YP Action native hook guard", () => {
     }, {});
 
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.blocked_tool_turn, undefined);
     assert.equal(state.prompt_requirement_gate.status, "pending");
   });
 
@@ -673,16 +672,23 @@ describe("YP Action native hook guard", () => {
       createHash("sha256").update(scope.sessionKey).digest("hex").slice(0, 24),
       "confirmation_guard.json",
     );
-    const persisted = JSON.parse(readFileSync(persistedPath, "utf8"));
+    let persisted;
+    try {
+      persisted = JSON.parse(readFileSync(persistedPath, "utf8"));
+    } catch {
+      persisted = {};
+    }
     assert.equal(persisted.latest_requirement_id, undefined);
     const blocked = await hooks.get("before_tool_call")({
       toolName: "ypmcn-mcp__search_creators",
       params: { id: requirementId },
     }, scope);
-    assert.match(blocked.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*MCP_TOOL_FAILED/);
+    // Without completed validate_requirement in scope, search_creators is blocked by the normal guard (not a stale-chain block)
+    assert.equal(blocked.block, true);
+    assert.doesNotMatch(blocked.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT/);
   });
 
-  it("allows a corrected read-only call immediately after a Hook denial", async () => {
+  it("allows a corrected call in the same turn immediately after a Hook denial", async () => {
     await hooks.get("before_prompt_build")({ prompt: "恢复状态", messages: [] }, {});
     const invalid = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__get_workflow_state",
@@ -696,6 +702,7 @@ describe("YP Action native hook guard", () => {
     }, {});
     assert.equal(retried, undefined);
 
+    // Same-turn corrected call to another tool is not blocked by the previous denial
     await hooks.get("before_prompt_build")({ prompt: "具体守卫优先", messages: [] }, {});
     await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__get_workflow_state",
@@ -705,8 +712,8 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__create_with_distributions",
       params: distributionParams({ projectName: "具体守卫优先测试" }),
     }, {});
-    assert.match(specific.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*INVALID_INPUT/);
-    assert.doesNotMatch(specific.blockReason, /WORKFLOW_STATE_REFRESH_REQUIRED/);
+    assert.doesNotMatch(specific.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT/);
+    assert.match(specific.blockReason, /WORKFLOW_STATE_REFRESH_REQUIRED/);
 
     await hooks.get("before_prompt_build")({ prompt: "用户明确重试", messages: [] }, {});
     assert.equal(await hooks.get("before_tool_call")({
@@ -892,7 +899,9 @@ describe("YP Action native hook guard", () => {
       toolName: "mcp__ypmcn__validate_requirement",
       params: { payload: rewritten },
     }, {});
-    assert.match(downgrade.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*BLOCKED_REQUIREMENT_INCOMPLETE/);
+    assert.doesNotMatch(downgrade.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT/);
+    // Now receives the real semantic rewrite guard instead of the blanket BLOCKED_REQUIREMENT_INCOMPLETE
+    assert.match(downgrade.blockReason, /BLOCKED_REQUIREMENT_SEMANTIC_REWRITE/);
 
     await hooks.get("before_prompt_build")({ prompt: "用户明确修正", messages: [] }, {});
     const nextTurn = await hooks.get("before_tool_call")({
@@ -1641,17 +1650,12 @@ describe("YP Action native hook guard", () => {
     }, {}), undefined);
   });
 
-  it("expires stale local blockers and search receipts instead of reusing them", async () => {
+  it("expires stale search receipts instead of reusing them", async () => {
     const requirementId = "req-expired-plan";
     await recordSearch(requirementId);
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
     state.supply_plans[requirementId].expires_at_ms = Date.now() - 1;
     state.search_receipts[requirementId].expires_at_ms = Date.now() - 1;
-    state.blocked_tool_turn = {
-      code: "INVALID_INPUT",
-      observed_at_ms: Date.now() - 10_000,
-      expires_at_ms: Date.now() - 1,
-    };
     writeFileSync(stateFile, JSON.stringify(state), "utf8");
 
     const blocked = await hooks.get("before_tool_call")({
@@ -1659,7 +1663,6 @@ describe("YP Action native hook guard", () => {
       params: { id: requirementId, platform: "xiaohongshu" },
     }, {});
     assert.match(blocked.blockReason, /INTEGRATION_REQUIRED.*successful search_creators/);
-    assert.doesNotMatch(blocked.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT/);
   });
 
   it("stores only confirmation metadata and safe summaries", async () => {

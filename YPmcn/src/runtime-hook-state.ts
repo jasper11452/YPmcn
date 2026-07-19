@@ -14,7 +14,6 @@ export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 export const WORKFLOW_STATE_TTL_MS = 60 * 60 * 1_000;
 export const SUPPLY_PLAN_TTL_MS = 60 * 60 * 1_000;
 export const TRUSTED_ID_TTL_MS = 60 * 60 * 1_000;
-const BLOCKED_TOOL_TURN_TTL_MS = 2 * 60 * 1_000;
 const READY_REQUIREMENT_TTL_MS = 30 * 60 * 1_000;
 
 export function text(value: unknown): value is string {
@@ -160,10 +159,6 @@ export function store(rootDir: string): GuardStore {
     delete data.latest_requirement_id;
     changed = true;
   }
-  if (data.blocked_tool_turn && Number(data.blocked_tool_turn.expires_at_ms ?? 0) <= now) {
-    delete data.blocked_tool_turn;
-    changed = true;
-  }
   const trustedIds = data.trusted_ids.filter((receipt: unknown) =>
     receipt && typeof receipt === "object" &&
     text((receipt as Json).kind) && text((receipt as Json).value) &&
@@ -181,7 +176,6 @@ export function beginPromptTurn(rootDir: string, preview?: Json, readyPayload?: 
   const current = store(rootDir);
   current.data.prompt_epoch = Number(current.data.prompt_epoch ?? 0) + 1;
   current.data.blocked_requirement_semantics = {};
-  delete current.data.blocked_tool_turn;
   delete current.data.prompt_requirement_gate;
   delete current.data.ready_requirement_binding;
   if (preview && preview.gate !== "ready") {
@@ -209,54 +203,4 @@ export function beginPromptTurn(rootDir: string, preview?: Json, readyPayload?: 
     };
   }
   save(current.path, current.data);
-}
-
-const CONTINUATION_BLOCK_CODES = new Set([
-  "YP_CONFIRMATION_REQUIRED",
-  "YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED",
-  "WRITE_RESULT_UNKNOWN",
-  "WORKFLOW_STATE_REFRESH_REQUIRED",
-  "BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED",
-  // These are local, pre-dispatch identity checks. The write cannot have happened,
-  // so a corrected identifier is safe to validate again in the same prompt turn.
-  "ID_PROVENANCE_REQUIRED",
-  "ID_PROVENANCE_MISMATCH",
-]);
-
-export function recordBlockedToolResult(rootDir: string, result: Json | undefined): void {
-  if (!result?.block || !text(result.blockReason)) return;
-  const code = result.blockReason.split(":", 1)[0];
-  if (code === "BLOCKED_PREVIOUS_HOOK_RESULT" || CONTINUATION_BLOCK_CODES.has(code)) return;
-  const current = store(rootDir);
-  const now = Date.now();
-  current.data.blocked_tool_turn = {
-    code,
-    prompt_epoch: Number(current.data.prompt_epoch ?? 0),
-    observed_at_ms: now,
-    expires_at_ms: now + BLOCKED_TOOL_TURN_TTL_MS,
-  };
-  save(current.path, current.data);
-}
-
-const BLOCKED_TURN_WRITE_TOOLS = new Set([
-  "validate_requirement", "search_creators", "rank_mcns", "manual_source_creators",
-  "create_with_distributions", "sync_mcn_inquiry_status", "ingest_mcn_submissions",
-  "rank_creators", "audit_manual_adjustment", "create_submission_batch", "record_client_feedback",
-]);
-
-function normalizedBusinessTool(name: string): string | undefined {
-  const prefixes = ["ypmcn__", "mcp__ypmcn__", "ypmcn-mcp__", "ypmcn-provider__"];
-  const prefix = prefixes.find((candidate) => name.startsWith(candidate));
-  return prefix ? name.slice(prefix.length) : undefined;
-}
-
-export function blockedToolTurnFailure(rootDir: string, rawToolName = ""): Json | undefined {
-  const blocked = store(rootDir).data.blocked_tool_turn;
-  if (!blocked || typeof blocked !== "object" || !text(blocked.code)) return undefined;
-  const tool = normalizedBusinessTool(rawToolName);
-  if (!tool || !BLOCKED_TURN_WRITE_TOOLS.has(tool)) return undefined;
-  return deny(
-    "BLOCKED_PREVIOUS_HOOK_RESULT",
-    `A previous write-like Tool call in this user turn was blocked with ${blocked.code}. Do not retry that write automatically. Read-only Tools remain available; ask the user only when a business choice is actually required.`,
-  );
 }

@@ -152,13 +152,13 @@ describe("requirement behavior through public plugin hooks", () => {
     assert.doesNotMatch(result.prependContext, /YPmcn mandatory unresolved-Brief interaction/);
   });
 
-  it("binds validate_requirement to the Ready Preview and stops every same-turn reconstruction retry", async () => {
+  it("binds validate_requirement to the Ready Preview and validates every same-turn retry independently", async () => {
     const wrongFirstToolTurn = await newTurn(LIVE_BRIEF);
     const exactFirstPayload = authoritativePayload(wrongFirstToolTurn);
     const wrongFirstTool = await guard("search", { query: "候选达人" });
     assert.match(wrongFirstTool.blockReason, /BLOCKED_REQUIREMENT_VALIDATION_REQUIRED.*only permitted Tool is validate_requirement/);
     const firstToolRetry = await guard("mcp__ypmcn__validate_requirement", { payload: exactFirstPayload });
-    assert.match(firstToolRetry.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*BLOCKED_REQUIREMENT_VALIDATION_REQUIRED/);
+    assert.equal(firstToolRetry, undefined);
 
     for (const mutate of [
       (payload) => { delete payload.rawMessagesJson; },
@@ -176,7 +176,7 @@ describe("requirement behavior through public plugin hooks", () => {
       assert.match(blocked.blockReason, /BLOCKED_REQUIREMENT_PREVIEW_MISMATCH/);
 
       const retried = await guard("mcp__ypmcn__validate_requirement", { payload: exactPayload });
-      assert.match(retried.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*BLOCKED_REQUIREMENT_PREVIEW_MISMATCH/);
+      assert.equal(retried, undefined);
     }
 
     const persisted = readFileSync(join(rootDir, "state", "confirmation_guard.json"), "utf8");
@@ -248,9 +248,6 @@ describe("requirement behavior through public plugin hooks", () => {
       params: { id: "failed-search-requirement-id" },
       result: { success: false, data: null, error: { code: "DEMAND_NOT_FOUND" } },
     }, {});
-
-    const retried = await guard("mcp__ypmcn__search_creators", { id: "failed-search-requirement-id" });
-    assert.match(retried.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*DEMAND_NOT_FOUND/);
 
     const recovery = {
       questions: [{

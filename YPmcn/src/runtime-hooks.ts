@@ -5,10 +5,8 @@ import {
   settleReadyRequirement,
 } from "./runtime-hook-requirement.js";
 import {
-  blockedToolTurnFailure,
   denyStructured,
   type Json,
-  recordBlockedToolResult,
   store,
   text,
 } from "./runtime-hook-state.js";
@@ -17,14 +15,13 @@ import {
   isAskTool,
   normalize,
   promptRequirementGate,
-  recordFailedContinuousTool,
   recordTrustedIds,
   recordWorkflowToolResult,
   successfulValidateRequirement,
   validateMarkedAsk,
 } from "./runtime-hook-workflow.js";
 
-export { beginPromptTurn, blockedToolTurnFailure, recordBlockedToolResult, withStateScope } from "./runtime-hook-state.js";
+export { beginPromptTurn, withStateScope } from "./runtime-hook-state.js";
 
 const SHELL_TOOLS = new Set(["bash", "exec", "shell", "powershell", "pwsh"]);
 const PROVIDER_WRITE_TARGET = /create[-_]with[-_]distributions|\/api\/projects\/create-with-distributions/i;
@@ -70,11 +67,9 @@ export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
   if (tool) recordTrustedIds(event, tool, rootDir);
   if (tool === "validate_requirement") {
     settleReadyRequirement(input, rootDir, successfulValidateRequirement(event));
-    recordFailedContinuousTool(event, tool, rootDir);
     return;
   }
   recordWorkflowToolResult(event, raw, tool, input, rootDir);
-  if (tool) recordFailedContinuousTool(event, tool, rootDir);
 }
 
 export function endSession(_event: Json, _ctx: Json, rootDir: string): void {

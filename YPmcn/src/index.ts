@@ -3,9 +3,7 @@ import {
   afterTool,
   beforeTool,
   beginPromptTurn,
-  blockedToolTurnFailure,
   endSession,
-  recordBlockedToolResult,
   withStateScope,
 } from "./runtime-hooks.js";
 import {
@@ -16,7 +14,6 @@ import {
   renderStandardBriefReadyArguments,
   renderStandardBriefReply,
 } from "./standard-brief.js";
-import { isAskTool } from "./runtime-hook-workflow.js";
 
 export {
   buildStandardBriefReadyPayload,
@@ -150,18 +147,11 @@ export function createYpmcnPlugin(
 
     api.on("before_tool_call", async (event, ctx) => withStateScope(hookStateScope(event, ctx), () => {
       try {
-        const raw = String(event?.toolName ?? "").trim();
-        const previousBlock = isAskTool(raw) ? undefined : blockedToolTurnFailure(rootDir, raw);
-        if (previousBlock) return previousBlock;
-        const result = runtime.beforeTool(event, ctx, rootDir);
-        recordBlockedToolResult(rootDir, result);
-        return result;
+        return runtime.beforeTool(event, ctx, rootDir);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         api.logger.error(`before_tool_call guard failed: ${reason}`);
-        const result = { block: true, blockReason: `YPmcn guard unavailable: ${reason}` };
-        recordBlockedToolResult(rootDir, result);
-        return result;
+        return { block: true, blockReason: `YPmcn guard unavailable: ${reason}` };
       }
     }));
 
