@@ -22,7 +22,7 @@
 | 评估面 | 结果 | 结论 |
 | --- | --- | --- |
 | 正式契约收口 | **PASS** | P0 与首批 P1 已有唯一 Spec 落点、JSON Schema、loader 与契约测试。 |
-| 插件与本地门禁 | **PARTIAL** | Skill、打包和 Native Node Hook 已进入当前执行面；它们是 deny-only 安全层，不能替代服务端状态与写幂等。 |
+| 插件与本地门禁 | **PARTIAL** | Skill、打包和 Native Node Hook 已进入当前执行面；Hook 只对企微外发做一次性确认，不能替代服务端参数、状态与写幂等。 |
 | 独立只读审查 | **待本变更冻结后执行** | OpenCode 必须复验冻结 SHA，并确认 Git 与 plan 目录无写入。 |
 | 开发 provider 契约 | **READ-ONLY PASS** | 开发与生产现统一使用公开 SSE endpoint；2026-07-18 实时 `tools/list` 确认 15 个目标业务 Tool 齐全且输入 schema 无差异。 |
 | 生产 provider 契约 | **READ-ONLY PASS** | 同一统一 endpoint 的 2026-07-18 实时只读检查通过；这不等于写行为或 Live E2E 通过。 |
@@ -37,7 +37,7 @@
 
 | 检查 | 命令 | 能证明什么 |
 | --- | --- | --- |
-| OpenClaw 插件、契约与 Native Node Hook | `npm run test:fast` | 当前 Node 门禁、业务契约和本地 vector MCP 协议 smoke |
+| OpenClaw 插件、契约与 Native Node Hook | `npm run test:fast` | 非外发 Tool 放行、企微外发一次性确认、业务契约和本地 vector MCP 协议 smoke |
 | OpenClaw 源码装载 | `npm run test:openclaw` | YP 内置 OpenClaw 能装载 Plugin/Skill/四个 typed Hook，并能注册 SSE 配置 |
 | 全仓库离线门禁 | `npm run verify` | Spec、文档、安装图、密钥扫描、Skill 引用、向量组件和发布包一致性 |
 | provider checker（开发） | `npm run verify:provider` | 仅对当前开发 endpoint 执行 initialize 与 `tools/list`；网络和服务必须真实可达 |
@@ -48,8 +48,8 @@
 
 这些命令在当前 SHA 通过时，只能同时证明：
 
-- `create_with_distributions` 缺少会话、调用证据、发送角色、三项确认、字段快照或正确阶段时均 fail closed。
-- 禁止 `preview_only` 和 shell/curl 绕过 provider 写接口。
+- `create_with_distributions` 未取得同参数一次性“确认发送”回执时 fail closed；其他前置条件由 Provider 校验。
+- 禁止 shell/curl 绕过企微外发 Tool；普通读写 Tool 不进入本地权限门禁。
 - Native Node Hook 的请求指纹与确认只能作为本地 deny-only 防线；它们不能授予服务端动作，也不是写幂等账本。
 - 目标恢复顺序仍为 `sync → ingest → sync`；独立后端工作树已覆盖真实表查询、同一推荐项 inquiry upsert 与 `returned_not_ingested` 单测，只有部署后再通过新 session 聚合 Live E2E 才算真正恢复。
 - tracked 文件和发布包的密钥扫描均为零发现；发布包不包含 mock、测试、源码、凭据或绝对路径。

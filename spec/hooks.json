@@ -5,23 +5,18 @@
   "handlerImplementation": "YPmcn/src/runtime-hooks.ts",
   "executionSurface": "YP Action/OpenClaw Node plugin",
   "events": {
-    "before_agent_reply": {
-      "responsibility": "short_circuit_unresolved_standard_briefs_with_deterministic_structured_reply",
-      "mayBlock": false,
-      "script": "YPmcn/src/index.ts"
-    },
     "before_prompt_build": {
       "responsibility": "inject_strict_brief_and_continuous_workflow_context",
       "mayBlock": false,
       "script": "YPmcn/src/index.ts"
     },
     "before_tool_call": {
-      "responsibility": "deterministic_contract_permission_and_confirmation_guards",
+      "responsibility": "one_time_external_send_confirmation_and_shell_bypass_guard",
       "mayBlock": true,
       "script": "YPmcn/src/runtime-hooks.ts"
     },
     "after_tool_call": {
-      "responsibility": "consume_or_invalidate_local_confirmation_receipts_without_advancing_business_phase",
+      "responsibility": "consume_external_send_confirmation_receipts_without_advancing_business_phase",
       "mayBlock": false,
       "script": "YPmcn/src/runtime-hooks.ts"
     },
@@ -35,24 +30,25 @@
     "path": "YPmcn/state/sessions/<sha256(sessionKey)>/confirmation_guard.json (legacy fallback: YPmcn/state/confirmation_guard.json when session context is unavailable)",
     "ttl": {
       "oneTimeConfirmations": "10m",
-      "unknownExternalSend": "until-authoritatively-reconciled",
-      "readyRequirementBinding": "30m",
-      "workflowStateSupplyPlanAndTrustedIds": "60m"
+      "unknownExternalSend": "10m; every retry requires a fresh explicit confirmation"
     },
-    "format": "confirmation_guard_schema_v11",
+    "format": "confirmation_guard_schema_v12",
     "storesBusinessPayload": false,
     "authoritative": false
   },
   "boundaries": {
     "owns": [
-      "input_completeness",
-      "format_validation",
-      "preconditions",
-      "permission_guards",
-      "risk_blocking",
+      "external_send_confirmation",
+      "external_send_request_fingerprint_binding",
+      "provider_send_shell_bypass_blocking",
       "one_time_confirmation_fingerprints"
     ],
     "doesNotOwn": [
+      "general_tool_permissions",
+      "requirement_input_validation",
+      "tool_parameter_validation",
+      "workflow_order_enforcement",
+      "identifier_provenance_enforcement",
       "database_schema",
       "mcp_tool_schema",
       "workflow_state_authority",

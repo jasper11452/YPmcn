@@ -1,6 +1,6 @@
 # YPmcn 媒介助手插件
 
-YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。插件负责参数门禁和不可逆外发确认；业务状态由 MCP 从数据库派生。
+YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。插件只对不可逆企微外发做本地硬确认；参数与业务状态由 MCP/Provider 校验并从数据库派生。
 
 ## 完整链路
 
@@ -25,14 +25,14 @@ validate_requirement
 
 ## Hook 边界
 
-插件注册 `before_tool_call`、`after_tool_call`、`session_end`。
+插件注册 `before_prompt_build`、`before_tool_call`、`after_tool_call`、`session_end`。
 
 - Hook 不保存业务 phase，不依赖 `sessionKey`、`session_start` 或生命周期事件；`session_end` 只做机会性 TTL 清理。
-- 本地只保存短期搜索/排名衔接凭证，以及供给方案和企微外发的一次性确认凭证；仅保存请求哈希和安全摘要。
-- 每个 YPmcn 调用前按机器契约校验参数；shell、PowerShell、curl 直连 provider 写接口会被阻断。
-- `search_creators` 成功后首次 `rank_mcns` 直接放行且只消费一次搜索凭证；两者任一报错才进入 AskUserQuestion 澄清或安全恢复。
+- 需求 preview 只作为提示上下文，不形成 Tool 权限门禁；Skill、resources、prompts、普通宿主工具和除企微外发外的 YPmcn Tool 均不被 Hook 阻断。
+- 参数、ID 血缘、工作流顺序和业务动作授权交给 MCP/Provider；Hook 不重复实现一套本地业务状态机。
+- shell、PowerShell、curl 直连 provider 的企微外发接口会被阻断，避免绕过最终确认。
 - provider 发送首次调用返回 `YP_CONFIRMATION_REQUIRED`；AskUserQuestion 精确确认且请求参数未变化时只放行一次。
-- Reject、超时、修改、凭证过期或未知写结果均 fail closed。
+- Reject、超时、修改、参数变化、重放或未知写结果都不会沿用旧确认；再次尝试必须重新确认。
 - Hook 不记录客户 Brief、消息正文或完整 payload。
 
 ## Provider 状态

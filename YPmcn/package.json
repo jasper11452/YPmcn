@@ -1,7 +1,7 @@
 {
   "name": "ypmcn-media-assistant",
-  "version": "3.3.1",
-  "description": "YPmcn 媒介助手：数据库权威状态、工具参数门禁与外部写入确认",
+  "version": "3.3.2",
+  "description": "YPmcn 媒介助手：媒介工作流提示与企微外发一次性确认",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

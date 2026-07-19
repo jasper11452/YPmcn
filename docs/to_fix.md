@@ -24,14 +24,14 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 | YP Action 安装原生 Plugin 时不导入包内 MCP | 宿主待修，当前显式配置 | 2026-07-19 在无预存 MCP 的 YP Action `2026.7.1` 安装 YPmcn `3.1.5`：Plugin/Skill 成功，安装目录含 `.mcp.json`，但 MCP Store 不自动增加服务；显式创建 `ypmcn-mcp` 后 Gateway 加载成功 | YP Action 安装器没有读取 `.mcp.json`，也没有 Plugin 与 MCP 的更新、卸载归属 | 宿主实现经过校验的导入/更新/卸载；修复前按《高效联调测试指南》§4.1 显式创建，禁止 Plugin 安装脚本或直改 SQLite |
 | 默认模型鉴权失败 | 未修复，测试已绕过 | `HTTP 401 invalid_api_key`；原模型 `openai/gpt-5.5` | 默认 OpenAI 凭证仍失效 | 测试暂用 `deepseek/deepseek-v4-flash`；正式环境更新凭证或默认模型配置 |
 | 插件信任来源不明确 | 暂不修 | 手工环境曾报告 `plugins.allow is empty`、`loaded without install/load-path provenance` | 用户手工安装环境没有统一的 allowlist 和可审计安装来源 | 正式部署时补 `plugins.allow` 并统一安装来源；仓库自动 smoke 的隔离安全基线不能替代手工环境配置 |
-| 标准 Brief 确认前调用宿主/非契约工具 | 待修 | 三次独立解析中有一次先调用宿主 `read`，随后调用 `prompts_get(name="AskUserQuestion")` 并被 Hook 返回 `INTEGRATION_REQUIRED` | injected fast path 没有稳定阻止 Agent 读取 Skill 或把宿主原生 AskUserQuestion 误当成 MCP prompt capability，未满足确认前零 Tool 调用 | 标准 Brief 直接使用 injected fast path；禁止读取 Skill、调用 resources/prompts 或其他 Tool；需要弹窗时只用宿主原生 AskUserQuestion |
-| “母婴/亲子” taxonomy 解析预览不稳定 | 部分修复 | 实机预览仍可能把“账号类型：母婴类、亲子相关”直接映射到 `talentTypeLabel`；实际提交会被 `BLOCKED_TAXONOMY_CONFIRMATION_REQUIRED` 阻断 | Hook 能阻止错误 payload 进入 Provider，但 Tool 调用前的模型文本预览仍可能漂移 | 引入确定性结构化解析器/渲染器，并由正式 taxonomy 契约提供合法值和唯一映射 |
-| 解析原子明细与汇总计数不稳定 | 部分修复 | 正式提交的 audit 冲突会被 `BLOCKED_REQUIREMENT_AUDIT_CONFLICT` 阻断；实机文本预览仍曾出现明细与汇总合计不等、组合 `targetField` 和漏计歧义 | Hook 只能校验即将提交的 `rawMessagesJson`，不能保证调用前的自由文本预览确定化 | 让明细、gate 和 summary 由同一确定性 atom 列表生成，不再依赖模型独立计数 |
+| 标准 Brief 确认前调用宿主/非契约工具 | 已修复 | 当前 Hook 明确放行 Skill、`read`、resources、prompts 和非外发 Tool；回归覆盖 unresolved/ready 两种 preview | preview 仍是提示上下文，不是权限边界 | 仅在 `create_with_distributions` 真正外发前做一次性确认，不再追求确认前零 Tool 调用 |
+| “母婴/亲子” taxonomy 解析预览不稳定 | 部分修复 | 确定性 preview 继续保留原子与歧义信息；Hook 不再重复校验 taxonomy | Provider 仍需提供合法 taxonomy 值并拒绝非法映射 | 由解析器、正式 taxonomy 契约和 Provider 校验闭环，不恢复本地全局 Tool 门禁 |
+| 解析原子明细与汇总计数不稳定 | 部分修复 | preview 与 ready payload 由同一确定性 atom 列表生成；Hook 不再校验普通 requirement payload | 新自然语言样本仍可能暴露解析差异 | 保留 parser/golden 回归，最终参数正确性由 MCP/Provider 校验 |
 
 ### 当前边界
 
 - 最新包三次全新会话解析稳定性测试为 **0/3 满足完整验收**：一次擅自调用 `read/prompts_get`；一次遗漏 payload/audit/coverage 并错误映射 taxonomy；一次识别歧义但未输出正式 `rawMessagesJson`，日期也未补齐 schema 要求的秒。
-- 三轮均未产生 YPmcn 业务写入；taxonomy、schema 和 audit 的提交门禁已 fail closed，但不能据此把调用前文本预览视为可靠结构化结果。
+- 三轮历史测试均未产生 YPmcn 业务写入；当前不再用本地 Hook 代替 taxonomy、schema 或 audit 的 Provider 校验，也不能据此把调用前文本预览视为生产成功证据。
 - JSON taxonomy 字段的合法值集合仍需由 Provider/数据契约提供，不能由 Skill 猜测。
 - 仓库自动测试已隔离 OpenClaw 状态和配置；用户手工运行不同版本 OpenClaw 时仍应使用 `--profile` 或显式设置 `OPENCLAW_STATE_DIR`、`OPENCLAW_CONFIG_PATH`。
 
@@ -42,16 +42,16 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 | 问题 | 状态 | 当前证据 | 剩余问题 | 处理方式 |
 |---|---|---|---|---|
 | 手工 OpenClaw 环境安全审计未通过 | 手工环境待处理 | 历史 deep audit：`critical=1, warn=5, info=1`；仓库隔离 smoke 已达到 `summary.critical=0` | 自动测试安全基线不会修改用户全局认证、trusted proxies、插件来源和工具策略 | 在目标手工/正式环境单独配置并复跑 deep audit |
-| Capability 与正式 allowlist 不一致 | 待修 | `resources_list`、`prompts_list`、`prompts_get` 返回 `INTEGRATION_REQUIRED: Tool ... is not declared by the target contract` | MCP initialize 暴露的 capability、宿主 wrapper、`spec/mcp.json` 和 Hook allowlist 不是同一契约来源 | 不支持时停止注册对应 capability/wrapper；支持时增加独立 capability 契约和测试 |
+| Capability 与正式 allowlist 不一致 | Hook 侧已修复 | Hook 不再把 resources/prompts 或未知 wrapper 当业务 Tool 校验，相关调用默认放行 | Endpoint 是否真实支持 capability 仍由宿主/MCP 协商决定 | 保持 Hook 只识别最终外发 Tool；capability 兼容性在宿主与 Provider 层验证 |
 | YP Action 的 Ask 确认结果形状未被 Hook 识别 | 已修复 | 3.1.5 Live E2E 中，宿主返回“完整问题文本: 确认供给方案”后 Hook 正确识别，并在同一轮调用 `rank_mcns`；回归同时覆盖结构化与扁平结果、拒绝和超时 | Provider 后端错误仍可能让业务链停止，但不会再把用户确认误判为拒绝 | 保留 marker、同指纹、固定选项和尾部精确标签校验，禁止模糊肯定词授权 |
 | 需求确认弹窗不换行、术语过多 | 已修复 | 3.1.9 已安装并启用；只读 Live 会话 `457f15e0-ff39-4818-a46e-e25e676571aa` 一次渲染三题向导，问题均为简短单句，选项带说明并提供“其他”输入；价格题完整显示项目总预算与 L1/L2/L3 四项，未被 Hook 拦截或隐式重建 | 供给/外发属于绑定确认，仍使用带内部 marker 的独立紧凑模板 | 保留 2–4 个独立业务选项、单句问题和宿主结果形状回归；新增问题不得恢复长摘要或内部术语 |
 | 明确的 L1 官方报价被误判为缺失 | 已修复 | 3.1.6 解析器接受“单达人 L1 官方报价：4万元以内”，直接映射 `kolOfficialPriceL1=[0,40000]`，明确截止同时保持 `2026-07-20 18:00:00`；安装后只读 UI 会话 `55d827cc-9d13-41f8-8c5d-93164e875abd` 复测为 ready 且未弹窗 | 未覆盖的新自然语言写法仍应 fail closed | 保留原文 atom 和确定性解析回归；仅对明确档位映射 |
-| 未绑定真实数据的供给确认可被模型直接弹出 | 已修复 | 3.1.6 会拒绝无 `[YP_SUPPLY_PLAN_CONFIRMATION:...]` marker 的“供给确认/确认供给方案”弹窗；同一只读 UI 会话实测在弹窗显示前返回 `BLOCKED_CONFIRMATION_MISMATCH` | Provider 仍需返回完整十字段，OpenClaw 长结果仍可能截断 | 供给确认只能由 `rank_mcns` Hook 基于同 requirement、同请求指纹和已存 plan 生成 |
+| 未绑定真实数据的供给确认可被模型直接弹出 | 策略已调整 | 供给确认不再由 Hook 阻断或重建；只有最终企微外发参数与“确认发送”回执做一次性指纹绑定 | Provider 仍需返回真实供给数据，Agent 不得自行重算 | 供给选择作为业务交互执行；不可逆外发继续由 Hook 硬确认 |
 
 ### Hook 不能替代的 Provider 校验
 
-- 本地 TTL provenance ledger 已覆盖 `kwUid/requirement_id/project_id/mcn_id/inquiry_id/run_id`，用于阻止来源不明的调用。
-- ledger 按插件根目录和 TTL 隔离，不是数据库约束，也不能证明实体存在、归属正确或彼此关联。
+- 本地 Hook 不再维护 `kwUid/requirement_id/project_id/mcn_id/inquiry_id/run_id` provenance ledger，也不阻断普通业务 Tool。
+- ID 存在性、归属和关联关系由 Provider/数据库校验；Agent 仍只能复用真实成功响应中的 ID。
 - Provider 仍必须在每个业务写入前执行存在性、所有权/关联关系和幂等校验。
 
 ---

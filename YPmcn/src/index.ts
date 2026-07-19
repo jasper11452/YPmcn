@@ -2,8 +2,8 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import {
   afterTool,
   beforeTool,
-  beginPromptTurn,
   endSession,
+  isExternalSendAttempt,
   withStateScope,
 } from "./runtime-hooks.js";
 import {
@@ -99,7 +99,7 @@ YPmcn continuous-workflow fast path:
 - requirement_ready + allowed search_creators => search_creators({id}). On success, candidate_pool_ready + allowed rank_mcns => immediately call rank_mcns({id, platform}) as the next Tool in the same turn; do not insert AskUserQuestion, a prose checkpoint, get_workflow_state, or another Tool between them. Reuse validate_requirement.data.id and the already confirmed platform, and include only schema-valid ranking options explicitly requested by the user.
 - If search_creators or rank_mcns fails, do not call the next business Tool. In the same turn use the native AskUserQuestion recovery rule above to clarify invalid input or let the user choose the safe error path. After rank_mcns succeeds, show the actual MCN list/gaps and the Provider-backed supply plan, then stop for the user's supply-plan and MCN choices before field/message confirmation.
 - After MCN choice, call select_inquiry_form_fields({}) exactly once unless a custom URL/timeout was explicitly supplied before the call. Show only the actual returned description and stop for field/message confirmation; on timeout, stop without retry.
-- Before create_with_distributions, first reconcile get_workflow_state({demand_id,demand_version}); the result must identify the same projectName and explicitly allow create_with_distributions, otherwise the Hook blocks. Build projectName, deadline, columns, supplierIds, prefillRows, and prefillRowsBySupplier only from confirmed choices and actual prior results. Build the WeCom preview in this fixed order: title; platform from platform; optional brand/product from brandName/product; content requirement from contentTag then description (or only a media-confirmed content audit atom when both are empty); creator count from quantityTotal; every supplied kolOfficialPrice L1/L2/L3 tier and range; deadline from submissionDeadlineAt; confirmed column names in order; form_link. Only pass notification_template when the live tool schema advertises it; otherwise report the provider gap and do not claim the fixed message was sent. For confirmation, use header “外发确认” and choices including “确认发送” and “需要修改”; optional “自定义消息”, “稍后再说”, or “取消” choices are valid. The Hook injects the bound user-facing summary and keeps its hash internal. Only explicit “确认发送” authorizes the request.
+- Before create_with_distributions, first reconcile get_workflow_state({demand_id,demand_version}); the result must identify the same projectName and explicitly allow create_with_distributions, otherwise stop and resolve the Provider state before external send. Build projectName, deadline, columns, supplierIds, prefillRows, and prefillRowsBySupplier only from confirmed choices and actual prior results. Build the WeCom preview in this fixed order: title; platform from platform; optional brand/product from brandName/product; content requirement from contentTag then description (or only a media-confirmed content audit atom when both are empty); creator count from quantityTotal; every supplied kolOfficialPrice L1/L2/L3 tier and range; deadline from submissionDeadlineAt; confirmed column names in order; form_link. Only pass notification_template when the live tool schema advertises it; otherwise report the provider gap and do not claim the fixed message was sent. For confirmation, use header “外发确认” and choices including “确认发送” and “需要修改”; optional “自定义消息”, “稍后再说”, or “取消” choices are valid. The Hook injects the bound user-facing summary and keeps its hash internal. Only explicit “确认发送” authorizes the request.
 - manual_source_creators is optional pre-send enrichment only: call manual_source_creators({requirement_id}) after supply-plan confirmation only when real verifiable manual results are already associated with that requirement, and always before create_with_distributions. It never substitutes for WeCom send or recovery completion.
 - After distribution success, call sync_mcn_inquiry_status({requirement_id,project_id,mcn_id}) for identities returned by that write. While waiting, do not poll repeatedly. Recovery order is sync -> ingest_mcn_submissions({inquiry_id,items}) only when real returned/user-provided items exist -> sync. Never invent recovery items.
 - Only a successful WeCom distribution plus completed recovery may yield candidate_pool_enriched. Then and only when allowed_actions contains rank_creators, call rank_creators({requirement_id,limit}); use the explicitly confirmed shortlist size, otherwise the validated quantityTotal, otherwise ask once. Save the actual run_id.
@@ -119,18 +119,9 @@ export function createYpmcnPlugin(
   return definePluginEntry({
     id: "ypmcn-media-assistant",
     name: "YPmcn 媒介助手",
-    description: "按 mvp-v2 契约执行语义 ID 链路、人工门禁和可恢复回收状态机。",
+    description: "提供媒介工作流提示，并在真实企微外发前执行一次性确认。",
     register(api) {
     const rootDir = api.rootDir ?? process.cwd();
-    api.on("before_agent_reply", async (event, ctx) => withStateScope(hookStateScope(event, ctx), () => {
-      const prompt = typeof event?.cleanedBody === "string" ? event.cleanedBody : "";
-      if (!isStandardBrief(prompt) && !isYpmcnRequirementIntent(prompt)) return;
-      const preview = parseStandardBrief(prompt, new Date(), localTimeZone());
-      if (preview.gate === "ready") return;
-      beginPromptTurn(rootDir, preview);
-      return;
-    }));
-
     api.on("before_prompt_build", async (event, ctx) => withStateScope(hookStateScope(event, ctx), () => {
       const prompt = typeof event?.prompt === "string" ? event.prompt : "";
       const now = new Date();
@@ -139,7 +130,6 @@ export function createYpmcnPlugin(
         ? parseStandardBrief(prompt, now, timeZone)
         : undefined;
       const readyPayload = preview ? buildStandardBriefReadyPayload(prompt, preview) : undefined;
-      beginPromptTurn(rootDir, preview, readyPayload);
       return {
         prependSystemContext: YPMCN_FAST_PATH,
         prependContext: [
@@ -159,6 +149,7 @@ export function createYpmcnPlugin(
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         api.logger.error(`before_tool_call guard failed: ${reason}`);
+        if (!isExternalSendAttempt(event)) return undefined;
         return { block: true, blockReason: `YPmcn guard unavailable: ${reason}` };
       }
     }));

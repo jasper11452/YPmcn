@@ -12,9 +12,9 @@
 
 `search_creators` 成功后的下一个 Tool 必须直接是 `rank_mcns({id, platform})`，同一轮连续执行；两者之间不得插入 `AskUserQuestion`、文字确认、状态查询或其他 Tool。`id` 复用 `validate_requirement.data.id`，`platform` 复用已确认平台，只添加用户明确要求且 live schema 支持的排名参数。`search_creators` 或 `rank_mcns` 报错时立即停止后续业务 Tool，并在同一轮调用原生 `AskUserQuestion`：缺参/非法值请求精确澄清，明确后端错误提供安全恢复选择，未知写结果先对账且禁止盲重试。
 
-`rank_mcns` 成功后再展示实际 MCN 列表、缺口和 Provider-backed 供给方案，等待用户完成 supply 与 MCN 选择；搜索时记录的供给摘要只用于该外发前确认，不得自行重算或编造。随后才选择询价字段并确认 message。Native Ask 回执、最新字段选择和机构来源由 Hook 绑定到同一需求。
+`rank_mcns` 成功后再展示实际 MCN 列表、缺口和 Provider-backed 供给方案，等待用户完成 supply 与 MCN 选择；不得自行重算或编造。随后选择询价字段并确认 message。这些前序选择由 Agent 按 Provider 事实执行，不由本地 Hook 强制排序或绑定。
 
-选择询价字段后展示实际 description、机构名单和固定消息预览。外发前重新查询同一项目状态并确认动作授权；supply、MCN、message 三项确认通过 Native Ask 与 Hook 回执记录。首次外发 Hook 返回的 marker 和绑定摘要必须原样展示，只有“确认发送”才以完全相同参数继续；修改、拒绝或超时均重新确认或停止。未知外发结果在权威对账前持续阻塞，不能通过等待过期或修改参数重发。
+选择询价字段后展示实际 description、机构名单和固定消息预览。外发前按 Provider 状态确认动作授权。首次外发 Hook 返回的 marker 和绑定摘要必须原样展示，只有“确认发送”才以完全相同参数继续；修改、拒绝、超时、参数变化、重放或未知结果都不能沿用旧确认。未知结果应先对账；若业务决定再次尝试，Hook 会要求一份新的显式确认，不会永久锁死其他 Tool。
 
 ## 工具边界与恢复
 
@@ -22,4 +22,4 @@
 - 外发成功后按实际返回身份执行 `sync → ingest_mcn_submissions → sync`；无真实回收 items 不 ingest，不轮询。只有真实外发、全部回收和 `candidate_pool_enriched` 才可 `rank_creators`。
 - 详情 Tool 只读且不推进流程；`audit_manual_adjustment` 仅用于有操作者和原因的明确人工调整。批次成功后才导出；客户有具体反馈后才记录，不猜状态。
 
-Hook 的 `before_tool_call`、`after_tool_call`、`session_end` 只做无会话依赖的安全守卫，不推进数据库 phase，也不记录完整 payload。除 `validate_requirement` 可由已确认信息唯一修正的参数校验阻断必须同轮修正重调外，任何 `block=true` 或 `details.status="blocked"` 都立即停止；只有实际远程 response/trace 才能归因 MCP/Provider。
+Hook 的 `before_tool_call`、`after_tool_call`、`session_end` 只绑定最终企微外发的一次性确认，并阻断 shell/curl 绕过；不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序，不推进数据库 phase，也不记录完整 payload。企微外发被 Hook 阻断时请求尚未到 Provider；只有实际远程 response/trace 才能归因 MCP/Provider。

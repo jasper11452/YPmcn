@@ -81,7 +81,7 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertEqual(1 + len(EXPECTED_REFERENCE_FILES), len(markdown))
         self.assertLessEqual(sum(count_han(read(path)) for path in markdown), 3000)
 
-    def test_skill_repairs_requirement_arguments_but_stops_other_hook_failures(self):
+    def test_skill_repairs_requirement_arguments_without_a_global_hook_gate(self):
         text = "\n".join((
             read(SKILL),
             read(REFERENCES / "requirement-intake.md"),
@@ -92,15 +92,15 @@ class SkillPackageContractTest(unittest.TestCase):
             "同一轮持续重新调用直到成功",
             "保持原始需求语义",
             "只修报错字段、序列化、映射或审计计数",
-            "除上述 `validate_requirement` 参数自修复外，Hook 任意阻断后立即停止",
-            '`details.status="blocked"`',
-            "不改写 payload、ID 或已映射字段",
-            '`details.deniedReason="plugin-before-tool-call"`',
-            "未到 MCP/Provider",
+            "Hook 只硬拦企微外发确认及其 shell/curl 绕过",
+            "不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序",
+            "preview 不限制 Skill 读取或其他 Tool",
+            "外发 Hook 阻断表示请求未到 Provider",
             "只有实际远程 response/trace 才能归因 MCP/Provider",
             "用户要求失败即停时绝不重试",
         ):
             self.assertIn(required, text)
+        self.assertNotIn("Hook 任意阻断后立即停止", text)
 
     def test_skill_requires_provenance_for_detail_and_write_ids(self):
         text = read(SKILL)
@@ -419,7 +419,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "session_end",
         ):
             self.assertIn(f"`{event}`", text)
-        for required in ("无会话依赖", "不记录完整 payload"):
+        for required in ("只绑定最终企微外发的一次性确认", "不记录完整 payload"):
             self.assertIn(required, text)
 
     def test_hook_docs_map_public_projection_to_machine_phases(self):
