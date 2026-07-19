@@ -66,7 +66,7 @@ npm run pack:yp
 
 日常联调不先打包：`npm run test:fast` 运行 Native Node Hook/契约测试；`npm run test:openclaw` 使用 YP Action 内置 OpenClaw、临时隔离配置和源码目录验证 Plugin/Skill 装载。`npm run test:headless` 串联两者。旧 Python Hook 仅可用 `npm run test:legacy-hooks` 做历史回归，不属于当前执行面或交付证据。只有发布候选才打 tgz 并在 YP Action UI 验证安装器、配置同步、桌面交互和重启持久化。
 
-本项目采用 V2.3 极简 Agent 流程：默认一个写者；Fast 由 Claude Code 直接完成，Standard 才按需交给 Codex，Critical 才启用 OpenCode 独立只读验证。普通开发不使用 Workflow、跨 Session 状态机或任务证据目录。该规则由仓库根 `CLAUDE.md` 和项目级 `.claude/settings.json` 限定，只影响从本仓库启动的 Claude Code。
+本项目采用 V2.3 极简 Agent 流程：默认一个写者；Fast 由 Claude Code 直接完成，Standard 才按需交给 Codex，Critical 才启用 OpenCode 独立只读验证。普通开发不使用 Workflow、跨 Session 状态机或任务证据目录。该规则由项目级 `.claude/settings.json` 限定，只影响从本仓库启动的 Claude Code。
 
 生产 provider 只读门禁单独执行：
 

@@ -47,7 +47,6 @@ class SkillPackageContractTest(unittest.TestCase):
 
     def test_source_tree_contains_current_runtime_and_legacy_regression_entrypoints(self):
         required = [
-            ROOT / "AGENTS.md",
             ROOT / "README.md",
             PACKAGE / "README.md",
             PACKAGE / "openclaw.plugin.json",
@@ -442,21 +441,8 @@ class SkillPackageContractTest(unittest.TestCase):
             self.assertIn(required, text)
         self.assertNotIn("统一验证覆盖 207 项测试", text)
 
-    def test_agent_instructions_keep_specs_authoritative_and_production_separate(self):
-        text = read(ROOT / "AGENTS.md")
-        for required in (
-            "spec/mcp.json",
-            "spec/workflow.json",
-            "npm run verify",
-            "npm run verify:provider",
-            "uv",
-            "reference-mcp",
-            "生产 provider",
-        ):
-            self.assertIn(required, text)
-
     def test_docs_do_not_embed_machine_paths_or_pip_install(self):
-        paths = [ROOT / "AGENTS.md", ROOT / "CLAUDE.md", ROOT / "README.md", PACKAGE / "README.md", SKILL]
+        paths = [ROOT / "README.md", PACKAGE / "README.md", SKILL]
         paths.extend(REFERENCES.glob("*.md"))
         joined = "\n".join(read(path) for path in paths if path.exists())
         self.assertNotIn("/Users/", joined)

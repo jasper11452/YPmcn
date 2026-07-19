@@ -102,11 +102,10 @@ describe("human documentation", () => {
     const rootReadme = read("README.md");
     for (const path of humanDocs.map((document) => document.path)) assert.match(rootReadme, new RegExp(path));
 
-    const agentRules = read("AGENTS.md");
     const developerWorkflow = read("docs/DEVELOPER_SPEC_WORKFLOW.md");
     const agentWorkflow = read("docs/AGENT_SPEC_WORKFLOW.md");
     const rootPackage = JSON.parse(read("package.json"));
-    for (const source of [agentRules, developerWorkflow, agentWorkflow]) {
+    for (const source of [developerWorkflow, agentWorkflow]) {
       assert.match(source, /npm run docs:sync/);
       assert.match(source, /npm run verify:docs/);
       assert.match(source, /pre-commit/);

@@ -308,7 +308,8 @@ function hasTrustedId(rootDir: string, kind: string, value: unknown): boolean {
 
 function latestRequirementId(data: Json): string | undefined {
   const binding = data.latest_requirement_id;
-  return binding && typeof binding === "object" && binding.source_tool === "validate_requirement" && text(binding.value)
+  return binding && typeof binding === "object" &&
+    ["validate_requirement", "get_workflow_state"].includes(binding.source_tool) && text(binding.value)
     ? binding.value.trim()
     : undefined;
 }
@@ -427,6 +428,25 @@ function recordWorkflowState(event: Json, input: Json, rootDir: string): void {
         if (sameDemand || sameTrace) delete current.data.workflow_states[key];
       }
       current.data.workflow_states[workflowStateKey(binding.project_name)] = binding;
+      if (binding.requirement_id && binding.allowed_actions.includes("search_creators")) {
+        const now = Date.now();
+        current.data.trusted_ids = current.data.trusted_ids.filter((receipt: Json) =>
+          receipt.kind !== "requirement_id" || receipt.value !== binding.requirement_id
+        );
+        current.data.trusted_ids.push({
+          kind: "requirement_id",
+          value: binding.requirement_id,
+          source_tool: "get_workflow_state",
+          observed_at_ms: now,
+          expires_at_ms: now + TRUSTED_ID_TTL_MS,
+        });
+        current.data.latest_requirement_id = {
+          value: binding.requirement_id,
+          source_tool: "get_workflow_state",
+          observed_at_ms: now,
+          expires_at_ms: now + TRUSTED_ID_TTL_MS,
+        };
+      }
       reconcileUnknownConfirmations(current.data, binding);
       reconcileUnknownRankReceipts(current.data, binding);
     }

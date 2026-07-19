@@ -217,6 +217,10 @@ const CONTINUATION_BLOCK_CODES = new Set([
   "WRITE_RESULT_UNKNOWN",
   "WORKFLOW_STATE_REFRESH_REQUIRED",
   "BLOCKED_REQUIREMENT_CLARIFICATION_REQUIRED",
+  // These are local, pre-dispatch identity checks. The write cannot have happened,
+  // so a corrected identifier is safe to validate again in the same prompt turn.
+  "ID_PROVENANCE_REQUIRED",
+  "ID_PROVENANCE_MISMATCH",
 ]);
 
 export function recordBlockedToolResult(rootDir: string, result: Json | undefined): void {

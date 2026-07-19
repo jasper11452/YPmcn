@@ -201,10 +201,36 @@ describe("requirement behavior through public plugin hooks", () => {
     const wrong = await guard("mcp__ypmcn__search_creators", { id: "demand-route-id" });
     assert.match(wrong.blockReason, /ID_PROVENANCE_MISMATCH.*data\.id/);
     const correctedSameTurn = await guard("mcp__ypmcn__search_creators", { id: "requirement-row-id" });
-    assert.match(correctedSameTurn.blockReason, /BLOCKED_PREVIOUS_HOOK_RESULT.*ID_PROVENANCE_MISMATCH/);
+    assert.equal(correctedSameTurn, undefined);
+  });
 
-    await newTurn("用户开启新轮次并明确继续候选检索");
-    assert.equal(await guard("mcp__ypmcn__search_creators", { id: "requirement-row-id" }), undefined);
+  it("recovers search_creators provenance from authoritative workflow state in the same turn", async () => {
+    await newTurn("继续搜索达人");
+    const missing = await guard("mcp__ypmcn__search_creators", { id: "requirement-from-state" });
+    assert.match(missing.blockReason, /ID_PROVENANCE_(?:REQUIRED|MISMATCH)/);
+
+    assert.equal(await guard("mcp__ypmcn__get_workflow_state", {
+      demand_id: "demand-route-id",
+      demand_version: 1,
+    }), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__get_workflow_state",
+      params: { demand_id: "demand-route-id", demand_version: 1 },
+      result: {
+        success: true,
+        data: {
+          project_name: "千问61儿童节",
+          requirement_id: "requirement-from-state",
+          demand_id: "demand-route-id",
+          demand_version: 1,
+          workflow_state: { phase: "requirement_ready" },
+          allowed_actions: ["search_creators"],
+        },
+        error: null,
+      },
+    }, {});
+
+    assert.equal(await guard("mcp__ypmcn__search_creators", { id: "requirement-from-state" }), undefined);
   });
 
   it("shows a same-turn recovery popup after an explicit MCP failure", async () => {
