@@ -302,7 +302,13 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
   workflow.updated_at_ms = now;
   if (tool === "search_creators" || tool === "rank_mcns") clearMcnRecipientDirectory(workflow);
 
-  if (!ok) {
+  if (tool === "select_inquiry_form_fields") {
+    // The provider call only launches an out-of-band browser selector. Its result
+    // cannot tell us whether that browser opened, so always pause for pasted fields.
+    workflow.phase = "inquiry_fields_ready";
+    workflow.next_action = "confirm_inquiry_fields";
+    workflow.waiting_for = "user";
+  } else if (!ok) {
     workflow.next_action = `recover_${tool}`;
     workflow.waiting_for = "user";
   } else {
@@ -345,11 +351,6 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
         }
         break;
       }
-      case "select_inquiry_form_fields":
-        workflow.phase = "inquiry_fields_ready";
-        workflow.next_action = "confirm_inquiry_fields";
-        workflow.waiting_for = "user";
-        break;
       case "create_with_distributions":
         workflow.phase = "waiting_mcn_return";
         workflow.next_action = "sync_mcn_inquiry_status";
@@ -418,9 +419,10 @@ export function renderLocalWorkflowContext(rootDir: string): string {
 
 function selectedRecipientNames(input: Json, workflow: Json): string[] | undefined {
   if (!Array.isArray(input.supplierIds) || input.supplierIds.length === 0) return [];
-  if (!text(input.requirement_id) || !text(workflow.mcn_directory_requirement_id_sha256)) return undefined;
+  const unnamed = () => input.supplierIds.map(() => "名称未提供");
+  if (!text(input.requirement_id) || !text(workflow.mcn_directory_requirement_id_sha256)) return unnamed();
   if (sha256Text(input.requirement_id.trim()) !== workflow.mcn_directory_requirement_id_sha256) return undefined;
-  if (!Array.isArray(workflow.mcn_recipient_directory)) return undefined;
+  if (!Array.isArray(workflow.mcn_recipient_directory)) return unnamed();
 
   const namesBySupplierHash = new Map<string, string>();
   for (const recipient of workflow.mcn_recipient_directory) {
@@ -429,10 +431,17 @@ function selectedRecipientNames(input: Json, workflow: Json): string[] | undefin
       namesBySupplierHash.set(recipient.supplier_id_sha256.trim(), recipient.name.trim());
     }
   }
-  const names = input.supplierIds.map((supplierId: unknown) =>
-    text(supplierId) ? namesBySupplierHash.get(sha256Text(supplierId.trim())) : undefined
+  return input.supplierIds.map((supplierId: unknown) =>
+    text(supplierId) ? namesBySupplierHash.get(sha256Text(supplierId.trim())) ?? "名称未提供" : "名称未提供"
   );
-  return names.every(text) ? names : undefined;
+}
+
+function recipientRequirementMismatch(input: Json, workflow: Json): boolean {
+  return Boolean(
+    text(input.requirement_id) &&
+    text(workflow.mcn_directory_requirement_id_sha256) &&
+    sha256Text(input.requirement_id.trim()) !== workflow.mcn_directory_requirement_id_sha256,
+  );
 }
 
 function createSummary(input: Json, workflow: Json): Json {
@@ -462,7 +471,10 @@ function externalSendQuestion(input: Json, summary: Json): string {
     `发送对象（${summary.supplier_count} 家）`,
     ...(recipientNames.length > 0
       ? recipientNames.map((name: string, index: number) => `${index + 1}. ${name}`)
-      : ["（无发送对象）"]),
+      : Array.from(
+          { length: Number(summary.supplier_count) || 0 },
+          (_, index) => `${index + 1}. 名称未提供`,
+        )),
     "",
     "回填字段",
     ...(columnNames.length > 0 ? columnNames.map((name: string) => `- ${name}`) : ["- 未选择"]),
@@ -560,11 +572,11 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
 
   const id = randomUUID();
   const summary = createSummary(input, current.data.workflow as Json);
-  if (summary.supplier_count > 0 && !Array.isArray(summary.recipient_names)) {
+  if (recipientRequirementMismatch(input, current.data.workflow as Json)) {
     save(current.path, current.data);
     return denyStructured(
       "INTEGRATION_REQUIRED",
-      "无法从最近一次成功的 MCN 赛马结果核对全部发送对象名称，请返回 MCN 方案修改或重新选择后再发送。",
+      "发送对象所属需求与最近一次 MCN 赛马结果不一致，请返回 MCN 方案修改或重新选择后再发送。",
     );
   }
   const askInput = externalSendAskInput(input, summary);

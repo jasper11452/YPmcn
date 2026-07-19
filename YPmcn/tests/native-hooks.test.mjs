@@ -200,7 +200,7 @@ describe("YP Action native hooks", () => {
     assert.doesNotMatch(question, /消息结尾。…/);
   });
 
-  it("resolves selected MCN names from supported rank result shapes and blocks unverified recipients", async () => {
+  it("resolves available MCN names and allows recipients without names", async () => {
     const params = distributionParams({ supplierIds: ["supplier-1", "supplier-2"] });
     await recordTool(
       "mcp__ypmcn__rank_mcns",
@@ -226,8 +226,7 @@ describe("YP Action native hooks", () => {
       "call-unverified-recipient",
     );
     assert.equal(unknownRecipient.block, true);
-    assert.match(unknownRecipient.blockReason, /INTEGRATION_REQUIRED/);
-    assert.match(unknownRecipient.blockReason, /核对全部发送对象名称/);
+    assert.match(askInputFrom(unknownRecipient).questions[0].question, /1\. 星图文化\n2\. 名称未提供/);
 
     const staleRequirement = await guard(
       "mcp__ypmcn__create_with_distributions",
@@ -445,6 +444,11 @@ describe("YP Action native hooks", () => {
       "https://agenta.eshypdata.com/demand-field-selector",
       "https://agenta.eshypdata.com/demand-field-selector",
     ]);
+
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "inquiry_fields_ready");
+    assert.equal(state.workflow.next_action, "confirm_inquiry_fields");
+    assert.equal(state.workflow.waiting_for, "user");
   });
 
   it("does not alter Tool handling when the host cannot open the field selector", async () => {
