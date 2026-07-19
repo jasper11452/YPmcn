@@ -61,12 +61,15 @@ const requirementQuestion = (_confirmed, pending) => `${pending}？`;
 
 const requirementOption = (label, description = "选择后按此信息继续") => ({ label, description });
 
-const supplyPlanQuestion = (id, plan) => [
-  `【真实数据】需求人数=${plan.demand_count}｜候选达人=${plan.database_candidate_count}｜供给倍数=${plan.supply_demand_ratio}`,
-  `【计算计划】目标提报=${plan.target_submission_count}｜预计有效=${plan.estimated_valid_return_count}｜预计缺口=${plan.estimated_gap_count}`,
-  `【推荐组合】推荐MCN=${plan.recommended_mcn_count}｜MCN覆盖达人=${plan.mcn_covered_creator_count}｜人工补充=${plan.recommended_manual_creator_count}｜MCN人工比例=${plan.mcn_manual_creator_ratio}｜建议手扒占比=${Number((plan.recommended_manual_creator_count / (plan.mcn_covered_creator_count + plan.recommended_manual_creator_count) * 100).toFixed(2))}%`,
-  `【影响】确认后写入MCN排序${id ? `｜[YP_SUPPLY_PLAN_CONFIRMATION:${id}]` : ""}`,
-].join("\n");
+const supplyPlanQuestion = (id, plan) => {
+  const manualTotal = plan.mcn_covered_creator_count + plan.recommended_manual_creator_count;
+  const manualShare = manualTotal === 0 ? 0 : Number((plan.recommended_manual_creator_count / manualTotal * 100).toFixed(2));
+  return [
+    `【真实数据】需求人数=${plan.demand_count}｜候选达人=${plan.database_candidate_count}｜供给倍数=${plan.supply_demand_ratio}`,
+    `【推荐方案】目标提报=${plan.target_submission_count}｜预计有效=${plan.estimated_valid_return_count}｜预计缺口=${plan.estimated_gap_count}｜推荐MCN=${plan.recommended_mcn_count}｜MCN覆盖达人=${plan.mcn_covered_creator_count}｜人工补充=${plan.recommended_manual_creator_count}｜MCN人工比例=${plan.mcn_manual_creator_ratio}｜建议手扒占比=${manualShare}%`,
+    `【影响】确认后写入MCN排序${id ? `｜[YP_SUPPLY_PLAN_CONFIRMATION:${id}]` : ""}`,
+  ].join("\n");
+};
 
 before(() => {
   mkdirSync(dirname(templateFile), { recursive: true });

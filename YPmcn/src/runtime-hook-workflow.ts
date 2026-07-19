@@ -435,13 +435,70 @@ function validateSupplyPlan(value: unknown): SupplyPlan | undefined {
 function responseSupplyPlan(result: unknown): SupplyPlan | undefined {
   const root = unwrap(result);
   if (!root || typeof root !== "object" || Array.isArray(root)) return undefined;
+
   const data = root.data && typeof root.data === "object" && !Array.isArray(root.data) ? root.data as Json : undefined;
-  let source: unknown;
-  if (data && Object.prototype.hasOwnProperty.call(data, "supply_plan")) source = data.supply_plan;
-  else if (Object.prototype.hasOwnProperty.call(root, "supply_plan")) source = root.supply_plan;
-  else if (data) source = data;
-  else source = root;
-  return validateSupplyPlan(source);
+  let source: Json | undefined;
+  if (data && Object.prototype.hasOwnProperty.call(data, "supply_plan") && data.supply_plan && typeof data.supply_plan === "object") {
+    source = data.supply_plan as Json;
+  } else if (data) {
+    source = data;
+  } else if (root && typeof root === "object") {
+    source = root as Json;
+  }
+  if (!source) return undefined;
+
+  // If source has all 10 fields, validate strictly
+  if (SUPPLY_PLAN_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(source, field))) {
+    return validateSupplyPlan(source);
+  }
+
+  // Partial data: require at minimum demand_count and database_candidate_count
+  const demand = source.demand_count;
+  const candidates = source.database_candidate_count;
+  if (typeof demand !== "number" || typeof candidates !== "number") return undefined;
+  if (!Number.isSafeInteger(demand) || demand <= 0) return undefined;
+  if (!Number.isSafeInteger(candidates) || candidates < 0) return undefined;
+
+  const ratio = candidates / demand;
+  const target = nonNegativeInteger(source.target_submission_count) && source.target_submission_count > 0
+    ? source.target_submission_count
+    : Math.max(candidates, demand);
+  const valid = nonNegativeInteger(source.estimated_valid_return_count)
+    ? source.estimated_valid_return_count
+    : Math.round(target * 0.8);
+  const gap = Math.max(0, target - valid);
+  const manual = Math.max(Math.ceil(demand * 0.2), gap);
+  const mcnCovered = nonNegativeInteger(source.mcn_covered_creator_count)
+    ? source.mcn_covered_creator_count
+    : Math.max(0, candidates - manual);
+  const mcnCount = nonNegativeInteger(source.recommended_mcn_count)
+    ? source.recommended_mcn_count
+    : Math.max(1, Math.ceil(mcnCovered / Math.max(1, Math.round(mcnCovered / 5))));
+
+  let ratioStr: string;
+  if (typeof source.mcn_manual_creator_ratio === "string") {
+    const parsed = /^(\d+)\s*:\s*(\d+)$/.exec(source.mcn_manual_creator_ratio.trim());
+    if (parsed && Number(parsed[1]) >= 0 && Number(parsed[2]) >= 0) {
+      ratioStr = source.mcn_manual_creator_ratio.trim();
+    } else {
+      ratioStr = `${mcnCovered}:${manual}`;
+    }
+  } else {
+    ratioStr = `${mcnCovered}:${manual}`;
+  }
+
+  return {
+    demand_count: demand,
+    database_candidate_count: candidates,
+    supply_demand_ratio: ratio,
+    target_submission_count: target,
+    estimated_valid_return_count: valid,
+    estimated_gap_count: gap,
+    recommended_mcn_count: mcnCount,
+    mcn_covered_creator_count: mcnCovered,
+    recommended_manual_creator_count: manual,
+    mcn_manual_creator_ratio: ratioStr,
+  };
 }
 
 function storedSupplyPlan(data: Json, requirementId: string): SupplyPlanBinding | undefined {
@@ -780,25 +837,40 @@ function ratioQuestionValues(question: string, field: string): Array<[number, nu
 }
 
 function questionMatchesSupplyPlan(question: string, values: SupplyPlan): boolean {
+  const extracted: Record<string, number> = {};
   for (const field of SUPPLY_PLAN_FIELDS) {
     const aliases = SUPPLY_PLAN_DISPLAY_LABELS[field];
     if (field === "mcn_manual_creator_ratio") {
       const matches = aliases.flatMap((alias) => ratioQuestionValues(question, alias));
-      if (
-        matches.length !== 1 ||
-        matches[0][0] !== values.mcn_covered_creator_count ||
-        matches[0][1] !== values.recommended_manual_creator_count
-      ) return false;
-      continue;
+      if (matches.length !== 1) return false;
+      extracted[`${field}_a`] = matches[0][0];
+      extracted[`${field}_b`] = matches[0][1];
+    } else {
+      const matches = aliases.flatMap((alias) => numericQuestionValues(question, alias));
+      if (matches.length !== 1) return false;
+      extracted[field] = matches[0];
     }
-    const matches = aliases.flatMap((alias) => numericQuestionValues(question, alias));
-    if (matches.length !== 1 || matches[0] !== values[field]) return false;
   }
-  const manualTotal = values.mcn_covered_creator_count + values.recommended_manual_creator_count;
-  const expectedManualShare = manualTotal === 0 ? 0 : Number((values.recommended_manual_creator_count / manualTotal * 100).toFixed(2));
   const manualShareMatches = ["建议手扒占比", "recommended_manual_creator_share_pct"]
     .flatMap((alias) => numericQuestionValues(question, alias));
-  return manualShareMatches.length === 1 && manualShareMatches[0] === expectedManualShare;
+  if (manualShareMatches.length !== 1) return false;
+
+  const ev = extracted;
+  if (ev.demand_count !== values.demand_count) return false;
+  if (ev.database_candidate_count !== values.database_candidate_count) return false;
+
+  const expectedRatio = ev.database_candidate_count / ev.demand_count;
+  if (ev.supply_demand_ratio !== expectedRatio) return false;
+  const expectedGap = Math.max(0, ev.target_submission_count - ev.estimated_valid_return_count);
+  if (ev.estimated_gap_count !== expectedGap) return false;
+  const expectedManual = Math.max(Math.ceil(ev.demand_count * 0.2), expectedGap);
+  if (ev.recommended_manual_creator_count !== expectedManual) return false;
+  if (ev.mcn_manual_creator_ratio_a !== ev.mcn_covered_creator_count) return false;
+  if (ev.mcn_manual_creator_ratio_b !== ev.recommended_manual_creator_count) return false;
+
+  const manualTotal = ev.mcn_covered_creator_count + ev.recommended_manual_creator_count;
+  const expectedManualShare = manualTotal === 0 ? 0 : Number((ev.recommended_manual_creator_count / manualTotal * 100).toFixed(2));
+  return manualShareMatches[0] === expectedManualShare;
 }
 
 function labeledSegments(question: string, aliases: readonly string[]): string[] {
@@ -943,8 +1015,7 @@ function supplyPlanText(values: SupplyPlan): string {
   const manualShare = manualTotal === 0 ? 0 : Number((values.recommended_manual_creator_count / manualTotal * 100).toFixed(2));
   return [
     `【真实数据】需求人数=${values.demand_count}｜候选达人=${values.database_candidate_count}｜供给倍数=${values.supply_demand_ratio}`,
-    `【计算计划】目标提报=${values.target_submission_count}｜预计有效=${values.estimated_valid_return_count}｜预计缺口=${values.estimated_gap_count}`,
-    `【推荐组合】推荐MCN=${values.recommended_mcn_count}｜MCN覆盖达人=${values.mcn_covered_creator_count}｜人工补充=${values.recommended_manual_creator_count}｜MCN人工比例=${values.mcn_manual_creator_ratio}｜建议手扒占比=${manualShare}%`,
+    `【推荐方案】目标提报=${values.target_submission_count}｜预计有效=${values.estimated_valid_return_count}｜预计缺口=${values.estimated_gap_count}｜推荐MCN=${values.recommended_mcn_count}｜MCN覆盖达人=${values.mcn_covered_creator_count}｜人工补充=${values.recommended_manual_creator_count}｜MCN人工比例=${values.mcn_manual_creator_ratio}｜建议手扒占比=${manualShare}%`,
     "【影响】确认后写入MCN排序",
   ].join(" ");
 }

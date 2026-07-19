@@ -10,7 +10,15 @@
 
 ## 人工门禁
 
-`search_creators` 后的下一个 Tool 必须是原生 `AskUserQuestion`，不得先调用或试探 `rank_mcns`。确认页必须展示实际 `supply_plan` 的十项字段、同量纲的机构覆盖/手扒账号比例，以及由两类账号数计算的建议手扒占比；缺项即停止，禁止从分页、候选数组长度或“约 N+”文案估算。确认页固定使用“供给确认”标题和“确认供给方案 / 调整方案”选项，Hook 会把精确匹配当前搜索结果的首次弹窗绑定到内部 marker。只有答案精确为“确认供给方案”才可调用最小参数 `rank_mcns({id, platform})`；随后等待用户确认实际 MCN 列表。
+`search_creators` 后的下一个 Tool 必须是原生 `AskUserQuestion`，不得先调用或试探 `rank_mcns`。确认弹窗必须使用以下固定格式——包含三个 【分区】、｜ 分隔、一行内（YP Action 会折叠换行）：
+
+```
+【真实数据】需求人数={demand_count}｜候选达人={database_candidate_count}｜供给倍数={supply_demand_ratio}
+【推荐方案】目标提报={target_submission_count}｜预计有效={estimated_valid_return_count}｜预计缺口={estimated_gap_count}｜推荐MCN={recommended_mcn_count}｜MCN覆盖达人={mcn_covered_creator_count}｜人工补充={recommended_manual_creator_count}｜MCN人工比例={mcn_manual_creator_ratio}｜建议手扒占比={manualShare}%
+【影响】确认后写入MCN排序
+```
+
+其中 `建议手扒占比` = `recommended_manual_creator_count / (mcn_covered_creator_count + recommended_manual_creator_count) * 100%`，必须展示。十项字段均来自 `search_creators` 返回后的 AI 计算：`supply_demand_ratio` = 候选数/需求数；`estimated_gap_count` = max(0, 目标提报-预计有效)；`recommended_manual_creator_count` = max(ceil(需求数*20%), 预计缺口)；`mcn_manual_creator_ratio` = MCN覆盖达人:人工补充。缺项即停止，禁止从分页、候选数组长度或”约 N+”文案估算。标题固定为”供给确认”，选项固定为”确认供给方案 / 调整方案”。Hook 会把精确匹配当前搜索结果的首次弹窗绑定到内部 marker。只有答案精确为”确认供给方案”才可调用最小参数 `rank_mcns({id, platform})`；随后等待用户确认实际 MCN 列表。
 
 选择询价字段后展示实际 description、机构名单和固定消息预览。外发前重新查询同一项目状态并确认动作授权；supply、MCN、message 三项确认必须由 `confirm_distribution_send` session action 记录。首次外发 Hook 返回的 marker 和绑定摘要必须原样展示，只有“确认发送”才以完全相同参数继续；修改、拒绝、超时、过期或参数变化均重新确认或停止。session action 不可用时返回 `integration_required`，不得自行设计替代接口。
 
