@@ -966,7 +966,7 @@ export function loadWorkflowContract(): WorkflowContract {
   if (
     value.schemaVersion !== 1 ||
     value.profile !== "mvp-v2" ||
-    value.projectionStatus !== "database-derived"
+    value.projectionStatus !== "local-json-recorded"
   ) {
     throw new Error("workflow contract identity is invalid");
   }
@@ -979,16 +979,17 @@ export function loadWorkflowContract(): WorkflowContract {
   requireUnique(value.allowedActions, "workflow allowedActions");
   const stateAuthority = requireRecord(value.stateAuthority, "workflow stateAuthority");
   if (
-    stateAuthority.source !== "database-derived-provider-state" ||
-    stateAuthority.providerFacts !== true ||
+    stateAuthority.source !== "local-json-orchestration-state" ||
+    stateAuthority.providerFacts !== false ||
+    stateAuthority.providerBusinessFacts !== true ||
     stateAuthority.providerOutputSchemaAdvertised !== false ||
-    stateAuthority.phaseAdvance !== "derive-after-each-write-from-committed-facts" ||
+    stateAuthority.phaseAdvance !== "record-after-each-successful-tool-result" ||
     stateAuthority.missingEvidenceBehavior !== "no-phase-advance" ||
     stateAuthority.unknownWriteResult !== "WRITE_RESULT_UNKNOWN" ||
-    stateAuthority.mayGrantProviderAuthority !== true ||
-    stateAuthority.mayDenyForSafety !== true
+    stateAuthority.mayGrantProviderAuthority !== false ||
+    stateAuthority.mayDenyForSafety !== false
   ) {
-    throw new Error("workflow state must be derived from committed provider database facts");
+    throw new Error("workflow orchestration state must be recorded in local JSON from actual Tool results");
   }
   const profile = loadContractProfile("mvp-v2");
   const transitions = requireArray(value.transitions, "workflow transitions").map(

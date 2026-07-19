@@ -271,6 +271,19 @@ function validateSemanticRequirements(
       "Provide exactly one lookup mode: trace_id, or demand_id with demand_version.",
     )];
   }
+  if (tool === "create_with_distributions") {
+    if (typeof params.description !== "string" || params.description.trim().length === 0) {
+      return [issue("INVALID_INPUT", "$.description", "description must be a non-empty JSON string.")];
+    }
+    try {
+      const message = JSON.parse(params.description);
+      if (!isRecord(message)) {
+        return [issue("INVALID_INPUT", "$.description", "description JSON must encode an object.")];
+      }
+    } catch {
+      return [issue("INVALID_INPUT", "$.description", "description must contain valid JSON.")];
+    }
+  }
   if (tool === "sync_mcn_inquiry_status") {
     for (const key of ["requirement_id", "project_id", "mcn_id"] as const) {
       const value = params[key];
@@ -335,7 +348,7 @@ export function validateToolParams(
 
   const rootSchema: ContractSchema = {
     type: "object",
-    required: contract.required,
+    required: [...new Set([...contract.required, ...(contract.agentRequired ?? [])])],
     properties: contract.properties,
   };
   const mismatches = collectSchemaMismatches(

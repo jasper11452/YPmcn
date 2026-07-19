@@ -422,31 +422,15 @@
     "create_with_distributions": {
       "name": "create_with_distributions",
       "required": [
-        "projectName",
-        "deadline",
+        "requirement_id",
         "columns",
-        "supplierIds",
-        "prefillRows",
-        "prefillRowsBySupplier"
+        "supplierIds"
       ],
       "properties": {
-        "projectName": {
+        "requirement_id": {
           "type": "string"
         },
         "description": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "deadline": {
-          "type": "string"
-        },
-        "usageScope": {
           "anyOf": [
             {
               "type": "string"
@@ -468,26 +452,19 @@
           "items": {
             "type": "string"
           }
-        },
-        "prefillRows": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        },
-        "prefillRowsBySupplier": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          }
         }
       },
       "forbidden": [],
+      "agentRequired": ["description"],
+      "agentSemanticRequirements": {
+        "description": "valid JSON string assembled from the confirmed requirement",
+        "columns": "user-confirmed field object list",
+        "supplierIds": "confirmed institution ID array",
+        "aliases": {
+          "requirement_ID": "requirement_id",
+          "colums": "columns"
+        }
+      },
       "sideEffects": "provider-write",
       "writers": {
         "always": [],

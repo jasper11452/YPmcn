@@ -10,6 +10,7 @@ PROFILE_PATH = ROOT / "spec" / "mcp.json"
 WORKFLOW_PATH = ROOT / "spec" / "workflow.json"
 SKILL = PACKAGE / "skills" / "media-assistant" / "SKILL.md"
 REFERENCES = SKILL.parent / "references"
+TOOL_FORMATS = REFERENCES / "tools"
 SCHEMA = REFERENCES / "reference_schema.json"
 REQUIREMENT_CASES = ROOT / "tests" / "goldens" / "requirement_cases.json"
 REQUIREMENT_REGRESSIONS = ROOT / "tests" / "goldens" / "requirement_regressions.json"
@@ -70,6 +71,7 @@ class SkillPackageContractTest(unittest.TestCase):
         for required in (
             "integration_required",
             "execution-gates.md",
+            "references/tools/",
         ):
             self.assertIn(required, text)
         for path in SKILL.parent.rglob("*"):
@@ -92,11 +94,10 @@ class SkillPackageContractTest(unittest.TestCase):
             "同一轮持续重新调用直到成功",
             "保持原始需求语义",
             "只修报错字段、序列化、映射或审计计数",
-            "Hook 只硬拦企微外发确认及其 shell/curl 绕过",
             "不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序",
             "preview 不限制 Skill 读取或其他 Tool",
-            "外发 Hook 阻断表示请求未到 Provider",
-            "只有实际远程 response/trace 才能归因 MCP/Provider",
+            "Native Approval",
+            "本地状态只按实际成功结果推进",
             "用户要求失败即停时绝不重试",
         ):
             self.assertIn(required, text)
@@ -115,11 +116,11 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_documented_id_routing_matches_current_endpoint(self):
         routing = read(REFERENCES / "execution-gates.md")
         for mapping in (
-            "需求身份来自 `validate_requirement`",
-            "`demand_id+demand_version` 只用于状态版本",
+            "需求身份来自 `validate_requirement.data.id`",
+            "`demand_id+demand_version` 只用于对账",
             "`project_id+mcn_id+requirement_id` 绑定 distribution",
             "`inquiry_id` 绑定回收",
-            "`run_id` 只来自精排或验证状态",
+            "`run_id` 来自精排",
         ):
             self.assertIn(mapping, routing)
         for obsolete in (
@@ -136,6 +137,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "spec/workflow.json",
             "workflow_state",
             "allowed_actions",
+            "state/confirmation_guard.json",
             "sync → ingest_mcn_submissions → sync",
             "禁止盲重试",
         ):
@@ -145,11 +147,10 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_send_and_recovery_docs_are_fail_closed(self):
         joined = "\n".join(read(path) for path in [SKILL, *REFERENCES.glob("*.md")])
         for required in (
-            "Native Ask",
+            "Native Approval",
             "写结果未知",
             "只有实际 MCP 返回算成功证据",
-            "真实外发",
-            "全部回收",
+            "确认后宿主自动续传原调用",
         ):
             self.assertIn(required, joined)
         for pattern in (
@@ -176,6 +177,21 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertEqual(EXPECTED_REFERENCE_FILES, actual)
         self.assertFalse(any((REFERENCES / "tools").glob("*.md")))
 
+    def test_every_tool_has_a_contract_synced_read_before_call_format(self):
+        expected = set(self.profile["requiredTools"] + self.profile["optionalTools"])
+        actual = {path.stem for path in TOOL_FORMATS.glob("*.json")}
+        self.assertEqual(expected, actual)
+        for name in expected:
+            format_doc = json.loads(read(TOOL_FORMATS / f"{name}.json"))
+            contract = self.profile["tools"][name]
+            required = list(dict.fromkeys(contract["required"] + contract.get("agentRequired", [])))
+            self.assertTrue(format_doc["readImmediatelyBeforeCall"], name)
+            self.assertEqual(f"mcp__ypmcn__{name}", format_doc["hostQualifiedName"], name)
+            self.assertEqual(contract["required"], format_doc["providerRequired"], name)
+            self.assertEqual(required, format_doc["required"], name)
+            self.assertEqual(contract["properties"], format_doc["argumentSchema"]["properties"], name)
+            self.assertFalse(format_doc["argumentSchema"]["additionalProperties"], name)
+
     def test_requirement_parsing_routes_creator_price_to_official_price_tiers(self):
         intake = read(REFERENCES / "requirement-intake.md")
         schema_fields = {row["Field"] for row in json.loads(read(SCHEMA))["columns"]}
@@ -192,7 +208,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "抖音",
             "1–20",
             "21–60",
-            "60 秒以上",
+            "60秒以上",
             '"[min,max]"',
             "不得杜撰字段",
         ):
@@ -404,29 +420,29 @@ class SkillPackageContractTest(unittest.TestCase):
         ]
         joined = "\n".join(texts)
         for required in (
-            "kolOfficialPriceL1/L2/L3",
-            "需求返点不是机构实际返点",
-            "creator_id",
-            "supplier_binding_id",
+            "小红书图文价格/视频价格",
+            "抖音1–20秒/21–60秒/60秒以上视频价格",
+            "小红书禁止 `kolOfficialPriceL3`",
+            "不猜测或展示给用户",
         ):
             self.assertIn(required, joined)
 
     def test_hook_reference_matches_registered_safe_event_surface(self):
         text = read(REFERENCES / "execution-gates.md")
-        for event in (
-            "before_tool_call",
-            "after_tool_call",
-            "session_end",
+        for required in (
+            "`before_tool_call`",
+            "Native Approval",
+            "宿主自动续传同一调用",
+            "不做严格阻断",
         ):
-            self.assertIn(f"`{event}`", text)
-        for required in ("只绑定最终企微外发的一次性确认", "不记录完整 payload"):
             self.assertIn(required, text)
 
     def test_hook_docs_map_public_projection_to_machine_phases(self):
         text = read(REFERENCES / "execution-gates.md")
         for required in (
-            "不推进数据库 phase",
-            "workflow_state + allowed_actions",
+            "`phase/next_action` 是 Agent 编排权威",
+            "不能覆盖本地 phase",
+            "只按实际成功响应推进",
             "写结果未知",
         ):
             self.assertIn(required, text)

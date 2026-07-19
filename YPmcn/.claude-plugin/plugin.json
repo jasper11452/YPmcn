@@ -1,7 +1,7 @@
 {
   "id": "ypmcn-media-assistant",
   "name": "ypmcn-media-assistant",
-  "version": "3.3.2",
+  "version": "3.3.3",
   "description": "YPmcn 媒介助手：提供媒介工作流提示与企微外发一次性确认。",
   "author": {
     "name": "Jasper"

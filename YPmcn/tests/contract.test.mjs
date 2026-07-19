@@ -27,12 +27,10 @@ const CURRENT_TOOLS = [
 
 function validDistribution(overrides = {}) {
   return {
-    projectName: "项目 A",
-    deadline: "2026-07-19T18:00:00+08:00",
+    requirement_id: "req-1",
     columns: [{ key: "kwUid" }],
     supplierIds: ["supplier-1"],
-    prefillRows: [],
-    prefillRowsBySupplier: {},
+    description: JSON.stringify({ title: "项目 A", platform: "小红书" }),
     ...overrides,
   };
 }
@@ -50,10 +48,11 @@ describe("current Endpoint contract loader", () => {
     }
   });
 
-  it("loads database-derived workflow authority without requiring host sessions", () => {
+  it("loads local-JSON workflow authority without making it Provider success evidence", () => {
     const workflow = loadWorkflowContract();
-    assert.equal(workflow.projectionStatus, "database-derived");
-    assert.equal(workflow.stateAuthority.providerFacts, true);
+    assert.equal(workflow.projectionStatus, "local-json-recorded");
+    assert.equal(workflow.stateAuthority.providerFacts, false);
+    assert.equal(workflow.stateAuthority.providerBusinessFacts, true);
     assert.equal(workflow.stateAuthority.sessionLifecycleRequired, false);
     assert.equal(workflow.stateAuthority.providerOutputSchemaAdvertised, false);
     assert.equal(workflow.stateAuthority.missingEvidenceBehavior, "no-phase-advance");
@@ -106,9 +105,7 @@ describe("current Endpoint input validation", () => {
       ["search_creators", { id: "req-1" }],
       ["rank_mcns", { id: "req-1", platform: "xiaohongshu", medium_risk_confirmation: null }],
       ["select_inquiry_form_fields", { url: null, timeout_seconds: 30 }],
-      ["create_with_distributions", validDistribution({ prefillRowsBySupplier: {
-        "supplier-1": [{ kwUid: "creator-1" }],
-      } })],
+      ["create_with_distributions", validDistribution()],
       ["sync_mcn_inquiry_status", {
         requirement_id: "req-1", project_id: "project-1", mcn_id: "mcn-1",
         cron_job_id: null, scheduled_recover_at: null,
@@ -132,13 +129,20 @@ describe("current Endpoint input validation", () => {
   it("rejects old provider arguments and malformed nested live inputs", () => {
     const oldSend = validateToolParams("create_with_distributions", {
       ...validDistribution(),
+      projectName: "旧项目字段",
+      deadline: "2026-07-19T18:00:00+08:00",
+      prefillRows: [],
+      prefillRowsBySupplier: {},
       mcn_recommendation_id: "mcnr-old",
       remindAt: "2026-07-19T17:00:00+08:00",
       preview_only: false,
     });
     assert.deepEqual(
       oldSend.map(({ path }) => path),
-      ["$.mcn_recommendation_id", "$.remindAt", "$.preview_only"],
+      [
+        "$.projectName", "$.deadline", "$.prefillRows", "$.prefillRowsBySupplier",
+        "$.mcn_recommendation_id", "$.remindAt", "$.preview_only",
+      ],
     );
     assert.equal(
       validateToolParams("ingest_mcn_submissions", {
@@ -147,10 +151,12 @@ describe("current Endpoint input validation", () => {
       "$.items[0]",
     );
     assert.equal(
-      validateToolParams("create_with_distributions", validDistribution({
-        prefillRowsBySupplier: { "supplier-1": [{}], bad: "not-an-array" },
-      }))[0].path,
-      "$.prefillRowsBySupplier.bad",
+      validateToolParams("create_with_distributions", validDistribution({ columns: ["not-an-object"] }))[0].path,
+      "$.columns[0]",
+    );
+    assert.equal(
+      validateToolParams("create_with_distributions", validDistribution({ description: "not-json" }))[0].path,
+      "$.description",
     );
   });
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "profile": "mvp-v2",
-  "projectionStatus": "database-derived",
+  "projectionStatus": "local-json-recorded",
   "vectorDegradationPolicy": {
     "mode": "explicit-sql-only",
     "preserveBusinessWorkflow": true,
@@ -16,6 +16,7 @@
     "requirement_ready",
     "candidate_pool_ready",
     "mcn_planning",
+    "inquiry_fields_ready",
     "waiting_mcn_return",
     "candidate_pool_enriched",
     "recommendation_ready",
@@ -40,11 +41,13 @@
     "get_workflow_state"
   ],
   "stateAuthority": {
-    "source": "database-derived-provider-state",
+    "source": "local-json-orchestration-state",
     "schema": "schemas/workflow-state.schema.json",
-    "providerFacts": true,
+    "path": "state/sessions/<sha256(sessionKey)>/confirmation_guard.json",
+    "providerFacts": false,
+    "providerBusinessFacts": true,
     "providerOutputSchemaAdvertised": false,
-    "phaseAdvance": "derive-after-each-write-from-committed-facts",
+    "phaseAdvance": "record-after-each-successful-tool-result",
     "derivationOrder": [
       "closed-demand",
       "conflict-or-ledger-unknown-blocked",
@@ -74,8 +77,8 @@
     ],
     "missingEvidenceBehavior": "no-phase-advance",
     "unknownWriteResult": "WRITE_RESULT_UNKNOWN",
-    "mayGrantProviderAuthority": true,
-    "mayDenyForSafety": true,
+    "mayGrantProviderAuthority": false,
+    "mayDenyForSafety": false,
     "sessionLifecycleRequired": false,
     "rawPayloadStored": false,
     "ledger": {
@@ -90,12 +93,14 @@
     }
   },
   "policies": {
-    "outwardSendConfirmation": "ten-minute one-time request fingerprint confirmed through AskUserQuestion",
+    "outwardSendConfirmation": "native before_tool_call approval bound to the exact pending create_with_distributions invocation; approval resumes that invocation",
     "fieldSelectionBinding": "selected columns remain preparation evidence until a real distribution is committed",
     "unsupportedProviderArguments": ["candidate_pool_id", "mcn_recommendation_id", "preview_only", "remindAt", "trigger"],
-    "stateRefresh": "on resume, compaction, unknown write, conflict, missing state, and before outward send",
+    "stateRefresh": "read local JSON on every prompt; use get_workflow_state only for context loss or unknown write reconciliation",
     "unknownWriteRecovery": "current provider: get_workflow_state by demand identity from existing business facts; ledger trace_id reconciliation is target-only and an unknown external create remains blocked; never blind retry",
-    "postSearchContinuation": "a successful search_creators result immediately continues to rank_mcns without AskUserQuestion; failures use AskUserQuestion for clarification or a safe recovery choice",
+    "postValidationContinuation": "a successful validate_requirement result immediately continues to search_creators in the same turn",
+    "postSearchContinuation": "a successful search_creators result renders the fixed supply-demand summary and waits for explicit user confirmation before rank_mcns",
+    "mcnRace": "rank_mcns uses a confirmed dynamic race size; never hardcode five recommendations and display institution names instead of IDs",
     "manualSourcingPlacement": "optional pre-send enrichment only; never proves distribution or recovery",
     "rankCreatorsPrerequisite": "committed WeCom distribution plus completed recovery"
   },
@@ -120,23 +125,29 @@
       "id": "mcn-plan-ready",
       "from": "candidate_pool_ready",
       "trigger": {"type": "tool", "name": "rank_mcns"},
-      "guards": ["candidate pool belongs to the same requirement", "the immediately preceding successful search_creators result authorizes one rank_mcns attempt for that requirement"],
+      "guards": ["candidate pool belongs to the same requirement", "the user confirmed the fixed search supply-demand summary", "minimum_mcn_count is derived dynamically instead of fixed at five"],
       "evidence": ["committed mcn_recommendation_items rows"],
       "nextPhase": "mcn_planning"
     },
     {
-      "id": "distribution-created",
+      "id": "inquiry-fields-ready",
       "from": "mcn_planning",
+      "trigger": {"type": "tool", "name": "select_inquiry_form_fields"},
+      "guards": ["the MCN race result and institution choices are confirmed", "the returned field description is actual Provider evidence"],
+      "evidence": ["successful field-list response recorded in local JSON"],
+      "nextPhase": "inquiry_fields_ready"
+    },
+    {
+      "id": "distribution-created",
+      "from": "inquiry_fields_ready",
       "trigger": {"type": "tool", "name": "create_with_distributions"},
-      "guards": ["supply, MCN, field selection, and message confirmations are bound by Native Ask receipts and Hook evidence", "one-time Ask confirmation matches the unchanged request fingerprint", "supplier and prefill rows resolve one requirement"],
-      "implementationStatus": "target-blocked",
-      "blockedBy": "current provider does not use mcp_tool_call_ledger for this Tool",
-      "evidence": ["target-only: real external project and distribution identifiers persisted in the idempotency ledger; current provider does not produce this evidence"],
-      "nextPhase": "mcn_planning"
+      "guards": ["supply, MCN, and field choices are present in local orchestration state", "native warning approval is bound to the exact pending Tool call", "requirement_id, supplierIds, columns, and JSON-string description resolve one requirement"],
+      "evidence": ["actual successful external distribution response recorded in local JSON"],
+      "nextPhase": "waiting_mcn_return"
     },
     {
       "id": "distribution-waiting",
-      "from": "mcn_planning",
+      "from": "waiting_mcn_return",
       "trigger": {"type": "tool", "name": "sync_mcn_inquiry_status"},
       "guards": ["real project and distribution identifiers resolve to the same requirement and supplier"],
       "implementationStatus": "target-blocked",
@@ -159,6 +170,14 @@
       "guards": ["manual results are real and verifiable", "no distribution has been sent"],
       "evidence": ["committed eligible manual candidates"],
       "nextPhase": "mcn_planning"
+    },
+    {
+      "id": "manual-supply-before-send-from-inquiry-fields",
+      "from": "inquiry_fields_ready",
+      "trigger": {"type": "tool", "name": "manual_source_creators"},
+      "guards": ["manual results are real and verifiable", "no distribution has been sent"],
+      "evidence": ["committed eligible manual candidates"],
+      "nextPhase": "inquiry_fields_ready"
     },
     {
       "id": "submission-ingested",

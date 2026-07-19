@@ -32,11 +32,10 @@ const EXPECTED_INPUTS = {
     required: [], properties: { url: "string|null", timeout_seconds: "integer" },
   },
   create_with_distributions: {
-    required: ["projectName", "deadline", "columns", "supplierIds", "prefillRows", "prefillRowsBySupplier"],
+    required: ["requirement_id", "columns", "supplierIds"],
     properties: {
-      projectName: "string", description: "string|null", deadline: "string",
-      usageScope: "string|null", columns: "array", supplierIds: "array",
-      prefillRows: "array", prefillRowsBySupplier: "object",
+      requirement_id: "string", description: "string|null",
+      columns: "array", supplierIds: "array",
     },
   },
   sync_mcn_inquiry_status: {
@@ -139,6 +138,15 @@ describe("current Endpoint MCP contract", () => {
   it("keeps the two provider semantic constraints explicit", () => {
     assert.match(profile.tools.get_workflow_state.semanticRequirement, /demand_id.*demand_version.*trace_id/);
     assert.match(profile.tools.get_recommendation_run_detail.semanticRequirement, /positive integer/);
+  });
+
+  it("adds the Agent-required JSON message without misreporting the live Provider required list", () => {
+    assert.deepEqual(profile.tools.create_with_distributions.agentRequired, ["description"]);
+    assert.equal(
+      profile.tools.create_with_distributions.agentSemanticRequirements.aliases.requirement_ID,
+      "requirement_id",
+    );
+    assert.equal(profile.tools.create_with_distributions.agentSemanticRequirements.aliases.colums, "columns");
   });
 
   it("does not promote runtime observations into advertised output schemas", () => {

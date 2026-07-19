@@ -6,17 +6,17 @@
   "executionSurface": "YP Action/OpenClaw Node plugin",
   "events": {
     "before_prompt_build": {
-      "responsibility": "inject_strict_brief_and_continuous_workflow_context",
+      "responsibility": "inject_brief_guidance_and_local_json_orchestration_state",
       "mayBlock": false,
       "script": "YPmcn/src/index.ts"
     },
     "before_tool_call": {
-      "responsibility": "one_time_external_send_confirmation_and_shell_bypass_guard",
+      "responsibility": "native_exact_call_external_send_approval_and_shell_bypass_guard",
       "mayBlock": true,
       "script": "YPmcn/src/runtime-hooks.ts"
     },
     "after_tool_call": {
-      "responsibility": "consume_external_send_confirmation_receipts_without_advancing_business_phase",
+      "responsibility": "record_actual_tool_results_and_local_workflow_transitions",
       "mayBlock": false,
       "script": "YPmcn/src/runtime-hooks.ts"
     },
@@ -32,16 +32,19 @@
       "oneTimeConfirmations": "10m",
       "unknownExternalSend": "10m; every retry requires a fresh explicit confirmation"
     },
-    "format": "confirmation_guard_schema_v12",
+    "format": "confirmation_guard_schema_v13",
     "storesBusinessPayload": false,
-    "authoritative": false
+    "storesWorkflowIdentifiers": true,
+    "authoritativeForOrchestration": true,
+    "authoritativeForProviderSuccess": false
   },
   "boundaries": {
     "owns": [
       "external_send_confirmation",
       "external_send_request_fingerprint_binding",
       "provider_send_shell_bypass_blocking",
-      "one_time_confirmation_fingerprints"
+      "one_time_confirmation_fingerprints",
+      "local_workflow_phase_and_next_action_recording"
     ],
     "doesNotOwn": [
       "general_tool_permissions",
@@ -51,18 +54,18 @@
       "identifier_provenance_enforcement",
       "database_schema",
       "mcp_tool_schema",
-      "workflow_state_authority",
-      "allowed_actions",
+      "provider_business_fact_authority",
+      "provider_action_authorization",
       "recovery_ownership_or_authorization",
       "business_ranking_algorithm",
       "provider_evidence_rewrite",
       "server_side_idempotency"
     ],
-    "localConfirmationProjection": {
-      "authoritative": false,
+    "localOrchestrationProjection": {
+      "authoritative": true,
       "mayGrantServerAction": false,
-      "mayDenyForAdditionalSafety": true,
-      "advancesBusinessPhase": false,
+      "mayDenyOrdinaryToolOrder": false,
+      "advancesOnlyOnActualSuccess": true,
       "authoritativeContract": "workflow.json#stateAuthority"
     }
   },

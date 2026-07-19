@@ -89,6 +89,7 @@ export interface ToolInputModes {
 export interface ToolContract {
   name: string;
   required: string[];
+  agentRequired?: string[];
   requiredAlternatives?: string[][];
   alternativeMode?: "exactly-one";
   inputModes?: ToolInputModes;
@@ -173,7 +174,7 @@ export type ContractProfile = MvpContractProfile | LegacyContractProfile;
 export interface WorkflowContract {
   schemaVersion: number;
   profile: "mvp-v2";
-  projectionStatus: "database-derived";
+  projectionStatus: "local-json-recorded";
   phases: string[];
   allowedActions: string[];
   stateAuthority: Record<string, unknown>;

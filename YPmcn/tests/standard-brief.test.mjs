@@ -120,6 +120,36 @@ describe("deterministic standard Brief parser", () => {
     assert.equal(preview.atoms.find((atom) => atom.field === "creatorPriceTier")?.sourceText, "单达人 L1 官方报价：4万元以内");
   });
 
+  it("rejects the third internal price field for Xiaohongshu and asks with platform wording", () => {
+    const brief = [
+      "平台：小红书",
+      "数量：3位达人",
+      "单达人 L3 官方报价：8000元以内",
+      "提报截止：2026-07-20 18:00",
+    ].join("\n");
+    const preview = parseStandardBrief(brief);
+    const price = preview.atoms.find((atom) => atom.field === "creatorPriceTier");
+    assert.equal(preview.gate, "semantic_ambiguity");
+    assert.equal(preview.projection.kolOfficialPriceL3, undefined);
+    assert.deepEqual(price.candidates, ["小红书图文价格", "小红书视频价格"]);
+    const reply = renderStandardBriefReply(preview);
+    assert.match(reply, /图文价格或视频价格/);
+    assert.doesNotMatch(reply, /请确认 L1|L1、L2|L2 或 L3/);
+  });
+
+  it("maps Douyin prices by video duration while keeping duration wording user-facing", () => {
+    const brief = [
+      "平台：抖音",
+      "数量：3位达人",
+      "内容：60秒以上视频",
+      "单达人官方报价：8000元以内",
+      "提报截止：2026-07-20 18:00",
+    ].join("\n");
+    const preview = parseStandardBrief(brief);
+    assert.equal(preview.gate, "ready");
+    assert.equal(preview.projection.kolOfficialPriceL3, "[0,8000]");
+  });
+
   it("selects the last complete structured Brief instead of a field label quoted in operator instructions", () => {
     const brief = [
       "品牌：阿里巴巴",

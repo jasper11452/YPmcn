@@ -6,11 +6,21 @@ import { dirname, join } from "node:path";
 import { loadErrorCatalog } from "./contract/loader.js";
 
 export type Json = Record<string, any>;
-export type ConfirmationStatus = "pending" | "approved" | "in_flight" | "consumed" | "unknown" | "denied";
+export type ConfirmationStatus = "pending" | "in_flight" | "consumed" | "unknown" | "denied";
 export type GuardStore = { path: string; data: Json };
 const STATE_SCOPE = new AsyncLocalStorage<string>();
 
 export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
+
+function initialWorkflowState(): Json {
+  return {
+    phase: "requirement_draft",
+    next_action: "validate_requirement",
+    waiting_for: null,
+    transition_seq: 0,
+    updated_at_ms: null,
+  };
+}
 
 export function text(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
@@ -77,10 +87,6 @@ export function sha256Text(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-export function deny(code: string, message: string): Json {
-  return { block: true, blockReason: `${code}: ${message}` };
-}
-
 export function denyStructured(code: string, context: string): Json {
   const definition = loadErrorCatalog().errors.find((entry) => entry.code === code);
   if (!definition) throw new Error(`unknown contract error code: ${code}`);
@@ -102,15 +108,27 @@ export function denyStructured(code: string, context: string): Json {
 export function store(rootDir: string): GuardStore {
   const path = statePath(rootDir);
   const data = load(path);
-  let changed = data.schema_version !== 12;
-  data.schema_version = 12;
+  let changed = data.schema_version !== 13;
+  data.schema_version = 13;
   if (!data.confirmations || typeof data.confirmations !== "object" || Array.isArray(data.confirmations)) {
     data.confirmations = {};
+    changed = true;
+  }
+  if (!data.workflow || typeof data.workflow !== "object" || Array.isArray(data.workflow)) {
+    data.workflow = initialWorkflowState();
+    changed = true;
+  }
+  if (!Array.isArray(data.workflow_events)) {
+    data.workflow_events = [];
+    changed = true;
+  } else if (data.workflow_events.length > 50) {
+    data.workflow_events = data.workflow_events.slice(-50);
     changed = true;
   }
   for (const key of [
     "trusted_ids",
     "trusted_relations",
+    "blocked_requirement_semantics",
     "supply_plans",
     "search_receipts",
     "workflow_states",

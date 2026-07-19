@@ -7,12 +7,13 @@ YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。
 ```text
 validate_requirement
 → search_creators(id)
-→ rank_mcns(id, platform)
-→ 展示供需比、机构/手扒比例与 MCN 结果 → AskUserQuestion 确认
+→ 固定格式展示供需比与建议拓展数 → AskUserQuestion 确认
+→ rank_mcns(id, platform, 动态赛马数量)
+→ 按名称展示 MCN 赛马结果 → 确认
 → select_inquiry_form_fields()
 → manual_source_creators（可选，仅企微外发前）
-→ AskUserQuestion 一次性确认
-→ create_with_distributions(...)
+→ create_with_distributions(requirement_id, supplierIds, columns, description)
+→ Native Approval 警告；确认后宿主续传原调用
 → sync_mcn_inquiry_status(requirement_id, project_id, mcn_id)
 → waiting_mcn_return
 → sync / ingest_mcn_submissions / sync（完成回收）
@@ -27,12 +28,12 @@ validate_requirement
 
 插件注册 `before_prompt_build`、`before_tool_call`、`after_tool_call`、`session_end`。
 
-- Hook 不保存业务 phase，不依赖 `sessionKey`、`session_start` 或生命周期事件；`session_end` 只做机会性 TTL 清理。
+- Hook 按会话把本地 phase、next_action 和脱敏事件写入 `state/confirmation_guard.json`；实际 MCP 结果仍是业务事实证据。
 - 需求 preview 只作为提示上下文，不形成 Tool 权限门禁；Skill、resources、prompts、普通宿主工具和除企微外发外的 YPmcn Tool 均不被 Hook 阻断。
-- 参数、ID 血缘、工作流顺序和业务动作授权交给 MCP/Provider；Hook 不重复实现一套本地业务状态机。
+- 本地 JSON 是 Agent 编排状态权威，但 Hook 不对普通 Tool 做严格顺序/参数阻断；Provider 状态仅用于业务事实和未知写对账。
 - shell、PowerShell、curl 直连 provider 的企微外发接口会被阻断，避免绕过最终确认。
-- provider 发送首次调用返回 `YP_CONFIRMATION_REQUIRED`；AskUserQuestion 精确确认且请求参数未变化时只放行一次。
-- Reject、超时、修改、参数变化、重放或未知写结果都不会沿用旧确认；再次尝试必须重新确认。
+- provider 发送调用会触发 Native Approval；Allow 由宿主继续同一待执行调用，Reject/超时/取消不触达 Provider。
+- 参数变化、重放或未知写结果都必须产生新的 Native Approval；不会复用旧确认。
 - Hook 不记录客户 Brief、消息正文或完整 payload。
 
 ## Provider 状态

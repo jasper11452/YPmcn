@@ -189,20 +189,33 @@ function priceRange(match: RegExpExecArray): string | undefined {
 
 function priceTarget(source: string, brief: string): string | undefined {
   const explicit = /L\s*([123])/i.exec(source);
-  if (explicit) return `kolOfficialPriceL${explicit[1]}`;
+  const isXiaohongshu = /小红书|红书|XHS/i.test(brief);
+  const isDouyin = /抖音|Douyin|\bDY\b/i.test(brief);
+  if (explicit) {
+    if (isXiaohongshu && explicit[1] === "3") return undefined;
+    return `kolOfficialPriceL${explicit[1]}`;
+  }
   const context = `${source}\n${brief}`;
   const hasImage = /图文/.test(context);
   const hasVideo = /视频/.test(context);
-  if (/小红书|红书|XHS/i.test(brief)) {
+  if (isXiaohongshu) {
     if (hasImage && !hasVideo) return "kolOfficialPriceL1";
     if (hasVideo && !hasImage) return "kolOfficialPriceL2";
   }
-  if (/抖音|Douyin|\bDY\b/i.test(brief)) {
-    if (/60\s*s?\s*(?:以上|\+)/i.test(context)) return "kolOfficialPriceL3";
-    if (/(?:21\s*[-~～—至到]\s*60|21\s*至\s*60)\s*s/i.test(context)) return "kolOfficialPriceL2";
-    if (/(?:1\s*[-~～—至到]\s*20|20\s*s?\s*(?:以内|以下))/i.test(context)) return "kolOfficialPriceL1";
+  if (isDouyin) {
+    if (/60\s*(?:秒|s)?\s*(?:以上|\+)/i.test(context)) return "kolOfficialPriceL3";
+    if (/(?:21\s*[-~～—至到]\s*60|21\s*至\s*60)\s*(?:秒|s)/i.test(context)) return "kolOfficialPriceL2";
+    if (/(?:1\s*[-~～—至到]\s*20\s*(?:秒|s)|20\s*(?:秒|s)?\s*(?:以内|以下))/i.test(context)) return "kolOfficialPriceL1";
   }
   return undefined;
+}
+
+function priceCandidates(brief: string): string[] {
+  if (/小红书|红书|XHS/i.test(brief)) return ["小红书图文价格", "小红书视频价格"];
+  if (/抖音|Douyin|\bDY\b/i.test(brief)) {
+    return ["抖音1–20秒视频价格", "抖音21–60秒视频价格", "抖音60秒以上视频价格"];
+  }
+  return ["小红书图文价格", "小红书视频价格", "抖音1–20秒视频价格", "抖音21–60秒视频价格", "抖音60秒以上视频价格"];
 }
 
 export function isStandardBrief(prompt: unknown): prompt is string {
@@ -291,8 +304,8 @@ export function parseStandardBrief(
         field: "creatorPriceTier",
         resolution: "semantic_ambiguity",
         value: range,
-        candidates: ["kolOfficialPriceL1", "kolOfficialPriceL2", "kolOfficialPriceL3"],
-        reason: "The single-creator price has no uniquely determined content tier.",
+        candidates: priceCandidates(brief),
+        reason: "The single-creator price has no platform-valid content format or duration.",
         confidence: 1,
         inferred: false,
       };
@@ -512,9 +525,15 @@ export function renderStandardBriefReadyArguments(payload: Record<string, unknow
   return `YPmcn authoritative initial validate_requirement arguments (use this object exactly for the first call; after a deterministic argument rejection, preserve confirmed facts and follow the same-turn repair loop):\n${JSON.stringify({ payload })}`;
 }
 
-function ambiguityQuestion(field: string): string {
+function ambiguityQuestion(field: string, preview: StandardBriefPreview): string {
   if (field === "creatorPriceTier") {
-    return "- 价格口径：4w以下是项目总预算，还是单达人官方报价？若为单达人报价，请确认 L1、L2 或 L3。";
+    if (preview.projection.platform === "xiaohongshu") {
+      return "- 价格口径：这是项目总预算还是单达人官方报价？若为单达人报价，请确认图文价格或视频价格。";
+    }
+    if (preview.projection.platform === "douyin") {
+      return "- 价格口径：这是项目总预算还是单达人官方报价？若为单达人报价，请确认1–20秒、21–60秒或60秒以上视频价格。";
+    }
+    return "- 价格口径：请先确认平台，再确认对应内容形式或视频时长的单达人官方报价。";
   }
   if (field === "accountTaxonomy") {
     return "- 账号类型：母婴类、亲子相关是内容主题，还是平台达人 taxonomy？若为 taxonomy，请提供平台正式分类值。";
@@ -528,7 +547,7 @@ export function renderStandardBriefReply(preview: StandardBriefPreview): string 
     .map((atom) => `- ${atom.targetField}: ${JSON.stringify(atom.value)}`);
   const unresolved = [
     ...preview.missingRequired.map((field) => `- ${field}：请补充必填值。`),
-    ...preview.semanticAmbiguities.map(ambiguityQuestion),
+    ...preview.semanticAmbiguities.map((field) => ambiguityQuestion(field, preview)),
   ];
   return [
     "## 需求解析（权威结构化结果）",

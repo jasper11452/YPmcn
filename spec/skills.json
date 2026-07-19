@@ -24,14 +24,15 @@
       "toolPolicy": {
         "contract": "mcp.json",
         "runtimeCapabilityCheck": "tools/list",
+        "readFormatBeforeEveryCall": "skills/media-assistant/references/tools/<tool>.json",
         "incompatibleProviderAction": "integration_required",
         "automaticLegacyFallback": false,
         "preconditions": {
         "create_with_distributions": [
-          "database_state_refreshed_before_send",
-          "server_allowed_action_create_with_distributions",
+          "local_orchestration_state_has_confirmed_supply_mcn_and_columns",
           "request_identity_resolves_one_requirement",
-          "ask_confirmation_fingerprint_current_and_one_time"
+          "description_is_valid_json_string_from_confirmed_requirement",
+          "native_exact_call_approval_current_and_one_time"
         ],
         "ingest_mcn_submissions": [
           "server_allowed_action_ingest_mcn_submissions",

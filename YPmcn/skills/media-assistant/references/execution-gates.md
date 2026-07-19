@@ -1,25 +1,27 @@
 # 执行门禁
 
-## 契约与证据
+## 契约与本地状态
 
-先用运行时 `tools/list` 核对根 `spec/manifest.json` 指向的 `spec/mcp.json`、`spec/workflow.json` 和错误契约。Endpoint schema 优先；不兼容即 `integration_required`。Tool 存在不等于步骤成功，Hook、Ask、示例、测试或 reference MCP 都不是生产证据。
+以根 `spec/manifest.json` 指向的 `spec/mcp.json`、`spec/workflow.json` 和运行时 schema 为准。每次业务 Tool 调用前先读 `tools/<tool>.json`；只传其中字段。Tool 存在不等于成功，只有实际 MCP 返回是业务证据。
 
-每次写后只按实际返回的 `workflow_state + allowed_actions` 推进。写结果未知只能用 `get_workflow_state` 对账，禁止盲重试；本地确认不替代数据库幂等。`blocked/closed` 只执行返回允许的只读或修复动作。
+会话编排状态写入本地 `state/confirmation_guard.json` 的 `workflow` 与 `workflow_events`。`phase/next_action` 是 Agent 编排权威，Provider 的 `workflow_state/allowed_actions` 只作业务事实或未知写对账，不能覆盖本地 phase。Hook 只按实际成功响应推进；失败保留阶段并进入恢复。本地状态不伪造 Provider 成功。
 
-需求身份来自 `validate_requirement`；`demand_id+demand_version` 只用于状态版本，`project_id+mcn_id+requirement_id` 绑定 distribution，`inquiry_id` 绑定回收，`run_id` 只来自精排或验证状态。达人/机构沿用实际 `kwUid/supplier_id`，不得猜 `creator_id/supplier_binding_id`。价格来自平台 `kolOfficialPriceL1/L2/L3`；需求返点不是机构实际返点。
+需求身份来自 `validate_requirement.data.id`；它用于 `search_creators/rank_mcns` 的 `id` 及后续 `requirement_id`。`demand_id+demand_version` 只用于对账，`project_id+mcn_id+requirement_id` 绑定 distribution，`inquiry_id` 绑定回收，`run_id` 来自精排。达人/机构 ID 只复制实际结果，不猜测或展示给用户。
 
-## 人工门禁
+## 连续执行与人工确认
 
-`search_creators` 成功后的下一个 Tool 必须直接是 `rank_mcns({id, platform})`，同一轮连续执行；两者之间不得插入 `AskUserQuestion`、文字确认、状态查询或其他 Tool。`id` 复用 `validate_requirement.data.id`，`platform` 复用已确认平台，只添加用户明确要求且 live schema 支持的排名参数。`search_creators` 或 `rank_mcns` 报错时立即停止后续业务 Tool，并在同一轮调用原生 `AskUserQuestion`：缺参/非法值请求精确澄清，明确后端错误提供安全恢复选择，未知写结果先对账且禁止盲重试。
+`validate_requirement` 成功后同轮直接调用 `search_creators`，中间不停止、不确认。`search_creators` 成功后必须先按 `frontend-response.md` 输出固定供需格式，包含需求数量、实际命中数、供需比、建议拓展数，再用题头“供给确认”询问；确认前禁止调用 `rank_mcns`。弹窗返回“确认并开始MCN赛马”后同轮立即执行，不得只回复已确认。
 
-`rank_mcns` 成功后再展示实际 MCN 列表、缺口和 Provider-backed 供给方案，等待用户完成 supply 与 MCN 选择；不得自行重算或编造。随后选择询价字段并确认 message。这些前序选择由 Agent 按 Provider 事实执行，不由本地 Hook 强制排序或绑定。
+`rank_mcns` 使用动态 MCN 赛马规模，不依赖默认固定 5 家。成功后只显示机构名称、覆盖与缺口，ID 留作 `supplierIds`。选择机构后调用 `select_inquiry_form_fields` 并确认字段。
 
-选择询价字段后展示实际 description、机构名单和固定消息预览。外发前按 Provider 状态确认动作授权。首次外发 Hook 返回的 marker 和绑定摘要必须原样展示，只有“确认发送”才以完全相同参数继续；修改、拒绝、超时、参数变化、重放或未知结果都不能沿用旧确认。未知结果应先对账；若业务决定再次尝试，Hook 会要求一份新的显式确认，不会永久锁死其他 Tool。
+企微 Tool 的 live 参数为 `requirement_id`、`supplierIds`、`columns`、`description`；其中 `description` 是 AI 从已确认需求整理的合法 JSON 字符串，`columns` 是用户选定的字段对象列表。业务说法 `requirement_ID/colums` 必须映射为 live key，禁止直接发送拼错字段。
+
+正式外发只调用一次 `create_with_distributions`。`before_tool_call` 返回 Native Approval 警告并绑定原始调用；用户确认后宿主自动续传同一调用，拒绝/取消/超时则不触达 Provider。Hook 不用二次 Ask 或要求 Agent 重建参数，因此确认指令不会被只读成回复。
 
 ## 工具边界与恢复
 
-- `search_creators` 只查现有库，不开浏览器或外搜。`manual_source_creators` 只在外发前导入已关联当前需求的真实人工结果，不能替代外发和回收。
-- 外发成功后按实际返回身份执行 `sync → ingest_mcn_submissions → sync`；无真实回收 items 不 ingest，不轮询。只有真实外发、全部回收和 `candidate_pool_enriched` 才可 `rank_creators`。
-- 详情 Tool 只读且不推进流程；`audit_manual_adjustment` 仅用于有操作者和原因的明确人工调整。批次成功后才导出；客户有具体反馈后才记录，不猜状态。
-
-Hook 的 `before_tool_call`、`after_tool_call`、`session_end` 只绑定最终企微外发的一次性确认，并阻断 shell/curl 绕过；不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序，不推进数据库 phase，也不记录完整 payload。企微外发被 Hook 阻断时请求尚未到 Provider；只有实际远程 response/trace 才能归因 MCP/Provider。
+- Hook 不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序；除外发绕过与 Native Approval 外不做严格阻断。
+- `search_creators` 只查现有库；`manual_source_creators` 只导入当前需求已有的真实人工结果。
+- 外发成功后按实际身份执行 `sync → ingest_mcn_submissions → sync`；无真实 items 不 ingest，不轮询。
+- 写结果未知先对账且禁止盲重试；明确参数错误只修该字段。用户要求失败即停时绝不重试。
+- 详情 Tool 只读且不推进；批次成功后才导出，客户有具体反馈后才记录。

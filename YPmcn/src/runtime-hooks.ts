@@ -6,11 +6,8 @@ import {
 } from "./runtime-hook-state.js";
 import {
   guardWorkflowTool,
-  isAskTool,
-  isExternalConfirmationAsk,
   normalize,
   recordWorkflowToolResult,
-  validateMarkedAsk,
 } from "./runtime-hook-workflow.js";
 
 export { withStateScope } from "./runtime-hook-state.js";
@@ -35,7 +32,6 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
   const input = event.params && typeof event.params === "object" ? event.params :
     event.arguments && typeof event.arguments === "object" ? event.arguments : {};
   const tool = normalize(raw);
-  const askTool = isAskTool(raw);
 
   if (SHELL_TOOLS.has(raw.toLowerCase())) {
     const command = [input.command, input.cmd, input.script, input.input].filter(text).join("\n");
@@ -43,12 +39,8 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
       ? denyStructured("INTEGRATION_REQUIRED", "Provider writes must use the declared MCP tool, not shell or curl.")
       : undefined;
   }
-  if (!askTool && tool !== "create_with_distributions") return undefined;
-  if (askTool && !isExternalConfirmationAsk(input)) return undefined;
-
-  const current = store(rootDir);
-  if (askTool) return validateMarkedAsk(input, current.data);
   if (tool !== "create_with_distributions") return undefined;
+  const current = store(rootDir);
   return guardWorkflowTool(event, tool, input, current, rootDir);
 }
 
@@ -60,7 +52,7 @@ export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
   recordWorkflowToolResult(
     event,
     raw,
-    tool === "create_with_distributions" ? tool : undefined,
+    tool,
     input,
     rootDir,
   );

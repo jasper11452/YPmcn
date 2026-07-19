@@ -1,24 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ypmcn.local/schemas/workflow-state.schema.json",
-  "title": "YPmcn Database-Derived Workflow Projection",
-  "description": "Workflow phase projection derived from committed provider database facts; provider output remains unadvertised.",
+  "title": "YPmcn Local Workflow Orchestration State",
+  "description": "Session-scoped local JSON state recorded from actual Tool results; Provider output remains business evidence but does not drive orchestration phase.",
   "type": "object",
   "required": [
-    "projection_status",
     "phase",
-    "updated_at"
+    "next_action",
+    "waiting_for",
+    "transition_seq",
+    "updated_at_ms"
   ],
   "properties": {
-    "projection_status": {
-      "const": "database-derived"
-    },
     "phase": {
       "enum": [
         "requirement_draft",
         "requirement_ready",
         "candidate_pool_ready",
         "mcn_planning",
+        "inquiry_fields_ready",
         "waiting_mcn_return",
         "candidate_pool_enriched",
         "recommendation_ready",
@@ -28,35 +28,14 @@
         "closed"
       ]
     },
-    "requirement_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "mcn_recommendation_id": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Local confirmation binding only; never a current Endpoint provider argument."
-    },
-    "project_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "mcn_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "inquiry_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "run_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "updated_at": {
-      "type": "string",
-      "format": "date-time"
-    }
+    "next_action": {"type": ["string", "null"]},
+    "waiting_for": {"type": ["string", "null"]},
+    "transition_seq": {"type": "integer", "minimum": 0},
+    "updated_at_ms": {"type": ["integer", "null"]},
+    "requirement_id": {"type": "string", "minLength": 1},
+    "platform": {"enum": ["xiaohongshu", "douyin"]},
+    "quantity_total": {"type": "integer", "minimum": 1},
+    "run_id": {"type": "string", "minLength": 1}
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }

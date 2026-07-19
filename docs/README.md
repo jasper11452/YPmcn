@@ -29,11 +29,11 @@
 | Profile / 状态 | `mvp-v2` / `approved` |
 | 正式契约域 | 8 个 |
 | MCP Tool | 15 个（必需 15，可选 0） |
-| Workflow / Hook | 11 个阶段 / 4 个事件 |
+| Workflow / Hook | 12 个阶段 / 4 个事件 |
 | 数据库证明 | 5 项不变量，`development-observed` |
 | 算法定义 | `external-unverified` |
 | 兼容检测 | `legacy-1.9.4` |
-| Spec 摘要 | `sha256:8553e3ad47e10091b43058fabeb68e87713832ba4e13888ad79c8f76603e7ab3` |
+| Spec 摘要 | `sha256:7c79d92371eeddd6c63c66cde1f266a235e45024a7450092c9982f9780b07d53` |
 <!-- human-docs:spec-summary:end -->
 
 ## 五条原则

@@ -1,11 +1,12 @@
 {
-  "schema_version": 11,
+  "schema_version": 13,
   "confirmations": {},
-  "trusted_ids": [],
-  "blocked_requirement_semantics": {},
-  "supply_plans": {},
-  "field_selections": {},
-  "trusted_relations": [],
-  "workflow_states": {},
-  "prompt_epoch": 0
+  "workflow": {
+    "phase": "requirement_draft",
+    "next_action": "validate_requirement",
+    "waiting_for": null,
+    "transition_seq": 0,
+    "updated_at_ms": null
+  },
+  "workflow_events": []
 }

@@ -1,33 +1,27 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
 
 import plugin, { createYpmcnPlugin, YPMCN_FAST_PATH } from "../dist/index.js";
 
 const tempDir = mkdtempSync(join(tmpdir(), "ypmcn-native-hooks-"));
 const stateFile = join(tempDir, "state", "confirmation_guard.json");
-const templateFile = join(tempDir, "skills", "media-assistant", "assets", "wecom_inquiry_template.txt");
 const hooks = new Map();
 const UNRESOLVED_BRIEF = "找5位小红书达人，单达人预算口径待确认，明天提报。";
 const contract = JSON.parse(readFileSync(new URL("../../spec/mcp.json", import.meta.url), "utf8"));
 
 const distributionParams = (overrides = {}) => ({
-  projectName: "测试项目",
-  deadline: "2099-07-17T18:00:00+08:00",
+  requirement_id: "requirement-1",
   columns: [{ field_key: "creator_name", field_name: "达人名称" }],
   supplierIds: ["supplier-1"],
-  prefillRows: [],
-  prefillRowsBySupplier: { "supplier-1": [] },
+  description: JSON.stringify({ title: "测试项目", platform: "小红书", price: { 图文: "5000元以内" } }),
   ...overrides,
 });
 
 before(() => {
-  mkdirSync(dirname(templateFile), { recursive: true });
-  copyFileSync(fileURLToPath(new URL("../skills/media-assistant/assets/wecom_inquiry_template.txt", import.meta.url)), templateFile);
   plugin.register({
     rootDir: tempDir,
     logger: { error() {} },
@@ -41,10 +35,6 @@ beforeEach(() => {
 
 after(() => rmSync(tempDir, { recursive: true, force: true }));
 
-function confirmationId(result) {
-  return /confirmation_id=([0-9a-f-]{36})/i.exec(result?.blockReason ?? "")?.[1];
-}
-
 function sessionStateFile(sessionKey) {
   const hash = createHash("sha256").update(sessionKey).digest("hex").slice(0, 24);
   return join(tempDir, "state", "sessions", hash, "confirmation_guard.json");
@@ -54,35 +44,20 @@ async function guard(toolName, params = {}, toolCallId, context = {}) {
   return hooks.get("before_tool_call")({ toolName, params, toolCallId }, context);
 }
 
-async function requestConfirmation(params = distributionParams(), context = {}, toolCallId = "call-send-prepare") {
-  const blocked = await guard("mcp__ypmcn__create_with_distributions", params, toolCallId, context);
-  assert.equal(blocked?.block, true);
-  assert.match(blocked.blockReason, /YP_CONFIRMATION_REQUIRED/);
-  const id = confirmationId(blocked);
-  assert.ok(id);
-  return { id, params, blocked };
+async function requestApproval(params = distributionParams(), context = {}, toolCallId = "call-send") {
+  const result = await guard("mcp__ypmcn__create_with_distributions", params, toolCallId, context);
+  assert.equal(result?.block, undefined);
+  assert.equal(result?.requireApproval?.title, "企微外发确认");
+  assert.equal(result.requireApproval.severity, "warning");
+  assert.equal(typeof result.requireApproval.onResolution, "function");
+  return { result, params, toolCallId };
 }
 
-async function answerConfirmation(id, context = {}, answer = "确认发送", flattened = false) {
-  const params = {
-    questions: [{
-      header: "外发确认",
-      question: `是否确认本次企微外发？ [YP_CONFIRMATION:${id}]`,
-      options: [{ label: "确认发送" }, { label: "需要修改" }, { label: "取消" }],
-    }],
-  };
-  assert.equal(await guard("AskUserQuestion", params, undefined, context), undefined);
-  await hooks.get("after_tool_call")({
-    toolName: "AskUserQuestion",
-    params,
-    result: flattened
-      ? `${params.questions[0].question}: ${answer}`
-      : { status: "submitted", answers: [{ selected_labels: [answer] }] },
-  }, context);
-  return params;
+async function recordTool(toolName, params, result, context = {}, toolCallId) {
+  await hooks.get("after_tool_call")({ toolName, params, result, toolCallId }, context);
 }
 
-describe("YP Action native external-send hook", () => {
+describe("YP Action native hooks", () => {
   it("registers the expected runtime hooks", () => {
     assert.deepEqual(
       [...hooks.keys()].sort(),
@@ -90,201 +65,212 @@ describe("YP Action native external-send hook", () => {
     );
   });
 
-  it("keeps standard-Brief guidance without turning it into a global Tool gate", async () => {
+  it("injects the local JSON orchestration state without turning ordinary tools into gates", async () => {
     const prompt = await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     assert.equal(prompt.prependSystemContext, YPMCN_FAST_PATH);
-    assert.match(prompt.prependContext, /YPmcn authoritative requirement clock/);
+    assert.match(prompt.prependContext, /authoritative local orchestration state/);
+    assert.match(prompt.prependContext, /"next_action":"validate_requirement"/);
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 13);
 
     for (const [toolName, params] of [
       ["read", { file_path: "/tmp/SKILL.md" }],
-      ["resources_read", { uri: "skill://media-assistant" }],
-      ["ypmcn-mcp__prompts_get", { name: "media-assistant" }],
-      ["web_search", { query: "test" }],
+      ["AskUserQuestion", { questions: [{ header: "供给确认" }] }],
       ["mcp__ypmcn__validate_requirement", { payload: {} }],
+      ["mcp__ypmcn__rank_mcns", { id: "any", platform: "xiaohongshu" }],
     ]) {
-      assert.equal(await guard(toolName, params), undefined, `${toolName} should not be gated`);
+      assert.equal(await guard(toolName, params), undefined, toolName);
     }
   });
 
-  it("allows every declared business Tool except the external-send Tool", async () => {
-    const tools = [...contract.requiredTools, ...contract.optionalTools]
-      .filter((name) => name !== "create_with_distributions");
-    for (const name of tools) {
-      assert.equal(await guard(`mcp__ypmcn__${name}`, {}), undefined, name);
+  it("allows every declared business Tool except that send receives native approval", async () => {
+    for (const name of [...contract.requiredTools, ...contract.optionalTools]) {
+      const result = await guard(`mcp__ypmcn__${name}`, name === "create_with_distributions" ? distributionParams() : {});
+      if (name === "create_with_distributions") assert.ok(result.requireApproval);
+      else assert.equal(result, undefined, name);
     }
   });
 
-  it("does not validate ordinary AskUserQuestion or supply-plan questions", async () => {
-    assert.equal(await guard("AskUserQuestion", {
-      questions: [{ header: "参数确认", question: "请选择平台？", options: ["小红书", "抖音"] }],
-    }), undefined);
-    assert.equal(await guard("AskUserQuestion", {
-      questions: [{ header: "供给确认", question: "是否采用当前方案？", options: ["确认供给方案", "调整方案"] }],
-    }), undefined);
-    assert.equal(await guard("AskUserQuestion", {
-      questions: [{ header: "草稿操作", question: "是否发送内部草稿？", options: ["确认发送", "取消"] }],
-    }), undefined);
-    assert.equal(existsSync(stateFile), false);
-  });
-
-  it("blocks only a provider send attempted through shell while allowing read-only shell use", async () => {
+  it("blocks only provider send bypasses through shell", async () => {
     const blocked = await guard("bash", {
       command: "curl -X POST https://provider.invalid/api/projects/create-with-distributions",
     });
     assert.equal(blocked?.block, true);
     assert.match(blocked.blockReason, /INTEGRATION_REQUIRED/);
-
-    assert.equal(await guard("bash", {
-      command: "rg create_with_distributions YPmcn/skills/media-assistant/SKILL.md",
-    }), undefined);
+    assert.equal(await guard("bash", { command: "rg create_with_distributions YPmcn/README.md" }), undefined);
   });
 
-  it("requires one explicit confirmation without workflow, rank, supply, or ID prerequisites", async () => {
-    const { id, params } = await requestConfirmation();
-    await answerConfirmation(id);
-    assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, "call-send-1"), undefined);
-  });
+  it("binds a native warning to the original pending call so approval can resume it directly", async () => {
+    const { result, params, toolCallId } = await requestApproval(distributionParams({
+      supplierIds: ["supplier-1", "supplier-2"],
+      description: JSON.stringify({ title: "真实企微消息" }),
+    }));
+    assert.match(result.requireApproval.description, /2 家机构/);
+    assert.match(result.requireApproval.description, /真实企微消息/);
+    assert.ok(Array.from(result.requireApproval.description).length <= 256);
 
-  it("binds the visible confirmation to the stored safe summary", async () => {
-    const params = distributionParams({ projectName: "真实项目", supplierIds: ["a", "b"] });
-    const { id } = await requestConfirmation(params);
-    const ask = {
-      questions: [{
-        header: "外发确认",
-        question: `伪造项目 [YP_CONFIRMATION:${id}]`,
-        options: [{ label: "确认发送" }, { label: "需要修改" }],
-      }],
-    };
-    assert.equal(await guard("AskUserQuestion", ask), undefined);
-    assert.match(ask.questions[0].question, /项目名=真实项目/);
-    assert.match(ask.questions[0].question, /机构数=2/);
-    assert.doesNotMatch(ask.questions[0].question, /伪造项目/);
-  });
+    await result.requireApproval.onResolution("allow-once");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    const receipt = state.confirmations[state.latest_external_confirmation_id];
+    assert.equal(receipt.status, "in_flight");
+    assert.equal(receipt.tool_call_id, toolCallId);
 
-  it("allows the confirmed request once and asks again before replay", async () => {
-    const { id, params } = await requestConfirmation(distributionParams({ projectName: "一次性确认" }));
-    await answerConfirmation(id);
-    assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, "call-once-1"), undefined);
-    await hooks.get("after_tool_call")({
-      toolName: "mcp__ypmcn__create_with_distributions",
+    // If the host re-enters before_tool_call while resuming, the exact call is allowed without a second popup.
+    assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, toolCallId), undefined);
+    await recordTool(
+      "mcp__ypmcn__create_with_distributions",
       params,
-      toolCallId: "call-once-1",
-      result: { success: true, data: { project_id: "project-1" }, error: null },
-    }, {});
-
-    const replay = await guard("mcp__ypmcn__create_with_distributions", params, "call-once-2");
-    assert.match(replay.blockReason, /YP_CONFIRMATION_REQUIRED/);
-    assert.notEqual(confirmationId(replay), id);
+      { success: true, data: { project_id: "project-1" }, error: null },
+      {},
+      toolCallId,
+    );
+    const consumed = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(consumed.confirmations[consumed.latest_external_confirmation_id].status, "consumed");
+    assert.equal(consumed.workflow.phase, "waiting_mcn_return");
   });
 
-  it("requires a separate confirmation when any send parameter changes", async () => {
-    const { id, params } = await requestConfirmation(distributionParams({ projectName: "参数绑定" }));
-    const changed = { ...params, supplierIds: ["supplier-2"] };
-    const blocked = await guard("mcp__ypmcn__create_with_distributions", changed, "call-changed");
-    assert.match(blocked.blockReason, /YP_CONFIRMATION_REQUIRED/);
-    assert.notEqual(confirmationId(blocked), id);
+  it("keeps long WeCom previews within the native approval description limit", async () => {
+    const { result } = await requestApproval(distributionParams({
+      description: JSON.stringify({ content: "长消息".repeat(300) }),
+    }), {}, "call-long-preview");
+    assert.equal(Array.from(result.requireApproval.description).length, 256);
+    assert.match(result.requireApproval.description, /…$/);
   });
 
-  it("does not authorize modification, cancellation, or ambiguous host results", async () => {
-    for (const [index, answer] of ["需要修改", "取消", "确认发送 / 需要修改"].entries()) {
-      const { id, params } = await requestConfirmation(distributionParams({ projectName: `拒绝-${index}` }));
-      await answerConfirmation(id, {}, answer);
-      const blocked = await guard("mcp__ypmcn__create_with_distributions", params, `call-denied-${index}`);
-      assert.match(blocked.blockReason, /YP_CONFIRMATION_REQUIRED/);
+  it("does not authorize deny, timeout, or a changed request", async () => {
+    for (const [index, decision] of ["deny", "timeout", "cancelled"].entries()) {
+      const { result, params } = await requestApproval(
+        distributionParams({ requirement_id: `requirement-${index}` }),
+        {},
+        `call-${index}`,
+      );
+      await result.requireApproval.onResolution(decision);
+      const retry = await guard("mcp__ypmcn__create_with_distributions", params, `call-${index}-retry`);
+      assert.ok(retry.requireApproval, decision);
+    }
+
+    const first = await requestApproval(distributionParams(), {}, "call-original");
+    await first.result.requireApproval.onResolution("allow-once");
+    const changed = await guard(
+      "mcp__ypmcn__create_with_distributions",
+      { ...first.params, supplierIds: ["supplier-other"] },
+      "call-original",
+    );
+    assert.ok(changed.requireApproval);
+  });
+
+  it("requires a fresh approval after success or unknown result", async () => {
+    for (const [index, eventResult] of [
+      [0, { success: true, data: {}, error: null }],
+      [1, undefined],
+    ]) {
+      const params = distributionParams({ requirement_id: `requirement-replay-${index}` });
+      const prepared = await requestApproval(params, {}, `call-replay-${index}`);
+      await prepared.result.requireApproval.onResolution("allow-once");
+      if (eventResult) {
+        await recordTool("mcp__ypmcn__create_with_distributions", params, eventResult, {}, `call-replay-${index}`);
+      } else {
+        await hooks.get("after_tool_call")({
+          toolName: "mcp__ypmcn__create_with_distributions",
+          params,
+          toolCallId: `call-replay-${index}`,
+          error: "connection lost",
+        }, {});
+      }
+      assert.ok((await guard(
+        "mcp__ypmcn__create_with_distributions",
+        params,
+        `call-replay-${index}-next`,
+      )).requireApproval);
     }
   });
 
-  it("accepts the flattened YP Action confirmation result", async () => {
-    const { id, params } = await requestConfirmation(distributionParams({ projectName: "扁平确认" }));
-    await answerConfirmation(id, {}, "确认发送", true);
-    assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, "call-flat"), undefined);
+  it("records successful local transitions and popup commands without blocking ordinary calls", async () => {
+    const validateInput = { payload: { platform: "xiaohongshu", quantityTotal: 5 } };
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      validateInput,
+      { success: true, data: { id: "requirement-local" }, error: null },
+    );
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.deepEqual(
+      [state.workflow.phase, state.workflow.next_action, state.workflow.requirement_id],
+      ["requirement_ready", "search_creators", "requirement-local"],
+    );
+
+    await recordTool(
+      "mcp__ypmcn__search_creators",
+      { id: "requirement-local" },
+      { success: true, data: { candidate_count: 12, suggested_expansion_count: 3 }, error: null },
+    );
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "confirm_search_results");
+    assert.equal(state.workflow.waiting_for, "user");
+    assert.equal(state.workflow.matched_creator_count, 12);
+
+    const question = {
+      questions: [{
+        header: "供给确认",
+        question: "是否按以上供给建议开始MCN赛马？",
+        options: ["确认并开始MCN赛马", "调整拓展数量"],
+      }],
+    };
+    await recordTool("AskUserQuestion", question, {
+      status: "submitted",
+      answers: [{ selected_labels: ["确认并开始MCN赛马"] }],
+    });
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "rank_mcns");
+    assert.equal(state.workflow.waiting_for, null);
+
+    await recordTool(
+      "mcp__ypmcn__rank_mcns",
+      { id: "requirement-local", platform: "xiaohongshu", minimum_mcn_count: 7 },
+      { success: true, data: { suppliers: [] }, error: null },
+    );
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "mcn_planning");
+    assert.equal(state.workflow.mcn_race_size, 7);
+    assert.equal(state.workflow.next_action, "confirm_mcn_selection");
+    assert.ok(state.workflow_events.length >= 4);
   });
 
-  it("requires a fresh confirmation after an unknown send result instead of permanently blocking", async () => {
-    const { id, params } = await requestConfirmation(distributionParams({ projectName: "未知结果" }));
-    await answerConfirmation(id);
-    assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, "call-unknown-1"), undefined);
-    await hooks.get("after_tool_call")({
-      toolName: "mcp__ypmcn__create_with_distributions",
-      params,
-      toolCallId: "call-unknown-1",
-      error: new Error("connection lost"),
-    }, {});
-
-    const retry = await guard("mcp__ypmcn__create_with_distributions", params, "call-unknown-2");
-    assert.match(retry.blockReason, /YP_CONFIRMATION_REQUIRED/);
-    assert.notEqual(confirmationId(retry), id);
+  it("keeps failed Tool results from advancing the local phase", async () => {
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload: {} },
+      { success: false, error: { code: "INVALID_INPUT" } },
+    );
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "requirement_draft");
+    assert.equal(state.workflow.next_action, "recover_validate_requirement");
   });
 
-  it("isolates confirmations by host session", async () => {
+  it("isolates workflow and approval state by host session", async () => {
     const first = { sessionKey: "session-one" };
     const second = { sessionKey: "session-two" };
-    const params = distributionParams({ projectName: "会话隔离" });
-    const { id } = await requestConfirmation(params, first);
-    await answerConfirmation(id, first);
-    assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, "call-session-1", first), undefined);
-
-    const blocked = await guard("mcp__ypmcn__create_with_distributions", params, "call-session-2", second);
-    assert.match(blocked.blockReason, /YP_CONFIRMATION_REQUIRED/);
-    assert.notEqual(confirmationId(blocked), id);
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, first);
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, second);
+    const approval = await requestApproval(distributionParams(), first, "call-session-one");
+    await approval.result.requireApproval.onResolution("allow-once");
     assert.ok(readFileSync(sessionStateFile("session-one"), "utf8"));
     assert.ok(readFileSync(sessionStateFile("session-two"), "utf8"));
+    const secondState = JSON.parse(readFileSync(sessionStateFile("session-two"), "utf8"));
+    assert.deepEqual(secondState.confirmations, {});
   });
 
-  it("stores only fingerprints and the user-facing send summary", async () => {
-    await requestConfirmation(distributionParams({
-      projectName: "状态脱敏",
-      prefillRows: [{ private_note: "should-not-be-stored" }],
+  it("stores fingerprints and workflow metadata without persisting the message body", async () => {
+    await requestApproval(distributionParams({
+      description: JSON.stringify({ private_note: "should-not-be-stored" }),
     }));
     const persisted = readFileSync(stateFile, "utf8");
     assert.match(persisted, /"input_fingerprint": "[0-9a-f]{64}"/);
-    assert.match(persisted, /"safe_summary"/);
+    assert.match(persisted, /"workflow"/);
     assert.doesNotMatch(persisted, /should-not-be-stored/);
   });
 
-  it("expires stale unknown receipts and permits a newly confirmed attempt", async () => {
-    const { id, params } = await requestConfirmation(distributionParams({ projectName: "过期状态" }));
-    await answerConfirmation(id);
-    assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, "call-expire-1"), undefined);
-    await hooks.get("after_tool_call")({
-      toolName: "mcp__ypmcn__create_with_distributions",
-      params,
-      toolCallId: "call-expire-1",
-      error: new Error("connection lost"),
-    }, {});
-    const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    state.confirmations[id].expires_at_ms = Date.now() - 1;
-    writeFileSync(stateFile, JSON.stringify(state), "utf8");
-
-    const retry = await guard("mcp__ypmcn__create_with_distributions", params, "call-expire-2");
-    assert.match(retry.blockReason, /YP_CONFIRMATION_REQUIRED/);
-    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id], undefined);
-  });
-
-  it("still requests confirmation when provider arguments are incomplete", async () => {
-    const blocked = await guard("mcp__ypmcn__create_with_distributions", {}, "call-provider-validation");
-    assert.match(blocked.blockReason, /YP_CONFIRMATION_REQUIRED/);
-    assert.doesNotMatch(blocked.blockReason, /BLOCKED_INVALID|INVALID_INPUT|SCHEMA_MISMATCH/);
-  });
-
-  it("fails closed only for the external confirmation when its fixed template is unavailable", async () => {
-    const rootDir = mkdtempSync(join(tmpdir(), "ypmcn-no-template-"));
-    const localHooks = new Map();
-    try {
-      createYpmcnPlugin().register({
-        rootDir,
-        logger: { error() {} },
-        on(name, handler) { localHooks.set(name, handler); },
-      });
-      assert.equal(await localHooks.get("before_tool_call")({ toolName: "read", params: {} }, {}), undefined);
-      const blocked = await localHooks.get("before_tool_call")({
-        toolName: "mcp__ypmcn__create_with_distributions",
-        params: distributionParams(),
-      }, {});
-      assert.match(blocked.blockReason, /INTEGRATION_REQUIRED.*template/);
-    } finally {
-      rmSync(rootDir, { recursive: true, force: true });
-    }
+  it("still presents approval when provider arguments are incomplete because ordinary schema validation is not a Hook gate", async () => {
+    const result = await guard("mcp__ypmcn__create_with_distributions", {}, "call-provider-validation");
+    assert.ok(result.requireApproval);
   });
 
   it("fails open for ordinary tools and closed for external send when the guard itself throws", async () => {
@@ -301,9 +287,6 @@ describe("YP Action native external-send hook", () => {
       params: distributionParams(),
     }, {});
     assert.deepEqual(result, { block: true, blockReason: "YPmcn guard unavailable: guard exploded" });
-    assert.deepEqual(errors, [
-      "before_tool_call guard failed: guard exploded",
-      "before_tool_call guard failed: guard exploded",
-    ]);
+    assert.equal(errors.length, 2);
   });
 });
