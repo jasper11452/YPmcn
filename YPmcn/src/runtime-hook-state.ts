@@ -88,8 +88,7 @@ export function denyStructured(code: string, context: string): Json {
   };
 }
 
-export function store(rootDir: string): GuardStore {
-  const path = statePath(rootDir);
+function storeAtPath(path: string): GuardStore {
   const data = load(path);
   let changed = data.schema_version !== 14;
   data.schema_version = 14;
@@ -139,4 +138,12 @@ export function store(rootDir: string): GuardStore {
   }
   if (changed) save(path, data);
   return { path, data };
+}
+
+export function store(rootDir: string): GuardStore {
+  return storeAtPath(statePath(rootDir));
+}
+
+export function globalStore(rootDir: string): GuardStore {
+  return storeAtPath(join(rootDir, "state", "confirmation_guard.json"));
 }

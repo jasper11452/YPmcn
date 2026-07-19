@@ -4,6 +4,7 @@ import {
   CONFIRMATION_TTL_MS,
   denyStructured,
   fingerprint,
+  globalStore,
   type ConfirmationStatus,
   type GuardStore,
   type Json,
@@ -650,34 +651,49 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): vo
 
 function recordExternalSendDecision(event: Json, input: Json, rootDir: string): void {
   const askInputFingerprint = fingerprint(input);
-  const current = store(rootDir);
-  let pending = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.kind === "external_send" && receipt.confirmation_mode === "ask_user_question" &&
-    receipt.status === "pending" && receipt.ask_input_fingerprint === askInputFingerprint
-  );
-  let answer = pending ? answerForQuestion(event, input) : undefined;
+  const matchPending = (candidate: GuardStore): { pending: [string, Json]; answer?: string } | undefined => {
+    let pending = Object.entries<Json>(candidate.data.confirmations).find(([, receipt]) =>
+      receipt.kind === "external_send" && receipt.confirmation_mode === "ask_user_question" &&
+      receipt.status === "pending" && receipt.ask_input_fingerprint === askInputFingerprint
+    );
+    let answer = pending ? answerForQuestion(event, input) : undefined;
 
-  // Some hosts normalize or depth-truncate AskUserQuestion params before the
-  // after_tool_call hook. Their result still echoes the exact rendered question
-  // and selected label, so bind that echo back to one unique pending receipt.
-  if (!pending) {
-    const echoed = echoedExternalSendSelection(event);
-    const matches = Object.entries<Json>(current.data.confirmations).flatMap(([id, receipt]) => {
-      if (receipt.kind !== "external_send" || receipt.confirmation_mode !== "ask_user_question" ||
-          receipt.status !== "pending" || !echoed) return [];
-      const echoedAskInput = externalSendAskInputForQuestion(echoed.question, receipt.safe_summary);
-      return receipt.ask_input_fingerprint === fingerprint(echoedAskInput)
-        ? [{ id, receipt, answer: echoed.answer }]
-        : [];
-    });
-    if (matches.length === 1) {
-      pending = [matches[0].id, matches[0].receipt];
-      answer = matches[0].answer;
+    // Some hosts normalize or depth-truncate AskUserQuestion params before the
+    // after_tool_call hook. Their result still echoes the exact rendered question
+    // and selected label, so bind that echo back to one unique pending receipt.
+    if (!pending) {
+      const echoed = echoedExternalSendSelection(event);
+      const matches = Object.entries<Json>(candidate.data.confirmations).flatMap(([id, receipt]) => {
+        if (receipt.kind !== "external_send" || receipt.confirmation_mode !== "ask_user_question" ||
+            receipt.status !== "pending" || !echoed) return [];
+        const echoedAskInput = externalSendAskInputForQuestion(echoed.question, receipt.safe_summary);
+        return receipt.ask_input_fingerprint === fingerprint(echoedAskInput)
+          ? [{ id, receipt, answer: echoed.answer }]
+          : [];
+      });
+      if (matches.length === 1) {
+        pending = [matches[0].id, matches[0].receipt];
+        answer = matches[0].answer;
+      }
+    }
+    return pending ? { pending, answer } : undefined;
+  };
+
+  let current = store(rootDir);
+  let matched = matchPending(current);
+  if (!matched) {
+    const fallback = globalStore(rootDir);
+    if (fallback.path !== current.path) {
+      const fallbackMatch = matchPending(fallback);
+      if (fallbackMatch) {
+        current = fallback;
+        matched = fallbackMatch;
+      }
     }
   }
-  if (!pending) return;
+  if (!matched) return;
 
-  const [id, receipt] = pending;
+  const { pending: [id, receipt], answer } = matched;
   receipt.status = !event.error && event.result?.isError !== true && answer === EXTERNAL_SEND_CONFIRM_LABEL
     ? "approved" satisfies ConfirmationStatus
     : "denied" satisfies ConfirmationStatus;

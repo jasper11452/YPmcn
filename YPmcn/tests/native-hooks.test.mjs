@@ -214,6 +214,24 @@ describe("YP Action native hooks", () => {
     ), undefined);
   });
 
+  it("matches a global preflight receipt when AskUserQuestion gains session context", async () => {
+    const prepared = await requestConfirmation(distributionParams(), {}, "call-global-preflight");
+    await recordTool("AskUserQuestion", prepared.askInput, {
+      content: [{
+        type: "text",
+        text: `${prepared.askInput.questions[0].question}: 确认发送`,
+      }],
+    }, { sessionKey: "session-context-arrived-late" });
+
+    const globalState = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(globalState.confirmations[globalState.latest_external_confirmation_id].status, "approved");
+    assert.equal(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      prepared.params,
+      "call-global-preflight-execute",
+    ), undefined);
+  });
+
   it("keeps the full multiline WeCom message in the scrollable AskUserQuestion body", async () => {
     const message = `您好，现有以下合作需求：\n${"长消息".repeat(300)}\n以上为完整消息结尾。`;
     const prepared = await requestConfirmation(distributionParams({
