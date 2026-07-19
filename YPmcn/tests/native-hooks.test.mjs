@@ -68,7 +68,7 @@ const supplyPlanQuestion = (id, plan) => {
   return [
     `【真实数据】需求人数=${plan.demand_count}｜候选达人=${plan.database_candidate_count}｜供给倍数=${plan.supply_demand_ratio}`,
     `【推荐方案】目标提报=${plan.target_submission_count}｜预计有效=${plan.estimated_valid_return_count}｜预计缺口=${plan.estimated_gap_count}｜推荐MCN=${plan.recommended_mcn_count}｜MCN覆盖达人=${plan.mcn_covered_creator_count}｜人工补充=${plan.recommended_manual_creator_count}｜MCN人工比例=${plan.mcn_manual_creator_ratio}｜建议手扒占比=${manualShare}%`,
-    `【影响】确认后写入MCN排序${id ? `｜[YP_SUPPLY_PLAN_CONFIRMATION:${id}]` : ""}`,
+    `【影响】确认后锁定供给方案并继续外发准备${id ? `｜[YP_SUPPLY_PLAN_CONFIRMATION:${id}]` : ""}`,
   ].join("\n");
 };
 
@@ -92,6 +92,24 @@ after(() => {
 
 function confirmationId(result) {
   return /confirmation_id=([0-9a-f-]{36})/i.exec(result.blockReason)?.[1];
+}
+
+function pendingSupplyConfirmationId(requirementId) {
+  const state = JSON.parse(readFileSync(stateFile, "utf8"));
+  const entry = Object.entries(state.confirmations).find(([, receipt]) =>
+    receipt.kind === "supply_plan" && receipt.requirement_id === requirementId && receipt.status === "pending"
+  );
+  assert.ok(entry, `expected pending supply confirmation for ${requirementId}`);
+  return entry[0];
+}
+
+function clearSupplyConfirmations() {
+  const state = JSON.parse(readFileSync(stateFile, "utf8"));
+  for (const [id, receipt] of Object.entries(state.confirmations)) {
+    if (receipt.kind === "supply_plan") delete state.confirmations[id];
+  }
+  delete state.latest_supply_plan_confirmation_id;
+  writeFileSync(stateFile, JSON.stringify(state), "utf8");
 }
 
 async function requestConfirmation(params = distributionParams()) {
@@ -159,6 +177,21 @@ async function recordSearch(requirementId, plan = supplyPlan(), shape = "nested"
     toolName: "mcp__ypmcn__search_creators",
     params: { id: requirementId },
     result,
+  }, {});
+}
+
+async function recordSuccessfulRank(params, suffix) {
+  const toolCallId = `call-rank-${suffix}`;
+  assert.equal(await hooks.get("before_tool_call")({
+    toolName: "mcp__ypmcn__rank_mcns",
+    params,
+    toolCallId,
+  }, {}), undefined);
+  await hooks.get("after_tool_call")({
+    toolName: "mcp__ypmcn__rank_mcns",
+    params,
+    toolCallId,
+    result: { success: true, data: { mcn_run_id: `mcn-run-${suffix}` }, error: null },
   }, {});
 }
 
@@ -271,8 +304,8 @@ describe("YP Action native hook guard", () => {
     assert.match(result.prependSystemContext, /coverageCheck uses atomCount, mappedCount, preservedCount, and unresolvedCount/);
     assert.match(result.prependSystemContext, /requirement_ready.*search_creators/);
     assert.match(result.prependSystemContext, /candidate_pool_ready.*rank_mcns/);
-    assert.match(result.prependSystemContext, /replaces the question body with the authoritative supply plan/);
-    assert.match(result.prependSystemContext, /Do not reconstruct the long search output/);
+    assert.match(result.prependSystemContext, /immediately call rank_mcns.*do not insert AskUserQuestion/);
+    assert.match(result.prependSystemContext, /If search_creators or rank_mcns fails.*native AskUserQuestion/);
     assert.match(result.prependSystemContext, /notification_template/);
     assert.match(result.prependSystemContext, /export_csv/);
     assert.match(result.prependSystemContext, /successful WeCom distribution plus completed recovery/);
@@ -519,6 +552,44 @@ describe("YP Action native hook guard", () => {
     }, {});
     assert.equal(invalid.block, true);
     assert.match(invalid.blockReason, /INVALID_INPUT/);
+  });
+
+  it("keeps sanitized validate_requirement provenance across the next prompt turn", async () => {
+    const requirementId = "7d632c900dc74f36aa538a5c8a44eedd";
+    const structuredContent = {
+      success: true,
+      data: { id: requirementId },
+      workflow_state: { phase: "requirement_ready" },
+      allowed_actions: ["search_creators"],
+      error: null,
+    };
+
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: requirementPayload() },
+      result: {
+        content: [{
+          type: "text",
+          text: "Requirement validated successfully.",
+        }],
+        details: {
+          mcpServer: "ypmcn",
+          mcpTool: "validate_requirement",
+          structuredContent,
+        },
+      },
+    }, {});
+
+    const persisted = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(persisted.latest_requirement_id.value, requirementId);
+
+    await hooks.get("before_prompt_build")({ prompt: "继续", messages: [] }, {});
+    const allowed = await hooks.get("before_tool_call")({
+      toolName: "ypmcn-mcp__search_creators",
+      params: { id: requirementId },
+      toolCallId: "call-search-provenance-sanitized",
+    }, {});
+    assert.equal(allowed, undefined);
   });
 
   it("allows a corrected read-only call immediately after a Hook denial", async () => {
@@ -907,7 +978,7 @@ describe("YP Action native hook guard", () => {
     }
   });
 
-  it("requires a valid provider supply plan for the same requirement", async () => {
+  it("requires a successful search result for the same requirement", async () => {
     const blocked = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns",
       params: { id: "req-without-provider-plan", platform: "xiaohongshu" },
@@ -928,15 +999,15 @@ describe("YP Action native hook guard", () => {
       );
       assert.match(stored.fingerprint, /^[0-9a-f]{64}$/);
       assert.ok(stored.expires_at_ms > stored.observed_at_ms);
-      const blocked = await hooks.get("before_tool_call")({
+      const allowed = await hooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__rank_mcns",
         params: { id: requirementId, platform: "xiaohongshu" },
       }, {});
-      assert.match(blocked.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
+      assert.equal(allowed, undefined);
     }
   });
 
-  it("accepts provider strategy changes but rejects malformed plan values", async () => {
+  it("continues to rank after successful search while keeping malformed supply plans out of confirmation state", async () => {
     const invalidPlans = [
       supplyPlan({ estimated_gap_count: -1 }),
       supplyPlan({ recommended_manual_creator_count: -1, mcn_manual_creator_ratio: "18:-1" }),
@@ -946,32 +1017,41 @@ describe("YP Action native hook guard", () => {
       const requirementId = `req-invalid-plan-${index}`;
       await recordSearch(requirementId);
       await recordSearch(requirementId, invalidPlans[index]);
-      const blocked = await hooks.get("before_tool_call")({
+      const persisted = JSON.parse(readFileSync(stateFile, "utf8"));
+      assert.equal(persisted.supply_plans[requirementId], undefined);
+      const allowed = await hooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__rank_mcns",
         params: { id: requirementId, platform: "xiaohongshu" },
       }, {});
-      assert.match(blocked.blockReason, /INTEGRATION_REQUIRED/);
+      assert.equal(allowed, undefined);
     }
 
     const changedStrategyId = "req-provider-strategy-change";
     await hooks.get("before_prompt_build")({ prompt: "provider strategy changed", messages: [] }, {});
     await recordSearch(changedStrategyId, supplyPlan({ estimated_gap_count: 3 }));
-    const confirmation = await hooks.get("before_tool_call")({
+    const allowed = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns", params: { id: changedStrategyId, platform: "xiaohongshu" },
     }, {});
-    assert.match(confirmation.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
+    assert.equal(allowed, undefined);
   });
 
   it("hydrates reconstructed supply values from the bound receipt and still rejects non-exact options", async () => {
     const params = { id: "req-forged-plan-popup", platform: "xiaohongshu" };
     await recordSearch(params.id);
-    const blocked = await hooks.get("before_tool_call")({ toolName: "mcp__ypmcn__rank_mcns", params }, {});
-    const id = confirmationId(blocked);
+    const id = pendingSupplyConfirmationId(params.id);
     const plan = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
     const question = supplyPlanQuestion(id, { ...plan, demand_count: 999 });
     const forgedParams = {
       questions: [{ question, options: [{ label: "确认供给方案" }, { label: "调整方案" }] }],
     };
+    const premature = await hooks.get("before_tool_call")({
+      toolName: "AskUserQuestion",
+      params: forgedParams,
+    }, {});
+    assert.match(premature.blockReason, /INVALID_PHASE.*rank_mcns/);
+
+    await hooks.get("before_prompt_build")({ prompt: "按状态继续排名", messages: [] }, {});
+    await recordSuccessfulRank(params, "forged-plan-popup");
     const forged = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
       params: forgedParams,
@@ -993,6 +1073,7 @@ describe("YP Action native hook guard", () => {
   });
 
   it("blocks an unbound supply confirmation popup before it can show reconstructed values", async () => {
+    clearSupplyConfirmations();
     const blocked = await hooks.get("before_tool_call")({
       toolName: "AskUserQuestion",
       params: {
@@ -1010,8 +1091,8 @@ describe("YP Action native hook guard", () => {
   it("replaces a dense supply confirmation with the compact bound summary", async () => {
     const params = { id: "req-dense-plan-popup", platform: "xiaohongshu" };
     await recordSearch(params.id);
-    const blocked = await hooks.get("before_tool_call")({ toolName: "mcp__ypmcn__rank_mcns", params }, {});
-    const id = confirmationId(blocked);
+    await recordSuccessfulRank(params, "dense-plan-popup");
+    const id = pendingSupplyConfirmationId(params.id);
     const plan = JSON.parse(readFileSync(stateFile, "utf8")).confirmations[id].safe_summary;
     const question = [
       `供给方案。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
@@ -1029,10 +1110,8 @@ describe("YP Action native hook guard", () => {
   it("fills omitted supply display fields from the receipt before accepting confirmation", async () => {
     const params = { id: "req-supply-incomplete", platform: "xiaohongshu" };
     await recordSearch(params.id);
-    const blocked = await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-incomplete-1",
-    }, {});
-    const id = confirmationId(blocked);
+    await recordSuccessfulRank(params, "supply-incomplete");
+    const id = pendingSupplyConfirmationId(params.id);
     const askParams = {
       questions: [{
         question: `供需比 2:1。[YP_SUPPLY_PLAN_CONFIRMATION:${id}]`,
@@ -1046,10 +1125,8 @@ describe("YP Action native hook guard", () => {
       params: askParams,
       result: { status: "submitted", answers: [{ selected_labels: ["确认供给方案"] }] },
     }, {});
-    const retried = await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-incomplete-2",
-    }, {});
-    assert.equal(retried, undefined);
+    const confirmed = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(confirmed.confirmations[id].status, "approved");
   });
 
   it("binds visible hard-filter counts instead of a stale unfiltered provider plan", async () => {
@@ -1114,31 +1191,24 @@ describe("YP Action native hook guard", () => {
     }, {}), undefined);
   });
 
-  it("requires a popup supply-plan confirmation before rank_mcns", async () => {
+  it("continues directly from successful search to one rank_mcns attempt", async () => {
     const params = { id: "req-supply-1", platform: "xiaohongshu" };
     await recordSearch(params.id);
-    const blocked = await hooks.get("before_tool_call")({
+    const allowed = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-1",
     }, {});
-    assert.equal(blocked.block, true);
-    assert.match(blocked.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
-    assert.match(blocked.blockReason, /header “供给确认”/);
-    const id = confirmationId(blocked);
-    await answerSupplyPlanConfirmation(id);
-    assert.equal(await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-2",
-    }, {}), undefined);
+    assert.equal(allowed, undefined);
     await hooks.get("after_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-2",
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-1",
       result: { success: true, data: { mcn_run_id: "mcn-run-1" }, error: null },
     }, {});
     const replay = await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-3",
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-mcn-2",
     }, {});
-    assert.match(replay.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
+    assert.match(replay.blockReason, /INVALID_PHASE.*already been consumed/);
   });
 
-  it("binds the supply confirmation immediately after search without probing rank_mcns", async () => {
+  it("keeps the supply confirmation available after direct ranking for the pre-send gate", async () => {
     const params = { id: "req-supply-direct-popup", platform: "xiaohongshu" };
     await recordSearch(params.id);
     const stateAfterSearch = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -1147,6 +1217,18 @@ describe("YP Action native hook guard", () => {
     );
     assert.ok(pending, "search_creators should create the pending supply confirmation");
     assert.equal(pending[1].request_fingerprint, null);
+
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params,
+      toolCallId: "call-rank-before-supply-popup",
+    }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params,
+      toolCallId: "call-rank-before-supply-popup",
+      result: { success: true, data: { mcn_run_id: "mcn-run-before-supply-popup" }, error: null },
+    }, {});
 
     const askParams = {
       questions: [{
@@ -1162,34 +1244,13 @@ describe("YP Action native hook guard", () => {
       params: askParams,
       result: { status: "submitted", answers: [{ selected_labels: ["确认供给方案"] }] },
     }, {});
-
-    assert.equal(await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns",
-      params,
-      toolCallId: "call-rank-after-direct-popup",
-    }, {}), undefined);
+    const confirmed = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(confirmed.confirmations[pending[0]].status, "approved");
   });
 
-  it("allows schema-valid rank parameters from a search-bound confirmation", async () => {
+  it("allows schema-valid rank parameters directly from a successful search", async () => {
     const params = { id: "req-supply-direct-popup-options", platform: "xiaohongshu" };
     await recordSearch(params.id);
-    const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    const pending = Object.entries(state.confirmations).find(([, receipt]) =>
-      receipt.kind === "supply_plan" && receipt.requirement_id === params.id
-    );
-    const askParams = {
-      questions: [{
-        header: "供给确认",
-        question: supplyPlanQuestion(undefined, pending[1].safe_summary),
-        options: [{ label: "确认供给方案" }, { label: "调整方案" }],
-      }],
-    };
-    await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params: askParams }, {});
-    await hooks.get("after_tool_call")({
-      toolName: "AskUserQuestion",
-      params: askParams,
-      result: { status: "submitted", answers: [{ selected_labels: ["确认供给方案"] }] },
-    }, {});
     const allowed = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns",
       params: { ...params, minimum_mcn_count: 8 },
@@ -1200,39 +1261,35 @@ describe("YP Action native hook guard", () => {
   it("accepts YP Action flattened supply confirmation and raw JSON MCP success results", async () => {
     const params = { id: "req-supply-yp-action-shape", platform: "xiaohongshu" };
     await recordSearch(params.id);
-    const blocked = await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-yp-action-1",
-    }, {});
-    const id = confirmationId(blocked);
-    await answerSupplyPlanConfirmation(id, "确认供给方案", true);
-
+    const id = pendingSupplyConfirmationId(params.id);
     assert.equal(await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-yp-action-2",
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-yp-action-1",
     }, {}), undefined);
     await hooks.get("after_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns",
       params,
-      toolCallId: "call-rank-yp-action-2",
+      toolCallId: "call-rank-yp-action-1",
       result: JSON.stringify({ success: true, data: { mcn_run_id: "mcn-run-yp-action" }, error: null }),
     }, {});
+    await answerSupplyPlanConfirmation(id, "确认供给方案", true);
 
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.confirmations[id].status, "consumed");
+    assert.equal(state.search_receipts[params.id].status, "consumed");
+    assert.equal(state.confirmations[id].status, "approved");
   });
 
-  it("invalidates supply-plan confirmation when rank parameters change", async () => {
+  it("does not let a changed rank request bypass an in-flight write", async () => {
     const params = { id: "req-supply-change", platform: "xiaohongshu", minimum_mcn_count: 8 };
     await recordSearch(params.id);
-    const blocked = await hooks.get("before_tool_call")({
+    assert.equal(await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-rank-change-1",
-    }, {});
-    await answerSupplyPlanConfirmation(confirmationId(blocked));
+    }, {}), undefined);
     const changed = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns",
       params: { ...params, minimum_mcn_count: 10 },
       toolCallId: "call-rank-change-2",
     }, {});
-    assert.match(changed.blockReason, /YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED/);
+    assert.match(changed.blockReason, /WRITE_RESULT_UNKNOWN.*get_workflow_state/);
   });
 
   it("requires a self-contained Ask confirmation and allows one unchanged send", async () => {
@@ -1446,18 +1503,28 @@ describe("YP Action native hook guard", () => {
     const requirementId = "req-rank-reconcile";
     const params = { id: requirementId, platform: "xiaohongshu" };
     await recordSearch(requirementId);
-    const blocked = await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-reconcile-rank-1",
-    }, {});
-    await answerSupplyPlanConfirmation(confirmationId(blocked));
     assert.equal(await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-reconcile-rank-2",
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-reconcile-rank-1",
     }, {}), undefined);
     await hooks.get("after_tool_call")({
       toolName: "mcp__ypmcn__rank_mcns",
       params,
-      toolCallId: "call-reconcile-rank-2",
+      toolCallId: "call-reconcile-rank-1",
       error: new Error("connection lost"),
+    }, {});
+
+    const recovery = {
+      questions: [{
+        header: "服务异常",
+        question: "排名结果未知，请选择下一步？",
+        options: [{ label: "查询状态" }, { label: "停止" }],
+      }],
+    };
+    assert.equal(await hooks.get("before_tool_call")({ toolName: "AskUserQuestion", params: recovery }, {}), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "AskUserQuestion",
+      params: recovery,
+      result: { status: "submitted", answers: [{ selected_labels: ["查询状态"] }] },
     }, {});
 
     const stateParams = { demand_id: "demand-rank-reconcile", demand_version: 1 };
@@ -1480,15 +1547,16 @@ describe("YP Action native hook guard", () => {
       },
     }, {});
     assert.equal(await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-reconcile-rank-3",
+      toolName: "mcp__ypmcn__rank_mcns", params, toolCallId: "call-reconcile-rank-2",
     }, {}), undefined);
   });
 
-  it("expires stale local blockers and supply plans instead of reusing them", async () => {
+  it("expires stale local blockers and search receipts instead of reusing them", async () => {
     const requirementId = "req-expired-plan";
     await recordSearch(requirementId);
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
     state.supply_plans[requirementId].expires_at_ms = Date.now() - 1;
+    state.search_receipts[requirementId].expires_at_ms = Date.now() - 1;
     state.blocked_tool_turn = {
       code: "INVALID_INPUT",
       observed_at_ms: Date.now() - 10_000,

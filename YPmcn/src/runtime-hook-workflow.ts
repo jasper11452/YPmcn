@@ -40,6 +40,7 @@ const LOCAL_CONTINUATION_FAILURE_CODES = new Set([
 const CONTINUOUS_WRITE_TOOLS = new Set([
   "validate_requirement",
   "search_creators",
+  "rank_mcns",
   "manual_source_creators",
   "sync_mcn_inquiry_status",
   "ingest_mcn_submissions",
@@ -151,6 +152,9 @@ function unwrap(value: any): any {
   if (!value || typeof value !== "object") return value;
   if ("result" in value) return unwrap(value.result);
   if ("structuredContent" in value) return unwrap(value.structuredContent);
+  if (value.details && typeof value.details === "object" && "structuredContent" in value.details) {
+    return unwrap(value.details.structuredContent);
+  }
   if (Array.isArray(value.content)) {
     for (const item of value.content) {
       if (text(item?.text)) {
@@ -352,6 +356,17 @@ function reconcileUnknownConfirmations(data: Json, binding: WorkflowStateBinding
   }
 }
 
+function reconcileUnknownRankReceipts(data: Json, binding: WorkflowStateBinding): void {
+  if (!binding.requirement_id) return;
+  const receipt = data.search_receipts?.[binding.requirement_id] as Json | undefined;
+  if (!receipt || !["in_flight", "unknown"].includes(receipt.status)) return;
+  receipt.status = binding.allowed_actions.includes("rank_mcns") ? "ready" : "consumed";
+  receipt.workflow_state_fingerprint = binding.fingerprint;
+  receipt.reconciled_at_ms = Date.now();
+  delete receipt.tool_call_id;
+  data.search_receipts[binding.requirement_id] = receipt;
+}
+
 function recordWorkflowState(event: Json, input: Json, rootDir: string): void {
   const current = store(rootDir);
   if (!event.error && successful(event.result)) {
@@ -365,6 +380,7 @@ function recordWorkflowState(event: Json, input: Json, rootDir: string): void {
       }
       current.data.workflow_states[workflowStateKey(binding.project_name)] = binding;
       reconcileUnknownConfirmations(current.data, binding);
+      reconcileUnknownRankReceipts(current.data, binding);
     }
   }
   save(current.path, current.data);
@@ -551,6 +567,11 @@ function storedSupplyPlan(data: Json, requirementId: string): SupplyPlanBinding 
   };
 }
 
+function rankCompletedForSupplyConfirmation(data: Json, requirementId: string): boolean {
+  const receipt = data.search_receipts?.[requirementId] as Json | undefined;
+  return receipt?.requirement_id === requirementId && receipt.status === "consumed";
+}
+
 function supplyPlanReceiptMatches(
   receipt: Json,
   requirementId: string,
@@ -579,10 +600,11 @@ function supplyPlanReceiptMatchesPlan(
     fingerprint(receiptValues) === plan.fingerprint;
 }
 
-function recordSupplyPlan(event: Json, input: Json, rootDir: string): void {
+function recordSearchResult(event: Json, input: Json, rootDir: string): void {
   if (!text(input.id)) return;
   const requirementId = input.id;
   const current = store(rootDir);
+  delete current.data.search_receipts[requirementId];
   delete current.data.supply_plans[requirementId];
   for (const [id, receipt] of Object.entries<Json>(current.data.confirmations)) {
     if (
@@ -592,9 +614,16 @@ function recordSupplyPlan(event: Json, input: Json, rootDir: string): void {
   }
 
   if (!event.error && successful(event.result)) {
+    const now = Date.now();
+    current.data.search_receipts[requirementId] = {
+      requirement_id: requirementId,
+      status: "ready",
+      request_fingerprint: null,
+      observed_at_ms: now,
+      expires_at_ms: now + TRUSTED_ID_TTL_MS,
+    };
     const values = responseSupplyPlan(event.result);
     if (values) {
-      const now = Date.now();
       const plan = {
         ...values,
         fingerprint: fingerprint(values),
@@ -905,6 +934,9 @@ export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
       !supplyPlanReceiptMatchesPlan(latestReceipt, requirementId, plan)) {
       return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply-plan confirmation needs exactly one current search_creators result.");
     }
+    if (!rankCompletedForSupplyConfirmation(data, requirementId)) {
+      return deny("INVALID_PHASE", "Continue directly to rank_mcns before asking for the supply-plan confirmation.");
+    }
     question.question = `${supplyPlanText(latestReceipt.safe_summary)}｜[YP_SUPPLY_PLAN_CONFIRMATION:${latestId}]`;
     marker = { id: latestId, kind: "supply_plan" };
     }
@@ -922,6 +954,9 @@ export function validateMarkedAsk(input: Json, data: Json): Json | undefined {
       return deny("BLOCKED_CONFIRMATION_MISMATCH", "Supply-plan options must include 确认供给方案 and 调整方案; optional cancel/later choices are allowed.");
     }
     const requirementId = text(receipt.requirement_id) ? receipt.requirement_id : "";
+    if (!rankCompletedForSupplyConfirmation(data, requirementId)) {
+      return deny("INVALID_PHASE", "Continue directly to rank_mcns before asking for the supply-plan confirmation.");
+    }
     const plan = requirementId ? storedSupplyPlan(data, requirementId) : undefined;
     if (!plan || !supplyPlanReceiptMatches(receipt, requirementId, receipt.request_fingerprint, plan)) {
       return deny("INTEGRATION_REQUIRED", "The supply-plan receipt is not bound to the current provider plan.");
@@ -954,7 +989,7 @@ function supplyPlanText(values: SupplyPlan): string {
   return [
     `【真实数据】需求人数=${values.demand_count}｜候选达人=${values.database_candidate_count}｜供给倍数=${values.supply_demand_ratio}`,
     `【推荐方案】目标提报=${values.target_submission_count}｜预计有效=${values.estimated_valid_return_count}｜预计缺口=${values.estimated_gap_count}｜推荐MCN=${values.recommended_mcn_count}｜MCN覆盖达人=${values.mcn_covered_creator_count}｜人工补充=${values.recommended_manual_creator_count}｜MCN人工比例=${values.mcn_manual_creator_ratio}｜建议手扒占比=${manualShare}%`,
-    "【影响】确认后写入MCN排序",
+    "【影响】确认后锁定供给方案并继续外发准备",
   ].join(" ");
 }
 
@@ -1036,73 +1071,35 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
   );
 }
 
-function authorizeSupplyPlan(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
+function authorizeRankAfterSearch(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
   const requirementId = text(input.id) ? input.id : "";
   const requestFingerprint = bindingFingerprint(input);
   const current = store(rootDir);
-  const plan = requirementId ? storedSupplyPlan(current.data, requirementId) : undefined;
-  if (!plan) {
+  const receipt = requirementId ? current.data.search_receipts?.[requirementId] as Json | undefined : undefined;
+  if (!receipt || receipt.requirement_id !== requirementId) {
     return deny(
       "INTEGRATION_REQUIRED",
-      "rank_mcns requires a valid provider supply plan from a successful search_creators call for the same requirement.",
+      "rank_mcns requires a successful search_creators result for the same requirement.",
     );
   }
-  const approved = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.status === "approved" && supplyPlanReceiptMatchesPlan(receipt, requirementId, plan) &&
-    (receipt.request_fingerprint === requestFingerprint || receipt.request_fingerprint == null)
-  );
-  if (approved) {
-    const [id, receipt] = approved;
-    if (receipt.request_fingerprint == null) {
-      receipt.request_fingerprint = requestFingerprint;
+  if (receipt.status === "ready") {
+    if (text(receipt.request_fingerprint) && receipt.request_fingerprint !== requestFingerprint) {
+      return deny("STATE_CONFLICT", "The reconciled rank_mcns request differs from the original unknown write; refresh state and ask the user before changing it.");
     }
+    receipt.request_fingerprint = requestFingerprint;
     receipt.status = "in_flight" satisfies ConfirmationStatus;
     receipt.tool_call_id = toolCallId ?? null;
     receipt.updated_at_ms = Date.now();
-    current.data.confirmations[id] = receipt;
+    current.data.search_receipts[requirementId] = receipt;
     save(current.path, current.data);
     return undefined;
   }
-
-  const existing = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    ["pending", "in_flight", "unknown"].includes(receipt.status) &&
-    supplyPlanReceiptMatchesPlan(receipt, requirementId, plan) &&
-    (receipt.request_fingerprint === requestFingerprint || receipt.request_fingerprint == null)
-  );
-  if (existing) {
-    const [id, receipt] = existing;
-    if (receipt.status === "unknown" || receipt.status === "in_flight") {
-      return deny("WRITE_RESULT_UNKNOWN", `supply_plan_confirmation_id=${id}; call get_workflow_state before retrying rank_mcns.`);
-    }
-    if (receipt.request_fingerprint == null) {
-      receipt.request_fingerprint = requestFingerprint;
-      receipt.updated_at_ms = Date.now();
-      current.data.confirmations[id] = receipt;
-      save(current.path, current.data);
-    }
-    return deny(
-      "YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED",
-      `confirmation_id=${id}; call AskUserQuestion with header “${SUPPLY_PLAN_CONFIRMATION_HEADER}”. The Hook binds and renders the authoritative Provider plan. Include “${CONFIRM_SUPPLY_PLAN_LABEL}” and “调整方案”; optional “稍后再说” or “取消” choices are allowed. Only “${CONFIRM_SUPPLY_PLAN_LABEL}” authorizes ranking.`,
-    );
+  if (["in_flight", "unknown"].includes(receipt.status)) {
+    return deny("WRITE_RESULT_UNKNOWN", "Call get_workflow_state before retrying rank_mcns.");
   }
-
-  const id = randomUUID();
-  const now = Date.now();
-  current.data.confirmations[id] = {
-    kind: "supply_plan",
-    requirement_id: requirementId,
-    request_fingerprint: requestFingerprint,
-    supply_plan_fingerprint: plan.fingerprint,
-    safe_summary: { ...plan.values },
-    status: "pending" satisfies ConfirmationStatus,
-    created_at_ms: now,
-    updated_at_ms: now,
-    expires_at_ms: now + CONFIRMATION_TTL_MS,
-  };
-  save(current.path, current.data);
   return deny(
-    "YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED",
-    `confirmation_id=${id}; call AskUserQuestion with header “${SUPPLY_PLAN_CONFIRMATION_HEADER}”. The Hook binds and renders the authoritative Provider plan. Include “${CONFIRM_SUPPLY_PLAN_LABEL}” and “调整方案”; optional “稍后再说” or “取消” choices are allowed.`,
+    "INVALID_PHASE",
+    "The successful search_creators result has already been consumed by rank_mcns; refresh authoritative workflow state instead of replaying the write.",
   );
 }
 
@@ -1162,7 +1159,7 @@ export function guardWorkflowTool(
       "$.run_id must come from a successful trusted YPmcn Tool response observed in the current TTL window.",
     );
   }
-  if (tool === "rank_mcns") return authorizeSupplyPlan(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined);
+  if (tool === "rank_mcns") return authorizeRankAfterSearch(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined);
   if (tool === "create_with_distributions") {
     return authorizeExternalSend(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined);
   }
@@ -1208,7 +1205,22 @@ export function recordWorkflowToolResult(
   rootDir: string,
 ): void {
   if (tool === "search_creators") {
-    recordSupplyPlan(event, input, rootDir);
+    recordSearchResult(event, input, rootDir);
+    return;
+  }
+  if (tool === "rank_mcns") {
+    const current = store(rootDir);
+    const requirementId = text(input.id) ? input.id : "";
+    const receipt = requirementId ? current.data.search_receipts?.[requirementId] as Json | undefined : undefined;
+    if (!receipt || receipt.status !== "in_flight") return;
+    const afterToolCallId = text(event.toolCallId) ? event.toolCallId.trim() : undefined;
+    if (afterToolCallId && text(receipt.tool_call_id) && receipt.tool_call_id !== afterToolCallId) return;
+    if ((!afterToolCallId || !text(receipt.tool_call_id)) && receipt.request_fingerprint !== bindingFingerprint(input)) return;
+    receipt.status = successful(event.error ? { isError: true } : event.result) ? "consumed" : "unknown";
+    receipt.updated_at_ms = Date.now();
+    delete receipt.tool_call_id;
+    current.data.search_receipts[requirementId] = receipt;
+    save(current.path, current.data);
     return;
   }
   if (tool === "get_workflow_state") {
@@ -1268,14 +1280,14 @@ export function recordWorkflowToolResult(
     return;
   }
 
-  if (tool !== "create_with_distributions" && tool !== "rank_mcns") return;
-  const kind = tool === "create_with_distributions" ? "external_send" : "supply_plan";
+  if (tool !== "create_with_distributions") return;
+  const kind = "external_send";
   const requestFingerprint = bindingFingerprint(input);
   const afterToolCallId = text(event.toolCallId) ? event.toolCallId.trim() : undefined;
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) => {
     if (receipt.kind !== kind || receipt.status !== "in_flight") return false;
     if (afterToolCallId && text(receipt.tool_call_id)) return receipt.tool_call_id === afterToolCallId;
-    return (tool === "create_with_distributions" ? receipt.input_fingerprint : receipt.request_fingerprint) === requestFingerprint;
+    return receipt.input_fingerprint === requestFingerprint;
   });
   if (!inFlight) return;
   const [id, receipt] = inFlight;
@@ -1283,7 +1295,7 @@ export function recordWorkflowToolResult(
   receipt.updated_at_ms = Date.now();
   delete receipt.tool_call_id;
   current.data.confirmations[id] = receipt;
-  if (tool === "create_with_distributions" && text(input.projectName)) {
+  if (text(input.projectName)) {
     delete current.data.workflow_states[workflowStateKey(input.projectName)];
   }
   save(current.path, current.data);

@@ -1,7 +1,7 @@
 {
   "id": "ypmcn-media-assistant",
   "name": "ypmcn-media-assistant",
-  "version": "3.2.4",
+  "version": "3.2.5",
   "description": "YPmcn 媒介助手：以数据库事实为状态权威，提供工具参数门禁与外部写入确认。",
   "author": {
     "name": "Jasper"

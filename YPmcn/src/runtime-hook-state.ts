@@ -107,7 +107,7 @@ export function denyStructured(code: string, context: string): Json {
 export function store(rootDir: string): GuardStore {
   const path = statePath(rootDir);
   const data = load(path);
-  data.schema_version = 9;
+  data.schema_version = 10;
   data.confirmations ??= {};
   if (!Array.isArray(data.trusted_ids)) data.trusted_ids = [];
   if (!data.blocked_requirement_semantics || typeof data.blocked_requirement_semantics !== "object" || Array.isArray(data.blocked_requirement_semantics)) {
@@ -115,6 +115,9 @@ export function store(rootDir: string): GuardStore {
   }
   if (!data.supply_plans || typeof data.supply_plans !== "object" || Array.isArray(data.supply_plans)) {
     data.supply_plans = {};
+  }
+  if (!data.search_receipts || typeof data.search_receipts !== "object" || Array.isArray(data.search_receipts)) {
+    data.search_receipts = {};
   }
   if (!data.workflow_states || typeof data.workflow_states !== "object" || Array.isArray(data.workflow_states)) {
     data.workflow_states = {};
@@ -136,6 +139,12 @@ export function store(rootDir: string): GuardStore {
   for (const [key, plan] of Object.entries<Json>(data.supply_plans)) {
     if (!plan || Number(plan.expires_at_ms ?? 0) <= now) {
       delete data.supply_plans[key];
+      changed = true;
+    }
+  }
+  for (const [key, receipt] of Object.entries<Json>(data.search_receipts)) {
+    if (!receipt || Number(receipt.expires_at_ms ?? 0) <= now) {
+      delete data.search_receipts[key];
       changed = true;
     }
   }

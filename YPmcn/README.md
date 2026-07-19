@@ -7,8 +7,8 @@ YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。
 ```text
 validate_requirement
 → search_creators(id)
-→ 展示供需比与机构/手扒比例 → AskUserQuestion 确认
 → rank_mcns(id, platform)
+→ 展示供需比、机构/手扒比例与 MCN 结果 → AskUserQuestion 确认
 → select_inquiry_form_fields()
 → manual_source_creators（可选，仅企微外发前）
 → AskUserQuestion 一次性确认
@@ -28,9 +28,9 @@ validate_requirement
 插件注册 `before_tool_call`、`after_tool_call`、`session_end`。
 
 - Hook 不保存业务 phase，不依赖 `sessionKey`、`session_start` 或生命周期事件；`session_end` 只做机会性 TTL 清理。
-- 唯一本地状态是 10 分钟一次性确认凭证：搜索后的供给方案确认与企微外发确认；仅保存请求哈希和安全摘要。
+- 本地只保存短期搜索/排名衔接凭证，以及供给方案和企微外发的一次性确认凭证；仅保存请求哈希和安全摘要。
 - 每个 YPmcn 调用前按机器契约校验参数；shell、PowerShell、curl 直连 provider 写接口会被阻断。
-- `rank_mcns` 首次调用返回 `YP_SUPPLY_PLAN_CONFIRMATION_REQUIRED`；供需比与机构/手扒方案经 AskUserQuestion 确认且参数未变化时只放行一次。
+- `search_creators` 成功后首次 `rank_mcns` 直接放行且只消费一次搜索凭证；两者任一报错才进入 AskUserQuestion 澄清或安全恢复。
 - provider 发送首次调用返回 `YP_CONFIRMATION_REQUIRED`；AskUserQuestion 精确确认且请求参数未变化时只放行一次。
 - Reject、超时、修改、凭证过期或未知写结果均 fail closed。
 - Hook 不记录客户 Brief、消息正文或完整 payload。

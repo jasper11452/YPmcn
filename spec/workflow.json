@@ -94,7 +94,7 @@
     "unsupportedProviderArguments": ["candidate_pool_id", "mcn_recommendation_id", "preview_only", "remindAt", "trigger"],
     "stateRefresh": "on resume, compaction, unknown write, conflict, missing state, and before outward send",
     "unknownWriteRecovery": "current provider: get_workflow_state by demand identity from existing business facts; ledger trace_id reconciliation is target-only and an unknown external create remains blocked; never blind retry",
-    "postSearchSupplyPlanConfirmation": "AskUserQuestion confirms fielded supply-demand ratio and MCN/manual allocation before rank_mcns",
+    "postSearchContinuation": "a successful search_creators result immediately continues to rank_mcns without AskUserQuestion; failures use AskUserQuestion for clarification or a safe recovery choice",
     "manualSourcingPlacement": "optional pre-send enrichment only; never proves distribution or recovery",
     "rankCreatorsPrerequisite": "committed WeCom distribution plus completed recovery"
   },
@@ -119,7 +119,7 @@
       "id": "mcn-plan-ready",
       "from": "candidate_pool_ready",
       "trigger": {"type": "tool", "name": "rank_mcns"},
-      "guards": ["candidate pool belongs to the same requirement", "one-time Ask supply-plan confirmation binds demand_count, database_candidate_count, supply_demand_ratio, target_submission_count, estimated_valid_return_count, estimated_gap_count, recommended_mcn_count, mcn_covered_creator_count, recommended_manual_creator_count, and mcn_manual_creator_ratio; both ratio terms use creator-account counts"],
+      "guards": ["candidate pool belongs to the same requirement", "the immediately preceding successful search_creators result authorizes one rank_mcns attempt for that requirement"],
       "evidence": ["committed mcn_recommendation_items rows"],
       "nextPhase": "mcn_planning"
     },
@@ -127,7 +127,7 @@
       "id": "distribution-created",
       "from": "mcn_planning",
       "trigger": {"type": "tool", "name": "create_with_distributions"},
-      "guards": ["one-time Ask confirmation matches the unchanged request fingerprint", "supplier and prefill rows resolve one requirement"],
+      "guards": ["supply, MCN, and message confirmations are recorded through confirm_distribution_send", "one-time Ask confirmation matches the unchanged request fingerprint", "supplier and prefill rows resolve one requirement"],
       "implementationStatus": "target-blocked",
       "blockedBy": "current provider does not use mcp_tool_call_ledger for this Tool",
       "evidence": ["target-only: real external project and distribution identifiers persisted in the idempotency ledger; current provider does not produce this evidence"],

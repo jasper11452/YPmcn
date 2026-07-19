@@ -14,7 +14,7 @@ const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.u
 const stagedPluginRoot = fileURLToPath(
   new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
 );
-const VERSION = "3.2.4";
+const VERSION = "3.2.5";
 let archiveTempRoot;
 
 function json(relativePath) {

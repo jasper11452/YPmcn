@@ -10,7 +10,9 @@
 
 ## 人工门禁
 
-`search_creators` 后的下一个 Tool 必须是原生 `AskUserQuestion`，不得先调用或试探 `rank_mcns`。标题固定为“供给确认”，选项固定为“确认供给方案 / 调整方案”；正文可使用简短占位问题，无需复制或重算长搜索结果。Hook 会从最新成功搜索的本地 receipt 注入十项供给计划、内部 marker 和三段式可读摘要，并优先以 `total_matched`、`supply_assessment` 及实际达人 `supplier_id` 绑定纠正未过滤口径。缺少有效 receipt 时停止，不得自行编造。只有答案精确为“确认供给方案”才可调用最小参数 `rank_mcns({id, platform})`；随后等待用户确认实际 MCN 列表。
+`search_creators` 成功后的下一个 Tool 必须直接是 `rank_mcns({id, platform})`，同一轮连续执行；两者之间不得插入 `AskUserQuestion`、文字确认、状态查询或其他 Tool。`id` 复用 `validate_requirement.data.id`，`platform` 复用已确认平台，只添加用户明确要求且 live schema 支持的排名参数。`search_creators` 或 `rank_mcns` 报错时立即停止后续业务 Tool，并在同一轮调用原生 `AskUserQuestion`：缺参/非法值请求精确澄清，明确后端错误提供安全恢复选择，未知写结果先对账且禁止盲重试。
+
+`rank_mcns` 成功后再展示实际 MCN 列表、缺口和 Provider-backed 供给方案，等待用户完成 supply 与 MCN 选择；搜索时记录的供给摘要只用于该外发前确认，不得自行重算或编造。随后才选择询价字段并确认 message。外发前 supply、MCN、message 三项结果仍必须由 `confirm_distribution_send` session action 记录。
 
 选择询价字段后展示实际 description、机构名单和固定消息预览。外发前重新查询同一项目状态并确认动作授权；supply、MCN、message 三项确认必须由 `confirm_distribution_send` session action 记录。首次外发 Hook 返回的 marker 和绑定摘要必须原样展示，只有“确认发送”才以完全相同参数继续；修改、拒绝、超时、过期或参数变化均重新确认或停止。session action 不可用时返回 `integration_required`，不得自行设计替代接口。
 
