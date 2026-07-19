@@ -46,7 +46,10 @@ function selectedColumnName(value: unknown): string | undefined {
   if (text(value)) return value.trim();
   if (!value || typeof value !== "object") return undefined;
   const column = value as Json;
-  return [column.name, column.field_name, column.key, column.field_key].find(text)?.trim();
+  return [
+    column.label, column.name, column.field_name,
+    column.field, column.key, column.field_key,
+  ].find(text)?.trim();
 }
 
 function parsedJsonObject(value: string): Json | undefined {
@@ -155,6 +158,19 @@ function answerForQuestion(event: Json, input: Json): string | undefined {
     if (!candidate.startsWith(prefix)) continue;
     const answer = candidate.slice(prefix.length).trim();
     if (labels.includes(answer)) return answer;
+  }
+  return undefined;
+}
+
+function echoedExternalSendSelection(event: Json): { question: string; answer: string } | undefined {
+  if (event.error) return undefined;
+  for (const candidate of answerValues(event.result ?? event.message)) {
+    for (const answer of [EXTERNAL_SEND_CONFIRM_LABEL, EXTERNAL_SEND_CANCEL_LABEL]) {
+      const suffix = `: ${answer}`;
+      if (!candidate.endsWith(suffix)) continue;
+      const question = candidate.slice(0, -suffix.length).trim();
+      if (question) return { question, answer };
+    }
   }
   return undefined;
 }
@@ -488,11 +504,11 @@ function externalSendQuestion(input: Json, summary: Json): string {
   ].join("\n");
 }
 
-function externalSendAskInput(input: Json, summary: Json): Json {
+function externalSendAskInputForQuestion(question: string, summary: Json): Json {
   return {
     questions: [{
       header: EXTERNAL_SEND_HEADER,
-      question: externalSendQuestion(input, summary),
+      question,
       options: [
         {
           label: EXTERNAL_SEND_CONFIRM_LABEL,
@@ -505,6 +521,10 @@ function externalSendAskInput(input: Json, summary: Json): Json {
       ],
     }],
   };
+}
+
+function externalSendAskInput(input: Json, summary: Json): Json {
+  return externalSendAskInputForQuestion(externalSendQuestion(input, summary), summary);
 }
 
 function confirmationRequiredResult(askInput: Json): Json {
@@ -631,14 +651,33 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): vo
 function recordExternalSendDecision(event: Json, input: Json, rootDir: string): void {
   const askInputFingerprint = fingerprint(input);
   const current = store(rootDir);
-  const pending = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
+  let pending = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
     receipt.kind === "external_send" && receipt.confirmation_mode === "ask_user_question" &&
     receipt.status === "pending" && receipt.ask_input_fingerprint === askInputFingerprint
   );
+  let answer = pending ? answerForQuestion(event, input) : undefined;
+
+  // Some hosts normalize or depth-truncate AskUserQuestion params before the
+  // after_tool_call hook. Their result still echoes the exact rendered question
+  // and selected label, so bind that echo back to one unique pending receipt.
+  if (!pending) {
+    const echoed = echoedExternalSendSelection(event);
+    const matches = Object.entries<Json>(current.data.confirmations).flatMap(([id, receipt]) => {
+      if (receipt.kind !== "external_send" || receipt.confirmation_mode !== "ask_user_question" ||
+          receipt.status !== "pending" || !echoed) return [];
+      const echoedAskInput = externalSendAskInputForQuestion(echoed.question, receipt.safe_summary);
+      return receipt.ask_input_fingerprint === fingerprint(echoedAskInput)
+        ? [{ id, receipt, answer: echoed.answer }]
+        : [];
+    });
+    if (matches.length === 1) {
+      pending = [matches[0].id, matches[0].receipt];
+      answer = matches[0].answer;
+    }
+  }
   if (!pending) return;
 
   const [id, receipt] = pending;
-  const answer = answerForQuestion(event, input);
   receipt.status = !event.error && event.result?.isError !== true && answer === EXTERNAL_SEND_CONFIRM_LABEL
     ? "approved" satisfies ConfirmationStatus
     : "denied" satisfies ConfirmationStatus;

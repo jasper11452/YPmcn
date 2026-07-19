@@ -110,6 +110,8 @@ describe("YP Action native hooks", () => {
   it("injects the local JSON orchestration state without turning ordinary tools into gates", async () => {
     const prompt = await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     assert.equal(prompt.prependSystemContext, YPMCN_FAST_PATH);
+    assert.match(YPMCN_FAST_PATH, /需求达人数量：<quantityTotal>\n当前符合条件达人数量：<actual count>\n供需比：/);
+    assert.match(YPMCN_FAST_PATH, /Never replace these details with “以上”/);
     assert.match(prompt.prependContext, /authoritative local orchestration state/);
     assert.match(prompt.prependContext, /"next_action":"validate_requirement"/);
     assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 14);
@@ -146,13 +148,17 @@ describe("YP Action native hooks", () => {
   it("binds a multiline AskUserQuestion warning to the exact send parameters", async () => {
     const prepared = await requestConfirmation(distributionParams({
       supplierIds: ["supplier-1", "supplier-2"],
+      columns: [
+        { field: "platform", label: "平台（xiaohongshu / douyin）" },
+        { field: "kwUid", label: "达人 ID" },
+      ],
       description: "您好，想邀请贵司参与真实企微消息项目。\n请协助推荐合适达人。",
     }), {}, "call-send", ["星图文化", "青禾传媒"]);
     const question = prepared.askInput.questions[0].question;
     assert.match(question, /^⚠️ 不可逆企微外发\n\n/);
     assert.match(question, /确认后将立即向 2 家机构/);
     assert.match(question, /发送对象（2 家）\n1\. 星图文化\n2\. 青禾传媒/);
-    assert.match(question, /回填字段\n- 达人名称/);
+    assert.match(question, /回填字段\n- 平台（xiaohongshu \/ douyin）\n- 达人 ID/);
     assert.match(question, /企微消息正文\n────────\n您好[^]*\n请协助推荐合适达人。\n────────/);
     assert.match(question, /是否确认立即发送？$/);
 
@@ -187,6 +193,25 @@ describe("YP Action native hooks", () => {
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "consumed");
     assert.equal(state.workflow.phase, "waiting_mcn_return");
+  });
+
+  it("accepts an exact echoed confirmation when the host depth-truncates popup params", async () => {
+    const prepared = await requestConfirmation(distributionParams(), {}, "call-truncated-popup");
+    const truncatedInput = structuredClone(prepared.askInput);
+    truncatedInput.questions[0].options = ["[truncated-depth]", "[truncated-depth]"];
+    const question = prepared.askInput.questions[0].question;
+
+    await recordTool("AskUserQuestion", truncatedInput, {
+      content: [{ type: "text", text: `${question}: 确认发送` }],
+    });
+
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "approved");
+    assert.equal(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      prepared.params,
+      "call-truncated-popup-execute",
+    ), undefined);
   });
 
   it("keeps the full multiline WeCom message in the scrollable AskUserQuestion body", async () => {
@@ -379,7 +404,7 @@ describe("YP Action native hooks", () => {
     const question = {
       questions: [{
         header: "供给确认",
-        question: "是否按以上供给建议开始MCN赛马？",
+        question: "需求达人数量：5\n当前符合条件达人数量：12\n供需比：12/5（2.4:1）\n建议拓展达人数量：3\n\n是否按此供给建议开始MCN赛马？",
         options: ["确认并开始MCN赛马", "调整拓展数量"],
       }],
     };

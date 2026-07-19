@@ -10,7 +10,7 @@
 
 ## 连续执行与人工确认
 
-`validate_requirement` 成功后同轮直接调用 `search_creators`，中间不停止、不确认。`search_creators` 成功后必须先按 `frontend-response.md` 输出固定供需格式，包含需求数量、实际命中数、供需比、建议拓展数，再用题头“供给确认”询问；确认前禁止调用 `rank_mcns`。弹窗返回“确认并开始MCN赛马”后同轮立即执行，不得只回复已确认。
+`validate_requirement` 成功后同轮直接调用 `search_creators`，中间不停止、不确认。`search_creators` 成功后必须先按 `frontend-response.md` 输出固定供需格式，再在题头“供给确认”的弹窗正文中用真实换行完整重复需求数量、实际命中数、供需比、建议拓展数和确认问题；禁止用“以上”等弹窗外引用替代决策信息。确认前禁止调用 `rank_mcns`。弹窗返回“确认并开始MCN赛马”后同轮立即执行，不得只回复已确认。
 
 `rank_mcns` 使用动态 MCN 赛马规模，不依赖默认固定 5 家。成功后只显示机构名称、覆盖与缺口，ID 留作 `supplierIds`。选择机构后调用 `select_inquiry_form_fields` 并确认字段。
 
