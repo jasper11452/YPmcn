@@ -29,7 +29,7 @@ const EXPECTED_INPUTS = {
     },
   },
   select_inquiry_form_fields: {
-    required: ["platform"], properties: { platform: "string", url: "string|null", timeout_seconds: "integer" },
+    required: ["url"], properties: { url: "string", timeout_seconds: "integer" },
   },
   create_with_distributions: {
     required: ["requirement_id", "columns", "supplierIds"],
@@ -54,8 +54,8 @@ const EXPECTED_INPUTS = {
     properties: { requirement_id: "string", target_count: "integer" },
   },
   rank_creators: {
-    required: ["requirement_id", "limit"],
-    properties: { requirement_id: "string", limit: "integer" },
+    required: ["requirement_id", "inquiry_ids", "columns"],
+    properties: { requirement_id: "string", inquiry_ids: "array", columns: "array" },
   },
   create_submission_batch: {
     required: ["run_id"],
@@ -138,6 +138,11 @@ describe("current Endpoint MCP contract", () => {
   it("keeps the two provider semantic constraints explicit", () => {
     assert.match(profile.tools.get_workflow_state.semanticRequirement, /demand_id.*demand_version.*trace_id/);
     assert.match(profile.tools.get_recommendation_run_detail.semanticRequirement, /positive integer/);
+    assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /returned by sync/);
+    assert.match(
+      profile.tools.rank_creators.agentSemanticRequirements.columns,
+      /exactly the same ordered key\/name object array passed to create_with_distributions/,
+    );
   });
 
   it("adds the Agent-required plain-text message without misreporting the live Provider required list", () => {
@@ -176,10 +181,11 @@ describe("current Endpoint MCP contract", () => {
     );
   });
 
-  it("requires a supported platform when opening the inquiry field selector", () => {
+  it("requires a URL when opening the inquiry field selector", () => {
     const tool = profile.tools.select_inquiry_form_fields;
-    assert.deepEqual(tool.required, ["platform"]);
-    assert.deepEqual(tool.properties.platform.enum, ["xiaohongshu", "douyin"]);
+    assert.deepEqual(tool.required, ["url"]);
+    assert.equal(tool.properties.url.type, "string");
+    assert.equal(tool.properties.platform, undefined);
   });
 
   it("does not promote runtime observations into advertised output schemas", () => {

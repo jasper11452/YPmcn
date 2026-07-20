@@ -93,17 +93,17 @@ describe("read-only provider contract checker", () => {
 
   it("compares nullable anyOf branches recursively", () => {
     const definitions = currentToolDefinitions();
-    const select = definitions.find((tool) => tool.name === "select_inquiry_form_fields");
-    select.inputSchema.properties.url.anyOf[0].type = "number";
+    const rank = definitions.find((tool) => tool.name === "rank_mcns");
+    rank.inputSchema.properties.medium_risk_confirmation.anyOf[0].type = "number";
 
     const report = compareProviderTools(definitions);
 
     assert.equal(report.status, "FAIL");
     assert.deepEqual(report.schemaDiffs, [{
-      tool: "select_inquiry_form_fields",
-      path: "inputSchema.properties.url.anyOf[0].type",
+      tool: "rank_mcns",
+      path: "inputSchema.properties.medium_risk_confirmation.anyOf[0].type",
       reason: "value_mismatch",
-      expected: "string",
+      expected: "object",
       actual: "number",
     }]);
   });

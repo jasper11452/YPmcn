@@ -264,7 +264,7 @@ assert_advisory("sync from recovered phase", output, "RECOVERY_ALREADY_TERMINAL"
 
 output = run_hook(PRE_TOOL, {
     "tool_name": "mcp__ypmcn__rank_creators",
-    "tool_input": {"requirement_id": "req_123", "limit": 10},
+    "tool_input": {"requirement_id": "req_123", "inquiry_ids": ["10"], "columns": [{"key": "kwUid", "name": "达人ID"}]},
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
@@ -286,7 +286,7 @@ set_state(SESSION_KEY, {
 
 output = run_hook(PRE_TOOL, {
     "tool_name": "mcp__ypmcn__rank_creators",
-    "tool_input": {"requirement_id": "req_wrong", "limit": 10},
+    "tool_input": {"requirement_id": "req_wrong", "inquiry_ids": ["10"], "columns": [{"key": "kwUid", "name": "达人ID"}]},
     "sessionKey": SESSION_KEY,
     "toolCallId": "tc_001",
 })
@@ -416,7 +416,7 @@ assert_phase("final sync -> recovered", "recovered")
 
 # Step 10: rank_creators
 post_tool("rank_creators",
-          {"requirement_id": "req_001", "limit": 10},
+          {"requirement_id": "req_001", "inquiry_ids": ["10"], "columns": [{"key": "kwUid", "name": "达人ID"}]},
           {"success": True, "data": {"run_id": "run_001"}})
 assert_phase("rank_creators -> recommendation_ready", "recommendation_ready")
 

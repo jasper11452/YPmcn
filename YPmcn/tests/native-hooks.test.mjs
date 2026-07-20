@@ -943,7 +943,7 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.next_action, "recover_validate_requirement");
   });
 
-  it("opens the hosted field selector after select_inquiry_form_fields succeeds or fails", async () => {
+  it("opens only a callback URL returned by select_inquiry_form_fields", async () => {
     const localHooks = new Map();
     const openedUrls = [];
     createYpmcnPlugin({
@@ -957,12 +957,18 @@ describe("YP Action native hooks", () => {
     for (const event of [
       {
         toolName: "mcp__ypmcn__select_inquiry_form_fields",
-        params: { platform: "xiaohongshu" },
-        result: { success: true, data: { description: "creator_name：达人名称" }, error: null },
+        params: { url: "https://agenta.eshypdata.com/demand-field-selector" },
+        result: {
+          success: true,
+          data: {
+            url: "https://agenta.eshypdata.com/demand-field-selector?callback=selection-1&platform=xiaohongshu",
+          },
+          error: null,
+        },
       },
       {
         toolName: "mcp__ypmcn__select_inquiry_form_fields",
-        params: { platform: "douyin" },
+        params: { url: "https://agenta.eshypdata.com/demand-field-selector" },
         error: "connection lost",
       },
     ]) {
@@ -970,8 +976,7 @@ describe("YP Action native hooks", () => {
     }
 
     assert.deepEqual(openedUrls, [
-      "https://agenta.eshypdata.com/demand-field-selector",
-      "https://agenta.eshypdata.com/demand-field-selector",
+      "https://agenta.eshypdata.com/demand-field-selector?callback=selection-1&platform=xiaohongshu",
     ]);
 
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -993,8 +998,14 @@ describe("YP Action native hooks", () => {
 
     assert.equal(await localHooks.get("after_tool_call")({
       toolName: "mcp__ypmcn__select_inquiry_form_fields",
-      params: { platform: "xiaohongshu" },
-      result: { success: false, error: { code: "TIMEOUT" } },
+      params: { url: "https://agenta.eshypdata.com/demand-field-selector" },
+      result: {
+        success: true,
+        content: [{
+          type: "text",
+          text: "请打开 https://agenta.eshypdata.com/demand-field-selector?callback=selection-2",
+        }],
+      },
     }, {}), undefined);
     assert.deepEqual(errors, ["failed to open inquiry field selector: browser unavailable"]);
   });

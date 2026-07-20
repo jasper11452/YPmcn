@@ -565,25 +565,11 @@
     "select_inquiry_form_fields": {
       "name": "select_inquiry_form_fields",
       "required": [
-        "platform"
+        "url"
       ],
       "properties": {
-        "platform": {
-          "type": "string",
-          "enum": [
-            "xiaohongshu",
-            "douyin"
-          ]
-        },
         "url": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "timeout_seconds": {
           "type": "integer"
@@ -791,17 +777,43 @@
       "name": "rank_creators",
       "required": [
         "requirement_id",
-        "limit"
+        "inquiry_ids",
+        "columns"
       ],
       "properties": {
         "requirement_id": {
           "type": "string"
         },
-        "limit": {
-          "type": "integer"
+        "inquiry_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "name"],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "forbidden": [],
+      "agentSemanticRequirements": {
+        "inquiry_ids": "actual string inquiry IDs returned by sync for the current recovered distribution",
+        "columns": "must be exactly the same ordered key/name object array passed to create_with_distributions for the current distribution"
+      },
       "sideEffects": "business-write",
       "writers": {
         "always": [],

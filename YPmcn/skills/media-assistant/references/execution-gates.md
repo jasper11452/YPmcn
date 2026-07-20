@@ -6,7 +6,7 @@
 
 会话编排状态写入本地 `state/confirmation_guard.json` 的 `workflow` 与 `workflow_events`。`phase/next_action` 是 Agent 编排权威，Provider 的 `workflow_state/allowed_actions` 只作业务事实或未知写对账，不能覆盖本地 phase。Hook 只按实际成功响应推进；失败保留阶段并进入恢复。本地状态不伪造 Provider 成功。
 
-需求身份来自 `validate_requirement.data.id`，用于搜索/排序的 `id` 和后续 `requirement_id`。`rank_mcns` 返回的单个 `inquiry_id` 绑定达人拓展前置询价；`inquiry_ids` 绑定回收，不得混用。`demand_id+demand_version` 只用于对账；`project_id+supplierIds+requirement_id` 绑定 distribution；`run_id` 来自精排。其他 ID 只复制实际结果，不猜测或展示给用户。
+需求身份来自 `validate_requirement.data.id`，用于搜索/排序的 `id` 和后续 `requirement_id`。`rank_mcns` 返回的单个 `inquiry_id` 绑定达人拓展前置询价；`inquiry_ids` 绑定回收 → `rank_creators`，不得混用。`rank_creators.columns = create_with_distributions.columns`。`demand_id+demand_version` 只用于对账；`project_id+supplierIds+requirement_id` 绑定 distribution；`run_id` 来自精排。其他 ID 只复制实际结果，不猜测或展示给用户。
 
 ## 连续执行与人工确认
 

@@ -416,9 +416,11 @@ class SkillPackageContractTest(unittest.TestCase):
         assets = PACKAGE / "skills" / "media-assistant" / "assets"
         self.assertFalse((assets / "ypmcn_submission_template.csv").exists())
         workflow_text = "\n".join((read(SKILL), read(REFERENCES / "frontend-response.md")))
-        self.assertIn("After successful `rank_creators`, immediately call host `export_csv`", workflow_text)
+        self.assertIn("After successful `rank_creators`, call `get_creator_detail` once for every creator", workflow_text)
+        self.assertIn("Only after every required detail call succeeds, call host `export_csv`", workflow_text)
         self.assertIn("set each header to `name` verbatim", workflow_text)
-        self.assertIn("read its cells with the paired `key`", workflow_text)
+        self.assertIn("extract that creator's cell from its successful detail response with the paired `key`", workflow_text)
+        self.assertIn("Never reuse a previous or fixed header", workflow_text)
         wecom = (assets / "wecom_inquiry_template.txt").read_text(encoding="utf-8")
         for required in (
             "【{project_name}｜达人提报】",
