@@ -47,8 +47,9 @@ project/
 ## 当前生产状态
 
 - 仓库目标：`mvp-v2`，语义 ID、字段选择、发送门禁和 `sync → ingest → sync` 恢复链已固化。
-- 生产 provider 仍检测为 `legacy-1.9.4`，缺 `select_inquiry_form_fields`、`create_with_distributions`、`sync_mcn_inquiry_status`。
-- 完整生产链路保持 `integration_required`；不自动回退旧参数，也不把本地模拟结果当生产证据。
+- 本地 `current-endpoint` 契约使用批量恢复参数：`sync_mcn_inquiry_status({requirement_id,project_id,supplierIds})` 与 `ingest_mcn_submissions({inquiry_ids})`。
+- 生产 Provider 的可达性和实际 schema 必须单独运行 `npm run verify:provider`；纯本地测试不作为生产证据。
+- Provider 不可达、schema 不一致或 Live E2E 未完成时，完整生产链路仍保持 `integration_required`；不自动回退旧参数，也不把本地模拟结果当生产证据。
 
 ## 开发与验证
 
@@ -74,6 +75,6 @@ npm run pack:yp
 npm run verify:provider
 ```
 
-当前该命令预期非零退出；这是上线阻塞证据，不是离线仓库测试失败。
+该命令只在生产端点可达且 schema 一致时通过；非零退出是上线阻塞证据，不是离线仓库测试失败。执行纯本地验证时应明确跳过它。
 
 Agent 执行规则见 `docs/AGENT_SPEC_WORKFLOW.md`，开发者流程见 `docs/DEVELOPER_SPEC_WORKFLOW.md`。插件不内置 provider 凭据，不记录客户 Brief 或完整 payload。

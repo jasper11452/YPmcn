@@ -39,15 +39,14 @@ const EXPECTED_INPUTS = {
     },
   },
   sync_mcn_inquiry_status: {
-    required: ["requirement_id", "project_id", "mcn_id"],
+    required: ["requirement_id", "project_id", "supplierIds"],
     properties: {
-      requirement_id: "string", project_id: "string", mcn_id: "string",
-      cron_job_id: "string|null", scheduled_recover_at: "string|null",
+      requirement_id: "string", project_id: "string", supplierIds: "array",
     },
   },
   ingest_mcn_submissions: {
-    required: ["inquiry_id", "items"],
-    properties: { inquiry_id: "string", items: "array" },
+    required: ["inquiry_ids"],
+    properties: { inquiry_ids: "array" },
   },
   manual_source_creators: {
     required: ["requirement_id"],
@@ -151,6 +150,10 @@ describe("current Endpoint MCP contract", () => {
       "requirement_id",
     );
     assert.equal(profile.tools.create_with_distributions.agentSemanticRequirements.aliases.colums, "columns");
+    assert.match(
+      profile.tools.create_with_distributions.agentSemanticRequirements.columns,
+      /non-empty key.*field_key to key/,
+    );
   });
 
   it("does not promote runtime observations into advertised output schemas", () => {

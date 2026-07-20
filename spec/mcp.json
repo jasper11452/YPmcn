@@ -458,7 +458,7 @@
       "agentRequired": ["description"],
       "agentSemanticRequirements": {
         "description": "recipient-ready plain-text WeChat message organized by AI from the confirmed user requirement; may contain line breaks and must not be JSON",
-        "columns": "user-confirmed field object list",
+        "columns": "user-confirmed field object list; every item must contain the selector's non-empty key (map field_key to key before calling)",
         "supplierIds": "confirmed institution ID array",
         "aliases": {
           "requirement_ID": "requirement_id",
@@ -486,7 +486,7 @@
       "required": [
         "requirement_id",
         "project_id",
-        "mcn_id"
+        "supplierIds"
       ],
       "properties": {
         "requirement_id": {
@@ -495,28 +495,11 @@
         "project_id": {
           "type": "string"
         },
-        "mcn_id": {
-          "type": "string"
-        },
-        "cron_job_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "scheduled_recover_at": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "supplierIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "forbidden": [],
@@ -539,18 +522,13 @@
     "ingest_mcn_submissions": {
       "name": "ingest_mcn_submissions",
       "required": [
-        "inquiry_id",
-        "items"
+        "inquiry_ids"
       ],
       "properties": {
-        "inquiry_id": {
-          "type": "string"
-        },
-        "items": {
+        "inquiry_ids": {
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": true
+            "type": "string"
           }
         }
       },

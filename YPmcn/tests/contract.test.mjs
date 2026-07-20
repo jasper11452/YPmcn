@@ -107,10 +107,9 @@ describe("current Endpoint input validation", () => {
       ["select_inquiry_form_fields", { url: null, timeout_seconds: 30 }],
       ["create_with_distributions", validDistribution()],
       ["sync_mcn_inquiry_status", {
-        requirement_id: "req-1", project_id: "project-1", mcn_id: "mcn-1",
-        cron_job_id: null, scheduled_recover_at: null,
+        requirement_id: "req-1", project_id: "project-1", supplierIds: ["supplier-1"],
       }],
-      ["ingest_mcn_submissions", { inquiry_id: "inquiry-1", items: [{ kwUid: "creator-1" }] }],
+      ["ingest_mcn_submissions", { inquiry_ids: ["1"] }],
       ["manual_source_creators", { requirement_id: "req-1" }],
       ["rank_creators", { requirement_id: "req-1", limit: 20 }],
       ["create_submission_batch", { run_id: "1", risk_confirmation: null }],
@@ -144,15 +143,16 @@ describe("current Endpoint input validation", () => {
         "$.mcn_recommendation_id", "$.remindAt", "$.preview_only",
       ],
     );
-    assert.equal(
-      validateToolParams("ingest_mcn_submissions", {
-        inquiry_id: "inquiry-1", items: ["not-an-object"],
-      })[0].path,
-      "$.items[0]",
-    );
+    assert.equal(validateToolParams("ingest_mcn_submissions", { inquiry_ids: [1] })[0].path, "$.inquiry_ids[0]");
     assert.equal(
       validateToolParams("create_with_distributions", validDistribution({ columns: ["not-an-object"] }))[0].path,
       "$.columns[0]",
+    );
+    assert.deepEqual(
+      validateToolParams("create_with_distributions", validDistribution({
+        columns: [{ field_key: "kwUid", field_name: "达人 ID" }],
+      })).map(({ path }) => path),
+      ["$.columns[0].key"],
     );
     assert.equal(
       validateToolParams("create_with_distributions", validDistribution({
@@ -177,8 +177,14 @@ describe("current Endpoint input validation", () => {
       demand_id: "demand-1",
     }).length, 1);
     assert.equal(validateToolParams("sync_mcn_inquiry_status", {
-      requirement_id: "req-1", project_id: "0", mcn_id: "mcn-1",
+      requirement_id: "req-1", project_id: "0", supplierIds: ["supplier-1"],
     })[0].path, "$.project_id");
+    assert.equal(validateToolParams("sync_mcn_inquiry_status", {
+      requirement_id: "req-1", project_id: "project-1", supplierIds: [],
+    })[0].path, "$.supplierIds");
+    assert.equal(validateToolParams("sync_mcn_inquiry_status", {
+      requirement_id: "req-1", project_id: "project-1", supplierIds: ["0"],
+    })[0].path, "$.supplierIds[0]");
     assert.equal(validateToolParams("get_recommendation_run_detail", { run_id: "0" }).length, 1);
     assert.equal(validateToolParams("get_recommendation_run_detail", { run_id: "abc" }).length, 1);
   });

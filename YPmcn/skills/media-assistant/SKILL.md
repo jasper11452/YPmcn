@@ -19,7 +19,7 @@ description: "Use for YPmcn requirement validation, sourcing, distribution, rank
 
 `validate_requirement → 自动 search_creators → 固定供需结果与用户确认 → rank_mcns 赛马 → MCN 确认 → select_inquiry_form_fields → 可选 manual_source_creators → create_with_distributions 本地预检 → AskUserQuestion 确认 → 同参数 create_with_distributions → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
 
-任一弹窗的已提交选择都是执行指令，必须同轮继续所选动作，不能只回复已确认。企微 Tool 只传 live key `requirement_id`、`supplierIds`、`columns` 和 `description`；AI 仅根据已确认用户需求将 `description` 整理为可直接发送的微信纯文本，可按需换行，禁止 JSON、代码块或杜撰。业务说法 `requirement_ID/colums` 不可作为参数名。首次调用只做本地预检：Hook 从最近一次成功的 `rank_mcns` 结果核对 `supplierIds`，并在 `EXTERNAL_SEND_CONFIRMATION_REQUIRED` 中给出唯一允许的 AskUserQuestion 参数。必须原样调用该弹窗；它用多行正文逐项展示 MCN 名称、字段和完整消息。只有“确认发送”才可同轮以完全相同参数再次调用企微 Tool；拒绝、关闭、超时、弹窗被改写或参数变化均不得外发。
+任一弹窗的已提交选择都是执行指令，必须同轮继续所选动作，不能只回复已确认。企微 Tool 只传 live key `requirement_id`、`supplierIds`、`columns` 和 `description`；`columns` 每项必须含选择器原始 `key`，旧 `field_key` 调用前改名。AI 仅根据已确认用户需求将 `description` 整理为可直接发送的微信纯文本，可按需换行，禁止 JSON、代码块或杜撰。业务说法 `requirement_ID/colums` 不可作为参数名。首次调用只做本地预检：Hook 从最近一次成功的 `rank_mcns` 结果核对 `supplierIds`，并在 `EXTERNAL_SEND_CONFIRMATION_REQUIRED` 中给出唯一允许的 AskUserQuestion 参数。必须原样调用该弹窗；它用多行正文逐项展示 MCN 名称、字段和完整消息。只有“确认发送”才可同轮以完全相同参数再次调用企微 Tool；拒绝、关闭、超时、弹窗被改写或参数变化均不得外发。
 宿主若注入标准 Brief preview，将其作为解析参考：未决值主动询问，完整后优先调用 `validate_requirement`，但 preview 不限制 Skill 读取或其他 Tool。
 ## 用户引导
 

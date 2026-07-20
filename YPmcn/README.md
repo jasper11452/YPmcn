@@ -14,9 +14,9 @@ validate_requirement
 → manual_source_creators（可选，仅企微外发前）
 → create_with_distributions(requirement_id, supplierIds, columns, description)
 → Native Approval 警告；确认后宿主续传原调用
-→ sync_mcn_inquiry_status(requirement_id, project_id, mcn_id)
+→ sync_mcn_inquiry_status(requirement_id, project_id, supplierIds)
 → waiting_mcn_return
-→ sync / ingest_mcn_submissions / sync（完成回收）
+→ sync / ingest_mcn_submissions(inquiry_ids) / sync（完成回收）
 → rank_creators(requirement_id)
 → create_submission_batch(run_id)
 → record_client_feedback(run_id, feedback_items)

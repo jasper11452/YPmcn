@@ -119,14 +119,16 @@ class SkillPackageContractTest(unittest.TestCase):
         for mapping in (
             "需求身份来自 `validate_requirement.data.id`",
             "`demand_id+demand_version` 只用于对账",
-            "`project_id+mcn_id+requirement_id` 绑定 distribution",
-            "`inquiry_id` 绑定回收",
+            "`project_id+supplierIds+requirement_id` 绑定 distribution",
+            "`inquiry_ids` 绑定回收",
             "`run_id` 来自精排",
+            "无实际 `inquiry_ids` 不 ingest",
         ):
             self.assertIn(mapping, routing)
         for obsolete in (
             "search_creators.data.id → candidate_pool_id",
             "rank_mcns.data.id → mcn_recommendation_id",
+            "无真实 items 不 ingest",
         ):
             self.assertNotIn(obsolete, routing)
 

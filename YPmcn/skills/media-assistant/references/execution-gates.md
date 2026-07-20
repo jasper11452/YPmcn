@@ -6,7 +6,7 @@
 
 会话编排状态写入本地 `state/confirmation_guard.json` 的 `workflow` 与 `workflow_events`。`phase/next_action` 是 Agent 编排权威，Provider 的 `workflow_state/allowed_actions` 只作业务事实或未知写对账，不能覆盖本地 phase。Hook 只按实际成功响应推进；失败保留阶段并进入恢复。本地状态不伪造 Provider 成功。
 
-需求身份来自 `validate_requirement.data.id`；它用于 `search_creators/rank_mcns` 的 `id` 及后续 `requirement_id`。`demand_id+demand_version` 只用于对账，`project_id+mcn_id+requirement_id` 绑定 distribution，`inquiry_id` 绑定回收，`run_id` 来自精排。达人/机构 ID 只复制实际结果，不猜测或展示给用户。
+需求身份来自 `validate_requirement.data.id`；它用于 `search_creators/rank_mcns` 的 `id` 及后续 `requirement_id`。`demand_id+demand_version` 只用于对账，`project_id+supplierIds+requirement_id` 绑定 distribution，`inquiry_ids` 绑定回收，`run_id` 来自精排。达人/机构 ID 只复制实际结果，不猜测或展示给用户。
 
 ## 连续执行与人工确认
 
@@ -22,6 +22,6 @@
 
 - Hook 不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序；除外发绕过与 AskUserQuestion 外发确认外不做严格阻断。
 - `search_creators` 只查现有库；`manual_source_creators` 只导入当前需求已有的真实人工结果。
-- 外发成功后按实际身份执行 `sync → ingest_mcn_submissions → sync`；无真实 items 不 ingest，不轮询。
+- 外发成功后按实际身份执行 `sync → ingest_mcn_submissions → sync`；无实际 `inquiry_ids` 不 ingest，不轮询。
 - 写结果未知先对账且禁止盲重试；明确参数错误只修该字段。用户要求失败即停时绝不重试。
 - 详情 Tool 只读且不推进；批次成功后才导出，客户有具体反馈后才记录。

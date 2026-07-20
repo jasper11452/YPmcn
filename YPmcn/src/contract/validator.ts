@@ -272,6 +272,19 @@ function validateSemanticRequirements(
     )];
   }
   if (tool === "create_with_distributions") {
+    if (Array.isArray(params.columns)) {
+      for (let index = 0; index < params.columns.length; index += 1) {
+        const column = params.columns[index];
+        if (isRecord(column) &&
+          (typeof column.key !== "string" || column.key.trim().length === 0)) {
+          return [issue(
+            "INVALID_INPUT",
+            `$.columns[${index}].key`,
+            "Each column must contain a non-empty key.",
+          )];
+        }
+      }
+    }
     if (typeof params.description !== "string" || params.description.trim().length === 0) {
       return [issue("INVALID_INPUT", "$.description", "description must be a non-empty plain-text WeChat message.")];
     }
@@ -287,10 +300,23 @@ function validateSemanticRequirements(
     }
   }
   if (tool === "sync_mcn_inquiry_status") {
-    for (const key of ["requirement_id", "project_id", "mcn_id"] as const) {
+    for (const key of ["requirement_id", "project_id"] as const) {
       const value = params[key];
       if (typeof value !== "string" || value.trim().length === 0 || value.trim() === "0") {
         return [issue("INVALID_INPUT", `$.${key}`, `${key} must not be empty or a placeholder ID.`)];
+      }
+    }
+    if (!Array.isArray(params.supplierIds) || params.supplierIds.length === 0) {
+      return [issue("INVALID_INPUT", "$.supplierIds", "supplierIds must contain at least one supplier ID.")];
+    }
+    for (let index = 0; index < params.supplierIds.length; index += 1) {
+      const value = params.supplierIds[index];
+      if (typeof value !== "string" || value.trim().length === 0 || value.trim() === "0") {
+        return [issue(
+          "INVALID_INPUT",
+          `$.supplierIds[${index}]`,
+          "supplierIds must not contain empty or placeholder IDs.",
+        )];
       }
     }
   }

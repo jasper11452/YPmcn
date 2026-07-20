@@ -149,8 +149,8 @@ describe("YP Action native hooks", () => {
     const prepared = await requestConfirmation(distributionParams({
       supplierIds: ["supplier-1", "supplier-2"],
       columns: [
-        { field: "platform", label: "平台（xiaohongshu / douyin）" },
-        { field: "kwUid", label: "达人 ID" },
+        { key: "platform", name: "平台（xiaohongshu / douyin）" },
+        { key: "kwUid", name: "达人 ID" },
       ],
       description: "您好，想邀请贵司参与真实企微消息项目。\n请协助推荐合适达人。",
     }), {}, "call-send", ["星图文化", "青禾传媒"]);
