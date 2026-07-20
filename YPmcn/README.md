@@ -11,13 +11,14 @@ validate_requirement
 → rank_mcns(id, platform, 动态排序数量) 创建并返回 inquiry_id
 → 高风险且确认拓展时 manual_source_creators(requirement_id, target_count) 启动/复用关联任务
 → 按名称展示 MCN排序结果 → 确认
-→ select_inquiry_form_fields()
-→ create_with_distributions(requirement_id, supplierIds, columns, description, wechatNotificationMessage=description)
+→ select_inquiry_form_fields(platform)
+→ create_with_distributions(requirement_id, supplierIds, columns, description, wechat_notification_message=description)
 → Native Approval 警告；确认后宿主续传原调用（明确未绑定导致整批无写入拒绝时，自动剔除后续发剩余机构）
 → sync_mcn_inquiry_status(requirement_id, project_id, supplierIds)
 → waiting_mcn_return
 → sync / ingest_mcn_submissions(inquiry_ids) / sync（完成回收）
 → rank_creators(requirement_id)
+→ export_csv（按 create_with_distributions.columns 原顺序输出首批名单）
 → create_submission_batch(run_id)
 → record_client_feedback(run_id, feedback_items)
 ```

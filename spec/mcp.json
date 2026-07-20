@@ -564,8 +564,17 @@
     },
     "select_inquiry_form_fields": {
       "name": "select_inquiry_form_fields",
-      "required": [],
+      "required": [
+        "platform"
+      ],
       "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "xiaohongshu",
+            "douyin"
+          ]
+        },
         "url": {
           "anyOf": [
             {
@@ -619,14 +628,25 @@
             }
           ]
         },
-        "wechatNotificationMessage": {
+        "wechat_notification_message": {
           "type": "string"
         },
         "columns": {
           "type": "array",
           "items": {
             "type": "object",
-            "additionalProperties": true
+            "required": ["key", "name"],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
           }
         },
         "supplierIds": {
@@ -637,11 +657,11 @@
         }
       },
       "forbidden": [],
-      "agentRequired": ["description", "wechatNotificationMessage"],
+      "agentRequired": ["description", "wechat_notification_message"],
       "agentSemanticRequirements": {
         "description": "recipient-ready plain-text WeChat message organized by AI from the confirmed user requirement; may contain line breaks and must not be JSON",
-        "wechatNotificationMessage": "must be exactly identical to description",
-        "columns": "user-confirmed field object list; every item must contain the selector's non-empty key (map field_key to key before calling)",
+        "wechat_notification_message": "must be exactly identical to description",
+        "columns": "user-confirmed field object list; every item must contain only non-empty key and name (map field_key/field_name to key/name and discard all other metadata before calling)",
         "supplierIds": "confirmed institution ID array",
         "aliases": {
           "requirement_ID": "requirement_id",

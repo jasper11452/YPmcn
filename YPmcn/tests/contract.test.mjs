@@ -30,10 +30,10 @@ function validDistribution(overrides = {}) {
     "您好，现招募小红书达人参与项目 A。\n请协助推荐合适人选，谢谢。";
   return {
     requirement_id: "req-1",
-    columns: [{ key: "kwUid" }],
+    columns: [{ key: "kwUid", name: "达人 ID" }],
     supplierIds: ["supplier-1"],
     description,
-    wechatNotificationMessage: description,
+    wechat_notification_message: description,
     ...overrides,
   };
 }
@@ -119,7 +119,7 @@ describe("current Endpoint input validation", () => {
       ["validate_requirement", { payload: { raw: "brief" } }],
       ["search_creators", { id: "req-1" }],
       ["rank_mcns", { id: "req-1", platform: "xiaohongshu", medium_risk_confirmation: null }],
-      ["select_inquiry_form_fields", { url: null, timeout_seconds: 30 }],
+      ["select_inquiry_form_fields", { platform: "xiaohongshu", url: null, timeout_seconds: 30 }],
       ["create_with_distributions", validDistribution()],
       ["sync_mcn_inquiry_status", {
         requirement_id: "req-1", project_id: "project-1", supplierIds: ["supplier-1"],
@@ -141,6 +141,14 @@ describe("current Endpoint input validation", () => {
   });
 
   it("rejects old provider arguments and malformed nested live inputs", () => {
+    assert.equal(
+      validateToolParams("select_inquiry_form_fields", {})[0].path,
+      "$.platform",
+    );
+    assert.equal(
+      validateToolParams("select_inquiry_form_fields", { platform: "weibo" })[0].path,
+      "$.platform",
+    );
     const oldSend = validateToolParams("create_with_distributions", {
       ...validDistribution(),
       projectName: "旧项目字段",
@@ -167,7 +175,25 @@ describe("current Endpoint input validation", () => {
       validateToolParams("create_with_distributions", validDistribution({
         columns: [{ field_key: "kwUid", field_name: "达人 ID" }],
       })).map(({ path }) => path),
-      ["$.columns[0].key"],
+      ["$.columns[0].field_key", "$.columns[0].field_name"],
+    );
+    assert.equal(
+      validateToolParams("create_with_distributions", validDistribution({
+        columns: [{ key: "kwUid", name: "" }],
+      }))[0].path,
+      "$.columns[0].name",
+    );
+    assert.deepEqual(
+      validateToolParams("create_with_distributions", validDistribution({
+        columns: [{
+          key: "platform",
+          name: "平台（xiaohongshu / douyin）",
+          type: "VARCHAR(32)",
+          required: true,
+          group: "项目信息",
+        }],
+      })).map(({ path }) => path),
+      ["$.columns[0].type", "$.columns[0].required", "$.columns[0].group"],
     );
     assert.equal(
       validateToolParams("create_with_distributions", validDistribution({
@@ -183,15 +209,15 @@ describe("current Endpoint input validation", () => {
     );
     assert.equal(
       validateToolParams("create_with_distributions", validDistribution({
-        wechatNotificationMessage: "不同的企微消息",
+        wechat_notification_message: "不同的企微消息",
       }))[0].path,
-      "$.wechatNotificationMessage",
+      "$.wechat_notification_message",
     );
     assert.equal(
       validateToolParams("create_with_distributions", validDistribution({
-        wechatNotificationMessage: undefined,
+        wechat_notification_message: undefined,
       }))[0].path,
-      "$.wechatNotificationMessage",
+      "$.wechat_notification_message",
     );
   });
 

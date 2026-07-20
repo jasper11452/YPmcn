@@ -22,6 +22,6 @@
 
 拓展分支先执行 `rank_mcns`；成功返回 `inquiry_id` 后才调用 `manual_source_creators({requirement_id,target_count})`。回执须匹配询价并含完整任务证据，才展示“已启动/已沿用”并进入 MCN 确认。内部 ID 不展示；证据不足即恢复。排序结果只显示规模、机构名、覆盖和缺口。
 
-企微 `description` 只据确认需求生成微信纯文本，`wechatNotificationMessage` 传入完全相同的内容。首次 `create_with_distributions` 预检后仅“确认发送”可外发。若 Provider 明确未写入且返回未绑定机构，只删这些机构、继承原确认续发其余机构，不再询问。结束仅提示一次“未绑定群聊，未发送：<机构名>；已发送：<机构名>”；无逐项回执不得声称已发送，写结果未知不得续发。
+企微 `description` 只据确认需求生成微信纯文本，`wechat_notification_message` 传入完全相同的内容。首次 `create_with_distributions` 预检后仅“确认发送”可外发。若 Provider 明确未写入且返回未绑定机构，只删这些机构、继承原确认续发其余机构，不再询问。结束仅提示一次“未绑定群聊，未发送：<机构名>；已发送：<机构名>”；无逐项回执不得声称已发送，写结果未知不得续发。
 
-批次实际成功后才按 `../assets/ypmcn_submission_template.csv` 调宿主 `export_csv`。表头逐字节一致；仅填 MCP 返回值，缺失留空。只有源字段明确为 cents 或 0–1 比例时才换算。文件名固定为 `ypmcn_submission_<demandId>_v<demandVersion>_batch_<batchNo>.csv`。
+After successful `rank_creators`, immediately call host `export_csv` with the first ranked list; do not wait for confirmation or call `create_submission_batch` first. Build the CSV from the exact `create_with_distributions.columns`: preserve order, set each header to `name` verbatim, and read its cells with the paired `key`; never add, remove, rename, or reorder fields. Use only MCP facts, leave missing values empty, and convert only an explicitly cents or 0–1 ratio source. Name it `ypmcn_submission_<demandId>_v<demandVersion>_batch_1.csv`.

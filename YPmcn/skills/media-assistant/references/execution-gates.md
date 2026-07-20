@@ -14,7 +14,7 @@
 
 `rank_mcns` 动态排序，不固定 5 家。拓展分支先调用它；同一成功响应须有当前需求 `inquiry_id`，才同轮调用 `manual_source_creators({requirement_id,target_count})`。任务回执须匹配该 ID，再进入 MCN 确认；缺失/冲突即恢复。非拓展分支直接确认。用户只看机构名、覆盖与缺口，ID 内部使用。
 
-企微 Tool 只传 `requirement_id`、`supplierIds`、`columns`、纯文本 `description` 和 `wechatNotificationMessage`；`wechatNotificationMessage` 必须与 `description` 完全一致，不得 JSON 化、杜撰或发送 `requirement_ID/colums`。
+企微 Tool 只传 `requirement_id`、`supplierIds`、`columns`、纯文本 `description` 和 `wechat_notification_message`；`wechat_notification_message` 必须与 `description` 完全一致，不得 JSON 化、杜撰或发送 `requirement_ID/colums`。
 
 `create_with_distributions` 第一次仅预检；`before_tool_call` 以最近 `rank_mcns` 的 ID—名称核对 `supplierIds`，任一名称无法核对即阻断。`EXTERNAL_SEND_CONFIRMATION_REQUIRED` 中的 AskUserQuestion 必须原样调用，并以真实换行逐项展示 MCN、字段和完整企微消息。只有返回“确认发送”才同参数第二次调用；其他结果不外发，修改对象或消息后重新走预检。
 

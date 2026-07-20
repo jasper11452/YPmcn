@@ -468,7 +468,7 @@ function validateMvpProfile(value: unknown): MvpContractProfile {
   validateExternalSchemaReferences(profile.outputContracts, "mvp-v2.outputContracts");
   requireExactStrings(
     tools.select_inquiry_form_fields?.required,
-    [],
+    ["platform"],
     "mvp-v2.tools.select_inquiry_form_fields.required",
   );
   return profile as unknown as MvpContractProfile;

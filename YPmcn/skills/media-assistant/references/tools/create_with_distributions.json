@@ -5,30 +5,38 @@
   "hostQualifiedName": "mcp__ypmcn__create_with_distributions",
   "readImmediatelyBeforeCall": true,
   "providerRequired": ["requirement_id", "columns", "supplierIds"],
-  "required": ["requirement_id", "columns", "supplierIds", "description", "wechatNotificationMessage"],
+  "required": ["requirement_id", "columns", "supplierIds", "description", "wechat_notification_message"],
   "argumentSchema": {
     "type": "object",
-    "required": ["requirement_id", "columns", "supplierIds", "description", "wechatNotificationMessage"],
+    "required": ["requirement_id", "columns", "supplierIds", "description", "wechat_notification_message"],
     "properties": {
       "requirement_id": { "type": "string" },
       "description": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-      "wechatNotificationMessage": { "type": "string" },
-      "columns": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+      "wechat_notification_message": { "type": "string" },
+      "columns": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["key", "name"],
+          "properties": {
+            "key": { "type": "string", "minLength": 1 }, "name": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
       "supplierIds": { "type": "array", "items": { "type": "string" } }
     },
     "additionalProperties": false
   },
   "sideEffects": "provider-write",
   "retry": {
-    "policy": "no-blind-retry",
-    "blindRetry": false,
-    "unknownOutcome": "stop-and-request-returned-evidence",
-    "reconcileWith": null
+    "policy": "no-blind-retry", "blindRetry": false,
+    "unknownOutcome": "stop-and-request-returned-evidence", "reconcileWith": null
   },
   "rules": [
-    "columns 每个对象必须包含非空 key；选择器旧 field_key/field_name 输出必须在调用前重命名为 key/name，其余字段元数据可保留。",
+    "columns 每个对象只允许非空 key 和 name；选择器旧 field_key/field_name 输出必须在调用前重命名为 key/name，并丢弃 type、required、group 等其他字段元数据。",
     "description 由 AI 仅根据已确认用户需求整理成可直接发送、可按需换行的微信纯文本；禁止 JSON、代码块或杜撰。",
-    "wechatNotificationMessage 必须与 description 使用完全相同的字符串。",
+    "wechat_notification_message 必须与 description 使用完全相同的字符串。",
     "requirement_ID 与 colums 是业务误拼，实际参数必须写 requirement_id 与 columns。",
     "首次调用只做本地预检；AskUserQuestion 必须使用 EXTERNAL_SEND_CONFIRMATION_REQUIRED 中的原始参数，以多行正文展示最近一次成功 rank_mcns 映射出的 MCN 名称、字段和完整消息；名称无法全部核对时不得发送。",
     "只有 AskUserQuestion 返回“确认发送”才可同轮以完全相同参数再次调用；拒绝、关闭、超时、弹窗改写或参数变化均不得触达 Provider；明确无写入的未绑定缩减或逐机构 fallback 可继承本次确认。",

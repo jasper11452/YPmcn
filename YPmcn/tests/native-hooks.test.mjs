@@ -18,10 +18,10 @@ const distributionParams = (overrides = {}) => {
     "您好，现招募小红书达人参与测试项目。\n图文报价：5000元以内\n请协助推荐合适人选，谢谢。";
   return {
     requirement_id: "requirement-1",
-    columns: [{ field_key: "creator_name", field_name: "达人名称" }],
+    columns: [{ key: "creator_name", name: "达人名称" }],
     supplierIds: ["supplier-1"],
     description,
-    wechatNotificationMessage: description,
+    wechat_notification_message: description,
     ...overrides,
   };
 };
@@ -957,12 +957,12 @@ describe("YP Action native hooks", () => {
     for (const event of [
       {
         toolName: "mcp__ypmcn__select_inquiry_form_fields",
-        params: {},
+        params: { platform: "xiaohongshu" },
         result: { success: true, data: { description: "creator_name：达人名称" }, error: null },
       },
       {
         toolName: "mcp__ypmcn__select_inquiry_form_fields",
-        params: {},
+        params: { platform: "douyin" },
         error: "connection lost",
       },
     ]) {
@@ -993,7 +993,7 @@ describe("YP Action native hooks", () => {
 
     assert.equal(await localHooks.get("after_tool_call")({
       toolName: "mcp__ypmcn__select_inquiry_form_fields",
-      params: {},
+      params: { platform: "xiaohongshu" },
       result: { success: false, error: { code: "TIMEOUT" } },
     }, {}), undefined);
     assert.deepEqual(errors, ["failed to open inquiry field selector: browser unavailable"]);

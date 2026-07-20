@@ -145,7 +145,7 @@
       "id": "distribution-created",
       "from": "inquiry_fields_ready",
       "trigger": {"type": "tool", "name": "create_with_distributions"},
-      "guards": ["supply, MCN, and field choices are present in local orchestration state", "the exact multiline AskUserQuestion prompt and subsequent create_with_distributions parameters match the one-time confirmation receipt", "requirement_id, supplierIds, columns, a plain-text WeChat-message description, and an identical wechatNotificationMessage resolve one requirement"],
+      "guards": ["supply, MCN, and field choices are present in local orchestration state", "the exact multiline AskUserQuestion prompt and subsequent create_with_distributions parameters match the one-time confirmation receipt", "requirement_id, supplierIds, columns, a plain-text WeChat-message description, and an identical wechat_notification_message resolve one requirement"],
       "evidence": ["actual successful external distribution response recorded in local JSON"],
       "nextPhase": "waiting_mcn_return"
     },

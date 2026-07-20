@@ -288,11 +288,11 @@ function validateSemanticRequirements(
     if (typeof params.description !== "string" || params.description.trim().length === 0) {
       return [issue("INVALID_INPUT", "$.description", "description must be a non-empty plain-text WeChat message.")];
     }
-    if (params.wechatNotificationMessage !== params.description) {
+    if (params.wechat_notification_message !== params.description) {
       return [issue(
         "INVALID_INPUT",
-        "$.wechatNotificationMessage",
-        "wechatNotificationMessage must be exactly identical to description.",
+        "$.wechat_notification_message",
+        "wechat_notification_message must be exactly identical to description.",
       )];
     }
     const trimmed = params.description.trim();

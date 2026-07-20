@@ -29,13 +29,13 @@ const EXPECTED_INPUTS = {
     },
   },
   select_inquiry_form_fields: {
-    required: [], properties: { url: "string|null", timeout_seconds: "integer" },
+    required: ["platform"], properties: { platform: "string", url: "string|null", timeout_seconds: "integer" },
   },
   create_with_distributions: {
     required: ["requirement_id", "columns", "supplierIds"],
     properties: {
       requirement_id: "string", description: "string|null",
-      wechatNotificationMessage: "string",
+      wechat_notification_message: "string",
       columns: "array", supplierIds: "array",
     },
   },
@@ -143,14 +143,14 @@ describe("current Endpoint MCP contract", () => {
   it("adds the Agent-required plain-text message without misreporting the live Provider required list", () => {
     assert.deepEqual(
       profile.tools.create_with_distributions.agentRequired,
-      ["description", "wechatNotificationMessage"],
+      ["description", "wechat_notification_message"],
     );
     assert.match(
       profile.tools.create_with_distributions.agentSemanticRequirements.description,
       /plain-text WeChat message.*line breaks.*must not be JSON/,
     );
     assert.match(
-      profile.tools.create_with_distributions.agentSemanticRequirements.wechatNotificationMessage,
+      profile.tools.create_with_distributions.agentSemanticRequirements.wechat_notification_message,
       /exactly identical to description/,
     );
     assert.equal(
@@ -160,8 +160,26 @@ describe("current Endpoint MCP contract", () => {
     assert.equal(profile.tools.create_with_distributions.agentSemanticRequirements.aliases.colums, "columns");
     assert.match(
       profile.tools.create_with_distributions.agentSemanticRequirements.columns,
-      /non-empty key.*field_key to key/,
+      /only non-empty key and name.*field_key\/field_name to key\/name.*discard all other metadata/,
     );
+    assert.deepEqual(
+      profile.tools.create_with_distributions.properties.columns.items,
+      {
+        type: "object",
+        required: ["key", "name"],
+        properties: {
+          key: { type: "string", minLength: 1 },
+          name: { type: "string", minLength: 1 },
+        },
+        additionalProperties: false,
+      },
+    );
+  });
+
+  it("requires a supported platform when opening the inquiry field selector", () => {
+    const tool = profile.tools.select_inquiry_form_fields;
+    assert.deepEqual(tool.required, ["platform"]);
+    assert.deepEqual(tool.properties.platform.enum, ["xiaohongshu", "douyin"]);
   });
 
   it("does not promote runtime observations into advertised output schemas", () => {

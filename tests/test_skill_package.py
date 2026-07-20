@@ -414,11 +414,11 @@ class SkillPackageContractTest(unittest.TestCase):
 
     def test_output_assets_fix_wecom_and_submission_shapes(self):
         assets = PACKAGE / "skills" / "media-assistant" / "assets"
-        csv_header = (assets / "ypmcn_submission_template.csv").read_text(encoding="utf-8").strip()
-        self.assertEqual(
-            "排名,平台,达人昵称,达人ID,来源,机构名称,官方报价（元）,提报报价（元）,提报返点（%）,推荐得分,推荐理由,风险提示",
-            csv_header,
-        )
+        self.assertFalse((assets / "ypmcn_submission_template.csv").exists())
+        workflow_text = "\n".join((read(SKILL), read(REFERENCES / "frontend-response.md")))
+        self.assertIn("After successful `rank_creators`, immediately call host `export_csv`", workflow_text)
+        self.assertIn("set each header to `name` verbatim", workflow_text)
+        self.assertIn("read its cells with the paired `key`", workflow_text)
         wecom = (assets / "wecom_inquiry_template.txt").read_text(encoding="utf-8")
         for required in (
             "【{project_name}｜达人提报】",
