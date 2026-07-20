@@ -335,6 +335,14 @@ class SkillPackageContractTest(unittest.TestCase):
             }
         ))
 
+        cases_by_id = {item["id"]: item for item in cases}
+        single_budget = cases_by_id["single-creator-budget-default-range"]
+        self.assertEqual("小红书图文单达人预算5000元", single_budget["brief_fragment"])
+        self.assertEqual(
+            "[4500,5500]",
+            single_budget["expected_range_fields"]["kolOfficialPriceL1"],
+        )
+
         serialized = json.dumps([cases, regressions], ensure_ascii=False)
         for obsolete in ("quantity_total", "submission_deadline_at", "budget_min_cents", "budget_max_cents"):
             self.assertNotIn(obsolete, serialized)

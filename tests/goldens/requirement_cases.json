@@ -14,10 +14,10 @@
     "forbidden_fields": ["followercountMin", "followercountMax"]
   },
   {
-    "id": "exact-single-creator-price",
-    "brief_fragment": "小红书图文单达人官方报价5000元",
+    "id": "single-creator-budget-default-range",
+    "brief_fragment": "小红书图文单达人预算5000元",
     "expected_gate": "ready",
-    "expected_range_fields": {"kolOfficialPriceL1": "[5000,5000]"},
+    "expected_range_fields": {"kolOfficialPriceL1": "[4500,5500]"},
     "forbidden_fields": ["kolOfficialPriceL1Min", "kolOfficialPriceL1Max"]
   },
   {
