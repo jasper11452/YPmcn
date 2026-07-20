@@ -421,6 +421,10 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertIn("set each header to `name` verbatim", workflow_text)
         self.assertIn("extract that creator's cell from its successful detail response with the paired `key`", workflow_text)
         self.assertIn("Never reuse a previous or fixed header", workflow_text)
+        self.assertIn("Export the CSV as UTF-8 with a leading UTF-8 BOM (bytes `EF BB BF`)", workflow_text)
+        self.assertIn("never emit GBK/ANSI or UTF-8 without the BOM", workflow_text)
+        runtime_source = read(PACKAGE / "src" / "index.ts")
+        self.assertIn("Export UTF-8 with a leading UTF-8 BOM (bytes EF BB BF)", runtime_source)
         wecom = (assets / "wecom_inquiry_template.txt").read_text(encoding="utf-8")
         for required in (
             "【{project_name}｜达人提报】",
