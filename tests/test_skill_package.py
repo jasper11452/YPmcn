@@ -120,6 +120,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "需求身份来自 `validate_requirement.data.id`",
             "`demand_id+demand_version` 只用于对账",
             "`project_id+supplierIds+requirement_id` 绑定 distribution",
+            "`rank_mcns` 返回的单个 `inquiry_id` 绑定达人拓展前置询价",
             "`inquiry_ids` 绑定回收",
             "`run_id` 来自精排",
             "无实际 `inquiry_ids` 不 ingest",
@@ -158,6 +159,9 @@ class SkillPackageContractTest(unittest.TestCase):
             "真实换行逐项展示 MCN、字段和完整企微消息",
             "任一名称无法核对即阻断",
             "修改对象或消息后重新走预检",
+            "未绑定的供应商不发送",
+            "已绑定的供应商在同一次调用中继续发送",
+            "只传实际回执为已发送的供应商 ID",
         ):
             self.assertIn(required, joined)
         for pattern in (

@@ -35,6 +35,7 @@ const EXPECTED_INPUTS = {
     required: ["requirement_id", "columns", "supplierIds"],
     properties: {
       requirement_id: "string", description: "string|null",
+      wechatNotificationMessage: "string",
       columns: "array", supplierIds: "array",
     },
   },
@@ -140,10 +141,17 @@ describe("current Endpoint MCP contract", () => {
   });
 
   it("adds the Agent-required plain-text message without misreporting the live Provider required list", () => {
-    assert.deepEqual(profile.tools.create_with_distributions.agentRequired, ["description"]);
+    assert.deepEqual(
+      profile.tools.create_with_distributions.agentRequired,
+      ["description", "wechatNotificationMessage"],
+    );
     assert.match(
       profile.tools.create_with_distributions.agentSemanticRequirements.description,
       /plain-text WeChat message.*line breaks.*must not be JSON/,
+    );
+    assert.match(
+      profile.tools.create_with_distributions.agentSemanticRequirements.wechatNotificationMessage,
+      /exactly identical to description/,
     );
     assert.equal(
       profile.tools.create_with_distributions.agentSemanticRequirements.aliases.requirement_ID,
@@ -166,7 +174,7 @@ describe("current Endpoint MCP contract", () => {
       assert.equal(output.failureEnvelope, "observed-runtime", name);
       assert.equal(output.successSchema.type, "object", name);
       assert.equal(output.successSchema.additionalProperties, true, name);
-      if (!["search_creators", "manual_source_creators"].includes(name)) {
+      if (!["search_creators", "rank_mcns", "manual_source_creators"].includes(name)) {
         assert.deepEqual(output.successSchema, { type: "object", additionalProperties: true }, name);
       }
     }
@@ -174,8 +182,11 @@ describe("current Endpoint MCP contract", () => {
       "demand_count", "eligible_creator_count", "supply_ratio", "hard_shortfall_count",
       "buffer_shortfall_count", "supply_risk_level", "suggested_expansion_count", "recommended_action",
     ]);
+    assert.deepEqual(profile.outputContracts.rank_mcns.successSchema.properties.data.required, [
+      "inquiry_id",
+    ]);
     assert.deepEqual(profile.outputContracts.manual_source_creators.successSchema.properties.data.required, [
-      "task_id", "requirement_id", "target_count", "status", "operation", "started_at", "accepted_count",
+      "task_id", "requirement_id", "inquiry_id", "target_count", "status", "operation", "started_at", "accepted_count",
     ]);
     assert.deepEqual(
       profile.outputContracts.manual_source_creators.successSchema.properties.data.properties.status.enum,

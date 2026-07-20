@@ -186,11 +186,45 @@
     },
     "rank_mcns": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "No provider outputSchema is advertised; retain the actual response as evidence before deriving downstream identifiers.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. Before manual sourcing, one successful response must return the inquiry_id created for the current requirement; a success envelope without inquiry_id cannot satisfy the prerequisite.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
         "type": "object",
+        "required": [
+          "success",
+          "data",
+          "error"
+        ],
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "inquiry_id"
+            ],
+            "properties": {
+              "inquiry_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                ]
+              }
+            },
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "null"
+          }
+        },
         "additionalProperties": true
       },
       "errorCodes": []
@@ -260,6 +294,7 @@
             "required": [
               "task_id",
               "requirement_id",
+              "inquiry_id",
               "target_count",
               "status",
               "operation",
@@ -274,6 +309,18 @@
               "requirement_id": {
                 "type": "string",
                 "minLength": 1
+              },
+              "inquiry_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                ]
               },
               "target_count": {
                 "type": "integer",
@@ -511,6 +558,7 @@
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
+        "one successful persisted response returns exactly one inquiry_id created for the same requirement before manual_source_creators is called",
         "retain actual returned payload as downstream evidence"
       ]
     },
@@ -571,6 +619,9 @@
             }
           ]
         },
+        "wechatNotificationMessage": {
+          "type": "string"
+        },
         "columns": {
           "type": "array",
           "items": {
@@ -586,9 +637,10 @@
         }
       },
       "forbidden": [],
-      "agentRequired": ["description"],
+      "agentRequired": ["description", "wechatNotificationMessage"],
       "agentSemanticRequirements": {
         "description": "recipient-ready plain-text WeChat message organized by AI from the confirmed user requirement; may contain line breaks and must not be JSON",
+        "wechatNotificationMessage": "must be exactly identical to description",
         "columns": "user-confirmed field object list; every item must contain the selector's non-empty key (map field_key to key before calling)",
         "supplierIds": "confirmed institution ID array",
         "aliases": {
@@ -694,7 +746,7 @@
         "target_count": {
           "type": "integer",
           "minimum": 1,
-          "description": "本次需要手扒新增的达人数量"
+          "description": "本次需要达人拓展新增的达人数量"
         }
       },
       "forbidden": [],
@@ -711,7 +763,7 @@
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
-        "one returned data record contains task_id, echoed requirement_id and target_count, allowed status and operation, started_at, and accepted_count",
+        "one returned data record contains task_id, echoed requirement_id, the same inquiry_id returned by rank_mcns, target_count, allowed status and operation, started_at, and accepted_count",
         "retain actual returned payload as downstream evidence"
       ]
     },

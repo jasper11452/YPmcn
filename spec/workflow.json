@@ -89,7 +89,8 @@
     "currentProviderGaps": {
       "create_with_distributions": "writes the external API but does not persist project or distribution identifiers in the local ledger",
       "sync_mcn_inquiry_status": "records sync metadata only; it does not query provider state or upsert mcn_inquiries",
-      "manual_source_creators": "the production Provider task store, idempotent start implementation, and durable task evidence are not present in this repository and require external deployment verification",
+      "rank_mcns": "the production Provider has not been verified to create and return an inquiry_id for the current requirement before manual sourcing",
+      "manual_source_creators": "the production Provider task store, inquiry-linked idempotent start implementation, and durable task evidence are not present in this repository and require external deployment verification",
       "maximumRecoverablePhase": "mcn_planning until provider inquiry sync is implemented"
     }
   },
@@ -100,10 +101,11 @@
     "stateRefresh": "read local JSON on every prompt; use get_workflow_state only for context loss or unknown write reconciliation",
     "unknownWriteRecovery": "current provider: get_workflow_state by demand identity from existing business facts; ledger trace_id reconciliation is target-only and an unknown external create remains blocked; never blind retry",
     "postValidationContinuation": "a successful validate_requirement result immediately continues to search_creators in the same turn",
-    "postSearchContinuation": "a successful search_creators result renders Provider risk, hard shortfall, buffer shortfall, and suggested expansion evidence; high risk with a positive suggestion waits for an explicit choice to start manual sourcing and MCN racing, start MCN only, or adjust the manual target",
-    "mcnRace": "rank_mcns uses a confirmed dynamic race size; never hardcode five recommendations and display institution names instead of IDs",
-    "manualSourcingPlacement": "after high-risk supply confirmation and before rank_mcns, create or idempotently reuse a durable manual-sourcing task with the confirmed positive target; task evidence never proves distribution or recovery",
-    "manualSourcingEvidence": "advance to rank_mcns only when one successful Provider response record contains a non-empty task_id, echoed requirement_id and target_count, status started/running/completed, operation created/reused, started_at, and non-negative accepted_count",
+    "postSearchContinuation": "a successful search_creators result renders Provider risk, hard shortfall, buffer shortfall, and suggested expansion evidence; high risk with a positive suggestion waits for an explicit choice to run MCN ranking then start inquiry-linked manual sourcing, run MCN ranking only, or adjust the manual target",
+    "mcnRace": "rank_mcns uses a confirmed dynamic ranking size, persists the inquiry association, and returns inquiry_id; never hardcode five recommendations and display institution names instead of IDs",
+    "rankInquiryEvidence": "manual_source_creators is not callable until one successful rank_mcns response for the same requirement returns a non-empty inquiry_id",
+    "manualSourcingPlacement": "after rank_mcns creates the current inquiry association and before MCN selection confirmation, create or idempotently reuse a durable manual-sourcing task with the confirmed positive target; inquiry and task evidence never prove distribution or recovery",
+    "manualSourcingEvidence": "advance to MCN selection confirmation only when one successful Provider response record contains a non-empty task_id, echoed requirement_id, the same inquiry_id returned by rank_mcns, echoed target_count, status started/running/completed, operation created/reused, started_at, and non-negative accepted_count",
     "rankCreatorsPrerequisite": "committed WeCom distribution plus completed recovery"
   },
   "transitions": [
@@ -127,15 +129,15 @@
       "id": "mcn-plan-ready",
       "from": "candidate_pool_ready",
       "trigger": {"type": "tool", "name": "rank_mcns"},
-      "guards": ["candidate pool belongs to the same requirement", "the user selected MCN-only or a requested manual-sourcing task returned complete durable task evidence", "minimum_mcn_count is derived dynamically instead of fixed at five"],
-      "evidence": ["committed mcn_recommendation_items rows"],
+      "guards": ["candidate pool belongs to the same requirement", "the user selected MCN-only or confirmed a positive pending manual-sourcing target", "minimum_mcn_count is derived dynamically instead of fixed at five", "write_mcn_recommendation_items is not false so the inquiry association is persisted"],
+      "evidence": ["committed mcn_recommendation_items rows", "a non-empty inquiry_id created for the same requirement"],
       "nextPhase": "mcn_planning"
     },
     {
       "id": "inquiry-fields-ready",
       "from": "mcn_planning",
       "trigger": {"type": "tool", "name": "select_inquiry_form_fields"},
-      "guards": ["the MCN race result and institution choices are confirmed", "the returned field description is actual Provider evidence"],
+      "guards": ["the MCN ranking result and institution choices are confirmed", "the returned field description is actual Provider evidence"],
       "evidence": ["successful field-list response recorded in local JSON"],
       "nextPhase": "inquiry_fields_ready"
     },
@@ -143,7 +145,7 @@
       "id": "distribution-created",
       "from": "inquiry_fields_ready",
       "trigger": {"type": "tool", "name": "create_with_distributions"},
-      "guards": ["supply, MCN, and field choices are present in local orchestration state", "the exact multiline AskUserQuestion prompt and subsequent create_with_distributions parameters match the one-time confirmation receipt", "requirement_id, supplierIds, columns, and a plain-text WeChat-message description resolve one requirement"],
+      "guards": ["supply, MCN, and field choices are present in local orchestration state", "the exact multiline AskUserQuestion prompt and subsequent create_with_distributions parameters match the one-time confirmation receipt", "requirement_id, supplierIds, columns, a plain-text WeChat-message description, and an identical wechatNotificationMessage resolve one requirement"],
       "evidence": ["actual successful external distribution response recorded in local JSON"],
       "nextPhase": "waiting_mcn_return"
     },
@@ -158,12 +160,12 @@
       "nextPhase": "waiting_mcn_return"
     },
     {
-      "id": "manual-supply-before-send-from-candidate-pool",
-      "from": "candidate_pool_ready",
+      "id": "manual-supply-after-inquiry-from-mcn-plan",
+      "from": "mcn_planning",
       "trigger": {"type": "tool", "name": "manual_source_creators"},
-      "guards": ["Provider reports high risk and a positive suggested expansion count", "the user confirmed the exact target_count or supplied one positive adjusted integer", "requirement_id and target_count match the pending local command", "no distribution has been sent"],
-      "evidence": ["durable Provider task record with task_id, echoed input, allowed status and operation, started_at, and accepted_count"],
-      "nextPhase": "candidate_pool_ready"
+      "guards": ["Provider reports high risk and a positive suggested expansion count", "the user confirmed the exact target_count or supplied one positive adjusted integer", "rank_mcns succeeded for the same requirement and returned inquiry_id", "requirement_id and target_count match the pending local command", "no distribution has been sent"],
+      "evidence": ["durable Provider task record with task_id, echoed requirement_id, matching inquiry_id, target_count, allowed status and operation, started_at, and accepted_count"],
+      "nextPhase": "mcn_planning"
     },
     {
       "id": "submission-ingested",

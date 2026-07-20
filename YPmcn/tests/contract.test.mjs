@@ -26,11 +26,14 @@ const CURRENT_TOOLS = [
 ];
 
 function validDistribution(overrides = {}) {
+  const description = overrides.description ??
+    "您好，现招募小红书达人参与项目 A。\n请协助推荐合适人选，谢谢。";
   return {
     requirement_id: "req-1",
     columns: [{ key: "kwUid" }],
     supplierIds: ["supplier-1"],
-    description: "您好，现招募小红书达人参与项目 A。\n请协助推荐合适人选，谢谢。",
+    description,
+    wechatNotificationMessage: description,
     ...overrides,
   };
 }
@@ -78,8 +81,9 @@ describe("current Endpoint contract loader", () => {
       item.trigger?.name === "manual_source_creators"
     );
     assert.equal(manualTransitions.length, 1);
-    assert.equal(manualTransitions[0].from, "candidate_pool_ready");
-    assert.match(workflow.policies.manualSourcingEvidence, /task_id.*target_count.*started_at/);
+    assert.equal(manualTransitions[0].from, "mcn_planning");
+    assert.match(workflow.policies.rankInquiryEvidence, /rank_mcns.*inquiry_id/);
+    assert.match(workflow.policies.manualSourcingEvidence, /task_id.*inquiry_id.*target_count.*started_at/);
     assert.equal(Object.isFrozen(workflow), true);
     assert.equal(loadDatabaseContract().profile, "mvp-v2");
     assert.equal(loadErrorCatalog().profile, "mvp-v2");
@@ -176,6 +180,18 @@ describe("current Endpoint input validation", () => {
         description: "```json\n{\"title\":\"项目 A\"}\n```",
       }))[0].message,
       /not a code block/,
+    );
+    assert.equal(
+      validateToolParams("create_with_distributions", validDistribution({
+        wechatNotificationMessage: "不同的企微消息",
+      }))[0].path,
+      "$.wechatNotificationMessage",
+    );
+    assert.equal(
+      validateToolParams("create_with_distributions", validDistribution({
+        wechatNotificationMessage: undefined,
+      }))[0].path,
+      "$.wechatNotificationMessage",
     );
   });
 

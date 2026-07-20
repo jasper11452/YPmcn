@@ -17,9 +17,9 @@ description: "Use for YPmcn requirement validation, sourcing, distribution, rank
 
 ## 主链
 
-`validate_requirement → 自动 search_creators → Provider 风险/缓冲补量与供给确认 → 高风险时 manual_source_creators(requirement_id,target_count) 启动或复用任务 → rank_mcns 赛马 → MCN 确认 → select_inquiry_form_fields → create_with_distributions 本地预检 → AskUserQuestion 确认 → 同参数 create_with_distributions → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
+`validate_requirement → 自动 search_creators → 供给确认 → rank_mcns（生成 inquiry_id）→ 已确认拓展时 manual_source_creators(requirement_id,target_count) → MCN 确认 → select_inquiry_form_fields → create_with_distributions 预检/确认/同参数外发 → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
 
-弹窗提交即同轮执行所选安全动作。高风险手扒只传 Hook 保存的确认数量；远程任务证据不完整时不得声称启动。企微参数与 `EXTERNAL_SEND_CONFIRMATION_REQUIRED` 规则见执行门禁；供给确认不授权外发。
+弹窗提交即同轮执行。拓展前须有同需求 `rank_mcns.inquiry_id`；该 ID 只作服务端关联，不作达人拓展参数。仅传 Hook 保存的确认数量，询价或任务证据不足时不调用、不宣称启动。`EXTERNAL_SEND_CONFIRMATION_REQUIRED` 见执行门禁；供给确认不授权外发。
 宿主若注入标准 Brief preview，将其作为解析参考：未决值主动询问，完整后优先调用 `validate_requirement`，但 preview 不限制 Skill 读取或其他 Tool。
 ## 用户引导
 

@@ -31,12 +31,14 @@
           "manual_source_creators": [
             "provider_supply_evidence_is_complete_and_high_risk_with_positive_suggested_expansion",
             "submitted_supply_command_binds_requirement_id_and_one_positive_target_count",
+            "rank_mcns_succeeded_for_the_same_requirement_and_returned_inquiry_id",
             "no_distribution_has_been_sent"
           ],
           "create_with_distributions": [
           "local_orchestration_state_has_confirmed_supply_mcn_and_columns",
           "request_identity_resolves_one_requirement",
           "description_is_plain_text_wechat_message_from_confirmed_user_requirement_not_json",
+          "wechat_notification_message_is_exactly_identical_to_description",
           "ask_user_question_prompt_and_followup_input_fingerprints_current_and_one_time"
         ],
         "ingest_mcn_submissions": [

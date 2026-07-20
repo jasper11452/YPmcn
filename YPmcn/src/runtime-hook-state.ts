@@ -90,8 +90,8 @@ export function denyStructured(code: string, context: string): Json {
 
 function storeAtPath(path: string): GuardStore {
   const data = load(path);
-  let changed = data.schema_version !== 14;
-  data.schema_version = 14;
+  let changed = data.schema_version !== 15;
+  data.schema_version = 15;
   if (!data.confirmations || typeof data.confirmations !== "object" || Array.isArray(data.confirmations)) {
     data.confirmations = {};
     changed = true;

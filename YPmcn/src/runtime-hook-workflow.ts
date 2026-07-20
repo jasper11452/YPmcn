@@ -20,14 +20,25 @@ const EXTERNAL_SEND_CONFIRM_LABEL = "确认发送";
 const EXTERNAL_SEND_CANCEL_LABEL = "取消发送";
 const EXTERNAL_SEND_CONFIRMATION_MARKER = "EXTERNAL_SEND_CONFIRMATION_REQUIRED";
 const SEARCH_CONFIRMATION_HEADER = "供给确认";
-const MANUAL_TARGET_CONFIRMATION_HEADER = "手扒数量";
+const MANUAL_TARGET_CONFIRMATION_HEADER = "达人拓展数量";
 const MCN_CONFIRMATION_HEADER = "MCN确认";
 const FIELD_CONFIRMATION_HEADER = "字段确认";
-const START_MANUAL_AND_MCN_LABEL = "启动手扒并开始MCN赛马";
-const MCN_ONLY_LABEL = "仅开始MCN赛马";
-const ADJUST_MANUAL_TARGET_LABEL = "调整手扒数量";
+const START_MANUAL_AND_MCN_LABEL = "启动达人拓展并开始MCN排序";
+const MCN_ONLY_LABEL = "仅开始MCN排序";
+const ADJUST_MANUAL_TARGET_LABEL = "调整达人拓展数量";
 const MANUAL_TASK_STATUSES = new Set(["started", "running", "completed"]);
 const MANUAL_TASK_OPERATIONS = new Set(["created", "reused"]);
+const DISTRIBUTION_SENT_STATUSES = new Set(["sent", "delivered"]);
+const DISTRIBUTION_UNBOUND_STATUSES = new Set([
+  "unbound", "not_bound", "group_unbound", "group_chat_unbound", "wecom_group_unbound",
+]);
+const DISTRIBUTION_SENT_LIST_KEYS = ["sent_supplier_ids", "sent_suppliers"];
+const DISTRIBUTION_UNBOUND_LIST_KEYS = ["unbound_supplier_ids", "unbound_suppliers"];
+const GROUP_BINDING_ERROR = /(?:未绑定|未配置|没有绑定|群聊.{0,12}(?:不存在|无效)|企业微信配置|企微配置|(?:wecom|wechat|group.?chat).{0,24}(?:unbound|not.?bound|missing|not.?configured))/iu;
+const GROUP_BINDING_CONTEXT = /(?:群聊|企微|企业微信|wecom|wechat|group.?chat)/iu;
+const EXTERNAL_SEND_CONFIRMATION_MODES = new Set([
+  "ask_user_question", "unbound_subset_continuation", "individual_fallback_continuation",
+]);
 const MCN_ID_KEYS = [
   "supplier_id", "supplierId", "mcn_id", "mcnId", "institution_id", "institutionId",
   "agency_id", "agencyId", "vendor_id", "vendorId",
@@ -184,7 +195,7 @@ function freeformAnswerForQuestion(event: Json, input: Json): string | undefined
 
 function positiveManualTarget(value: string | undefined): number | undefined {
   if (!value) return undefined;
-  const matched = /^(?:手扒新增|新增|目标)?\s*(\d+)\s*(?:位|个)?$/u.exec(value.normalize("NFKC").trim());
+  const matched = /^(?:达人拓展新增|新增|目标)?\s*(\d+)\s*(?:位|个)?$/u.exec(value.normalize("NFKC").trim());
   if (!matched) return undefined;
   const target = Number(matched[1]);
   return Number.isSafeInteger(target) && target > 0 ? target : undefined;
@@ -232,6 +243,11 @@ function findValue(root: unknown, keys: string[], accept: (value: unknown) => bo
 function resultText(root: unknown, keys: string[]): string | undefined {
   const value = findValue(root, keys, (candidate) => text(candidate));
   return text(value) ? value.trim() : undefined;
+}
+
+function identifierText(value: unknown): string | undefined {
+  if (text(value)) return value.trim();
+  return Number.isSafeInteger(value) && Number(value) > 0 ? String(value) : undefined;
 }
 
 function objectRecords(root: unknown): Json[] {
@@ -320,12 +336,46 @@ function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEviden
 
 type ManualSourcingEvidence = {
   taskId: string;
+  inquiryId: string;
   targetCount: number;
   status: string;
   operation: string;
   startedAt: string;
   acceptedCount: number;
 };
+
+type DistributionOutcomeEvidence = {
+  projectId?: string;
+  requestedCount: number;
+  sentCount: number;
+  unboundCount: number;
+  outcomes: Array<{ supplierId: string; status: "sent" | "unbound" }>;
+};
+
+type DistributionUnboundRejectionEvidence = {
+  remainingSupplierIds: string[];
+  unboundSupplierIds: string[];
+  unboundCount: number;
+};
+
+type DistributionBatchFallbackEvidence = {
+  supplierIds: string[];
+};
+
+function rankMcnInquiryEvidence(root: unknown, input: Json, workflow: Json): string | undefined {
+  const data = approvedTargetData(root);
+  if (!data || input.write_mcn_recommendation_items === false) return undefined;
+  if (
+    Number.isInteger(workflow.pending_manual_target_count) &&
+    (!text(workflow.requirement_id) || !text(input.id) || input.id.trim() !== workflow.requirement_id.trim())
+  ) return undefined;
+  const inquiryIds = new Set<string>();
+  for (const record of objectRecords(data)) {
+    const inquiryId = identifierText(record.inquiry_id);
+    if (inquiryId) inquiryIds.add(inquiryId);
+  }
+  return inquiryIds.size === 1 ? [...inquiryIds][0] : undefined;
+}
 
 function manualSourcingEvidence(
   root: unknown,
@@ -335,9 +385,10 @@ function manualSourcingEvidence(
   const data = approvedTargetData(root);
   if (!data) return undefined;
   const expectedRequirementId = text(workflow.requirement_id) ? workflow.requirement_id.trim() : undefined;
+  const expectedInquiryId = identifierText(workflow.rank_mcn_inquiry_id);
   const expectedTarget = workflow.pending_manual_target_count;
   if (
-    !expectedRequirementId || !Number.isInteger(expectedTarget) || expectedTarget < 1 ||
+    !expectedRequirementId || !expectedInquiryId || !Number.isInteger(expectedTarget) || expectedTarget < 1 ||
     !text(input.requirement_id) || input.requirement_id.trim() !== expectedRequirementId ||
     input.target_count !== expectedTarget
   ) return undefined;
@@ -346,6 +397,7 @@ function manualSourcingEvidence(
   for (const record of objectRecords(data)) {
     const taskId = record.task_id;
     const requirementId = record.requirement_id;
+    const inquiryId = identifierText(record.inquiry_id);
     const targetCount = record.target_count;
     const status = record.status;
     const operation = record.operation;
@@ -353,13 +405,15 @@ function manualSourcingEvidence(
     const acceptedCount = record.accepted_count;
     if (
       !text(taskId) || !text(requirementId) || requirementId.trim() !== expectedRequirementId ||
-      targetCount !== expectedTarget || !text(status) || !MANUAL_TASK_STATUSES.has(status) ||
+      inquiryId !== expectedInquiryId || targetCount !== expectedTarget ||
+      !text(status) || !MANUAL_TASK_STATUSES.has(status) ||
       !text(operation) || !MANUAL_TASK_OPERATIONS.has(operation) ||
       !text(startedAt) || !timestampPattern.test(startedAt) || Number.isNaN(Date.parse(startedAt)) ||
       !Number.isInteger(acceptedCount) || acceptedCount < 0
     ) continue;
     return {
       taskId: taskId.trim(),
+      inquiryId,
       targetCount,
       status,
       operation,
@@ -368,6 +422,299 @@ function manualSourcingEvidence(
     };
   }
   return undefined;
+}
+
+function distributionSupplierId(value: unknown): string | undefined {
+  if (text(value)) return value.trim();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Json;
+  const direct = recordText(record, [...MCN_ID_KEYS, "supplier"]);
+  if (direct) return direct;
+  for (const key of ["supplier", "mcn", "institution", "agency", "vendor"]) {
+    const nested = record[key];
+    if (!nested || typeof nested !== "object" || Array.isArray(nested)) continue;
+    const nestedId = recordText(nested as Json, ["id", ...MCN_ID_KEYS]);
+    if (nestedId) return nestedId;
+  }
+  return undefined;
+}
+
+function distributionSupplierName(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Json;
+  const direct = recordText(record, [...MCN_NAME_KEYS, "name"]);
+  if (direct) return direct;
+  for (const key of ["supplier", "mcn", "institution", "agency", "vendor"]) {
+    const nested = record[key];
+    if (!nested || typeof nested !== "object" || Array.isArray(nested)) continue;
+    const nestedName = recordText(nested as Json, ["name", ...MCN_NAME_KEYS]);
+    if (nestedName) return nestedName;
+  }
+  return undefined;
+}
+
+function rawObjectRecords(root: unknown): Json[] {
+  const queue: unknown[] = [root];
+  const records: Json[] = [];
+  const seen = new Set<unknown>();
+  while (queue.length > 0) {
+    const value = queue.shift();
+    if (typeof value === "string") {
+      const parsed = parsedJsonObject(value);
+      if (parsed) queue.push(parsed);
+      continue;
+    }
+    if (!value || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      queue.push(...value);
+      continue;
+    }
+    const record = value as Json;
+    records.push(record);
+    queue.push(...Object.values(record));
+  }
+  return records;
+}
+
+function rawResultTexts(root: unknown): string[] {
+  const queue: unknown[] = [root];
+  const values: string[] = [];
+  const seen = new Set<unknown>();
+  while (queue.length > 0) {
+    const value = queue.shift();
+    if (typeof value === "string") {
+      values.push(value.normalize("NFKC").trim());
+      const parsed = parsedJsonObject(value);
+      if (parsed) queue.push(parsed);
+      continue;
+    }
+    if (!value || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    queue.push(...(Array.isArray(value) ? value : Object.values(value as Json)));
+  }
+  return values.filter(text);
+}
+
+function definiteFailureEnvelope(root: unknown): boolean {
+  if (successful(root)) return false;
+  return rawObjectRecords(root).some((record) =>
+    record.success === false || record.ok === false || record.isError === true ||
+    (text(record.status) && ["error", "failed", "failure", "rejected"].includes(record.status.toLowerCase())) ||
+    (record.error !== null && record.error !== undefined && record.error !== false)
+  );
+}
+
+function hasDistributionWriteEvidence(root: unknown): boolean {
+  for (const record of rawObjectRecords(root)) {
+    if ([
+      "project_id", "provider_project_id", "distribution_id", "distributionId",
+    ].some((key) => identifierText(record[key]) !== undefined)) return true;
+    if (["created", "distributions"].some((key) => Array.isArray(record[key]) && record[key].length > 0)) {
+      return true;
+    }
+    for (const key of DISTRIBUTION_SENT_LIST_KEYS) {
+      if (Array.isArray(record[key]) && record[key].length > 0) return true;
+    }
+    const status = recordText(record, ["notification_status", "send_status", "outcome", "status"])
+      ?.toLowerCase();
+    if (status && DISTRIBUTION_SENT_STATUSES.has(status)) return true;
+  }
+  return false;
+}
+
+function distributionBatchFallbackEvidence(
+  event: Json,
+  input: Json,
+): DistributionBatchFallbackEvidence | undefined {
+  if (
+    event.error || !definiteFailureEnvelope(event.result) || hasDistributionWriteEvidence(event.result) ||
+    !Array.isArray(input.supplierIds) || input.supplierIds.length < 2
+  ) return undefined;
+  const supplierIds = input.supplierIds.filter(text).map((supplierId: string) => supplierId.trim());
+  if (supplierIds.length !== input.supplierIds.length || new Set(supplierIds).size !== supplierIds.length) {
+    return undefined;
+  }
+  return { supplierIds };
+}
+
+function distributionUnboundRejectionEvidence(
+  event: Json,
+  input: Json,
+  workflow: Json,
+): DistributionUnboundRejectionEvidence | undefined {
+  if (
+    event.error || !definiteFailureEnvelope(event.result) || hasDistributionWriteEvidence(event.result) ||
+    !Array.isArray(input.supplierIds) || input.supplierIds.length === 0
+  ) return undefined;
+  const requested = input.supplierIds.filter(text).map((supplierId: string) => supplierId.trim());
+  if (requested.length !== input.supplierIds.length || new Set(requested).size !== requested.length) return undefined;
+  const requestedSet = new Set(requested);
+  const unbound = new Set<string>();
+  const unboundNames = new Set<string>();
+  let structuredBindingEvidence = false;
+  const addUnbound = (supplierId: string | undefined) => {
+    if (supplierId && requestedSet.has(supplierId)) unbound.add(supplierId);
+  };
+
+  for (const record of rawObjectRecords(event.result)) {
+    for (const key of DISTRIBUTION_UNBOUND_LIST_KEYS) {
+      if (!Array.isArray(record[key])) continue;
+      structuredBindingEvidence = true;
+      for (const item of record[key]) {
+        addUnbound(distributionSupplierId(item));
+        const supplierName = distributionSupplierName(item);
+        if (supplierName) unboundNames.add(supplierName);
+      }
+    }
+    const status = recordText(record, ["notification_status", "send_status", "outcome", "status"])
+      ?.toLowerCase();
+    const bindingFlag = ["group_chat_bound", "wechat_group_bound", "wecom_group_bound", "is_group_bound"]
+      .map((key) => record[key])
+      .find((value) => typeof value === "boolean");
+    const error = recordText(record, ["notification_error", "send_error", "reason", "message", "detail"]);
+    const recordProvesUnbound = bindingFlag === false ||
+      Boolean(status && DISTRIBUTION_UNBOUND_STATUSES.has(status)) ||
+      Boolean(error && GROUP_BINDING_ERROR.test(error) && GROUP_BINDING_CONTEXT.test(error));
+    if (!recordProvesUnbound) continue;
+    structuredBindingEvidence = true;
+    addUnbound(distributionSupplierId(record));
+    const supplierName = distributionSupplierName(record);
+    if (supplierName) unboundNames.add(supplierName);
+  }
+
+  const bindingMessages = rawResultTexts(event.result).filter((value) =>
+    GROUP_BINDING_ERROR.test(value) && GROUP_BINDING_CONTEXT.test(value)
+  );
+  if (bindingMessages.length > 0) {
+    const mentionedIds = requested.filter((supplierId) =>
+      bindingMessages.some((message) => message.includes(supplierId))
+    );
+    for (const supplierId of mentionedIds) {
+      if (!mentionedIds.some((other) => other !== supplierId && other.includes(supplierId))) {
+        addUnbound(supplierId);
+      }
+    }
+  }
+
+  const requestedByHash = new Map(requested.map((supplierId) => [sha256Text(supplierId), supplierId]));
+  const supplierIdsByName = new Map<string, string[]>();
+  if (Array.isArray(workflow.mcn_recipient_directory)) {
+    for (const recipient of workflow.mcn_recipient_directory) {
+      if (!recipient || typeof recipient !== "object" || !text(recipient.name)) continue;
+      const supplierId = text(recipient.supplier_id_sha256)
+        ? requestedByHash.get(recipient.supplier_id_sha256.trim())
+        : undefined;
+      if (!supplierId) continue;
+      const supplierIds = supplierIdsByName.get(recipient.name.trim()) ?? [];
+      supplierIds.push(supplierId);
+      supplierIdsByName.set(recipient.name.trim(), supplierIds);
+    }
+  }
+  const mentionedNames = [...supplierIdsByName.keys()].filter((name) =>
+    unboundNames.has(name) || bindingMessages.some((message) => message.includes(name))
+  );
+  for (const name of mentionedNames) {
+    if (mentionedNames.some((other) => other !== name && other.includes(name))) continue;
+    const supplierIds = supplierIdsByName.get(name) ?? [];
+    if (supplierIds.length === 1) addUnbound(supplierIds[0]);
+  }
+
+  if ((!structuredBindingEvidence && bindingMessages.length === 0) || unbound.size === 0) return undefined;
+  return {
+    remainingSupplierIds: requested.filter((supplierId) => !unbound.has(supplierId)),
+    unboundSupplierIds: requested.filter((supplierId) => unbound.has(supplierId)),
+    unboundCount: unbound.size,
+  };
+}
+
+function distributionOutcomeEvidence(root: unknown, input: Json): DistributionOutcomeEvidence | undefined {
+  const data = approvedTargetData(root);
+  if (!data || !Array.isArray(input.supplierIds) || input.supplierIds.length === 0) return undefined;
+  const requested = input.supplierIds.filter(text).map((supplierId: string) => supplierId.trim());
+  if (requested.length !== input.supplierIds.length || new Set(requested).size !== requested.length) return undefined;
+  const requestedSet = new Set(requested);
+  const outcomes = new Map<string, "sent" | "unbound" | "conflict">();
+  const recordOutcome = (supplierId: string | undefined, outcome: "sent" | "unbound") => {
+    if (!supplierId || !requestedSet.has(supplierId)) return;
+    const existing = outcomes.get(supplierId);
+    outcomes.set(supplierId, existing && existing !== outcome ? "conflict" : outcome);
+  };
+
+  for (const record of objectRecords(data)) {
+    for (const key of DISTRIBUTION_SENT_LIST_KEYS) {
+      if (!Array.isArray(record[key])) continue;
+      for (const item of record[key]) recordOutcome(distributionSupplierId(item), "sent");
+    }
+    for (const key of DISTRIBUTION_UNBOUND_LIST_KEYS) {
+      if (!Array.isArray(record[key])) continue;
+      for (const item of record[key]) recordOutcome(distributionSupplierId(item), "unbound");
+    }
+
+    const supplierId = distributionSupplierId(record);
+    if (!supplierId || !requestedSet.has(supplierId)) continue;
+    const status = recordText(record, ["notification_status", "send_status", "outcome", "status"])?.toLowerCase();
+    const bindingFlag = ["group_chat_bound", "wechat_group_bound", "wecom_group_bound", "is_group_bound"]
+      .map((key) => record[key])
+      .find((value) => typeof value === "boolean");
+    const error = recordText(record, ["notification_error", "send_error", "reason", "message"]);
+    if (status && DISTRIBUTION_SENT_STATUSES.has(status)) {
+      recordOutcome(supplierId, "sent");
+    } else if (
+      bindingFlag === false ||
+      (status && DISTRIBUTION_UNBOUND_STATUSES.has(status)) ||
+      (["failed", "skipped"].includes(status ?? "") && Boolean(error && GROUP_BINDING_ERROR.test(error)))
+    ) {
+      recordOutcome(supplierId, "unbound");
+    }
+  }
+
+  if (outcomes.size !== requested.length || [...outcomes.values()].includes("conflict")) return undefined;
+  const sentCount = [...outcomes.values()].filter((outcome) => outcome === "sent").length;
+  const projectId = resultText(data, ["project_id", "provider_project_id"]);
+  if (sentCount > 0 && !projectId) return undefined;
+  return {
+    projectId,
+    requestedCount: requested.length,
+    sentCount,
+    unboundCount: requested.length - sentCount,
+    outcomes: requested.map((supplierId) => ({
+      supplierId,
+      status: outcomes.get(supplierId) as "sent" | "unbound",
+    })),
+  };
+}
+
+function distributionFallbackStatuses(workflow: Json): Json[] {
+  return Array.isArray(workflow.distribution_supplier_statuses)
+    ? workflow.distribution_supplier_statuses.filter((item: unknown): item is Json =>
+      Boolean(item && typeof item === "object" && !Array.isArray(item) && text((item as Json).supplier_id_sha256))
+    )
+    : [];
+}
+
+function individualFallbackPending(workflow: Json, input: Json): boolean {
+  if (
+    workflow.distribution_outcome_status !== "fallback_in_progress" ||
+    !Array.isArray(input.supplierIds) || input.supplierIds.length !== 1 || !text(input.supplierIds[0])
+  ) return false;
+  const supplierHash = sha256Text(input.supplierIds[0].trim());
+  return distributionFallbackStatuses(workflow).some((item) =>
+    item.supplier_id_sha256 === supplierHash && item.status === "pending"
+  );
+}
+
+function completedIndividualFallbackStatus(workflow: Json, input: Json): string | undefined {
+  if (
+    !["fallback_in_progress", "all_sent_individually", "partial_individual"].includes(
+      workflow.distribution_outcome_status,
+    ) || !Array.isArray(input.supplierIds) || input.supplierIds.length !== 1 || !text(input.supplierIds[0])
+  ) return undefined;
+  const supplierHash = sha256Text(input.supplierIds[0].trim());
+  const status = distributionFallbackStatuses(workflow).find((item) =>
+    item.supplier_id_sha256 === supplierHash
+  )?.status;
+  return text(status) && status !== "pending" ? status : undefined;
 }
 
 function recordText(record: Json, keys: string[]): string | undefined {
@@ -450,10 +797,10 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
       Number.isInteger(suggested) && suggested > 0
     ) {
       workflow.pending_manual_target_count = suggested;
-      workflow.next_action = "manual_source_creators";
+      workflow.next_action = "rank_mcns";
       workflow.waiting_for = null;
     } else if (
-      [MCN_ONLY_LABEL, "确认并开始MCN赛马", "按建议开始MCN赛马", "确认继续"].includes(answer) &&
+      [MCN_ONLY_LABEL, "确认并开始MCN排序", "按建议开始MCN排序", "确认继续"].includes(answer) &&
       validPlan
     ) {
       delete workflow.pending_manual_target_count;
@@ -471,7 +818,7 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
     const target = positiveManualTarget(answer);
     if (target && workflow.supply_plan_status === "valid" && workflow.supply_risk_level === "high_risk") {
       workflow.pending_manual_target_count = target;
-      workflow.next_action = "manual_source_creators";
+      workflow.next_action = "rank_mcns";
       workflow.waiting_for = null;
     } else {
       delete workflow.pending_manual_target_count;
@@ -511,15 +858,38 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
   const current = store(rootDir);
   const workflow = current.data.workflow as Json;
   const envelopeOk = successful(event.error ? { isError: true } : event.result);
+  const rankInquiryId = tool === "rank_mcns" && envelopeOk
+    ? rankMcnInquiryEvidence(event.result, input, workflow)
+    : undefined;
   const manualEvidence = tool === "manual_source_creators" && envelopeOk
     ? manualSourcingEvidence(event.result, input, workflow)
     : undefined;
-  const ok = envelopeOk && (tool !== "manual_source_creators" || manualEvidence !== undefined);
+  const distributionEvidence = tool === "create_with_distributions" && envelopeOk
+    ? distributionOutcomeEvidence(event.result, input)
+    : undefined;
+  const distributionUnboundRejection = tool === "create_with_distributions" && !envelopeOk
+    ? distributionUnboundRejectionEvidence(event, input, workflow)
+    : undefined;
+  const distributionBatchFallback = tool === "create_with_distributions" && !envelopeOk &&
+    !distributionUnboundRejection
+    ? distributionBatchFallbackEvidence(event, input)
+    : undefined;
+  const isIndividualFallback = tool === "create_with_distributions" &&
+    individualFallbackPending(workflow, input);
+  const ok = envelopeOk &&
+    (tool !== "rank_mcns" || rankInquiryId !== undefined) &&
+    (tool !== "manual_source_creators" || manualEvidence !== undefined) &&
+    (tool !== "create_with_distributions" || distributionEvidence !== undefined);
   const now = Date.now();
   workflow.last_tool = tool;
   workflow.last_tool_status = ok ? "success" : "failed";
   workflow.updated_at_ms = now;
   if (tool === "search_creators" || tool === "rank_mcns") clearMcnRecipientDirectory(workflow);
+  if (tool === "search_creators" || tool === "rank_mcns") {
+    for (const key of [
+      "rank_mcn_inquiry_id", "rank_mcn_inquiry_evidence_status", "rank_mcn_inquiry_evidence_error",
+    ]) delete workflow[key];
+  }
 
   if (tool === "select_inquiry_form_fields") {
     // The provider call only launches an out-of-band browser selector. Its result
@@ -527,12 +897,113 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
     workflow.phase = "inquiry_fields_ready";
     workflow.next_action = "confirm_inquiry_fields";
     workflow.waiting_for = "user";
+  } else if (tool === "create_with_distributions" && distributionUnboundRejection) {
+    const unboundHashes = new Set(
+      distributionUnboundRejection.unboundSupplierIds.map((supplierId) => sha256Text(supplierId)),
+    );
+    workflow.phase = "inquiry_sending";
+    workflow.requested_supplier_count = input.supplierIds.length;
+    workflow.sent_supplier_count = 0;
+    workflow.unbound_supplier_count = distributionUnboundRejection.unboundCount;
+    workflow.failed_supplier_count = 0;
+    workflow.unknown_supplier_count = 0;
+    workflow.distribution_supplier_statuses = input.supplierIds.map((supplierId: string) => {
+      const supplierHash = sha256Text(supplierId.trim());
+      return {
+        supplier_id_sha256: supplierHash,
+        status: unboundHashes.has(supplierHash) ? "unbound" : "pending",
+      };
+    });
+    delete workflow.project_id;
+    delete workflow.distribution_outcome_error;
+    workflow.distribution_outcome_status = distributionUnboundRejection.remainingSupplierIds.length > 0
+      ? "fallback_in_progress"
+      : "none_sent";
+    workflow.next_action = distributionUnboundRejection.remainingSupplierIds.length > 0
+      ? "fallback_send_next_individual_mcn"
+      : "report_distribution_result";
+    workflow.waiting_for = null;
+  } else if (tool === "create_with_distributions" && distributionBatchFallback) {
+    workflow.phase = "inquiry_sending";
+    workflow.requested_supplier_count = distributionBatchFallback.supplierIds.length;
+    workflow.sent_supplier_count = 0;
+    workflow.unbound_supplier_count = 0;
+    workflow.failed_supplier_count = 0;
+    workflow.unknown_supplier_count = 0;
+    workflow.distribution_supplier_statuses = distributionBatchFallback.supplierIds.map((supplierId) => ({
+      supplier_id_sha256: sha256Text(supplierId),
+      status: "pending",
+    }));
+    workflow.distribution_outcome_status = "fallback_in_progress";
+    workflow.next_action = "fallback_send_next_individual_mcn";
+    workflow.waiting_for = null;
+    delete workflow.project_id;
+    delete workflow.distribution_outcome_error;
+  } else if (tool === "create_with_distributions" && isIndividualFallback) {
+    const supplierHash = sha256Text(input.supplierIds[0].trim());
+    const statuses = distributionFallbackStatuses(workflow);
+    const item = statuses.find((candidate) => candidate.supplier_id_sha256 === supplierHash)!;
+    if (distributionEvidence?.sentCount === 1) {
+      item.status = "sent";
+      if (distributionEvidence.projectId) item.project_id = distributionEvidence.projectId;
+    } else if (distributionEvidence?.unboundCount === 1) {
+      item.status = "unbound";
+    } else if (!event.error && definiteFailureEnvelope(event.result) && !hasDistributionWriteEvidence(event.result)) {
+      item.status = "failed";
+    } else {
+      item.status = "unknown";
+    }
+    item.updated_at_ms = now;
+    workflow.distribution_supplier_statuses = statuses;
+    const count = (status: string) => statuses.filter((candidate) => candidate.status === status).length;
+    const pendingCount = count("pending");
+    workflow.sent_supplier_count = count("sent");
+    workflow.unbound_supplier_count = count("unbound");
+    workflow.failed_supplier_count = count("failed");
+    workflow.unknown_supplier_count = count("unknown");
+    delete workflow.distribution_outcome_error;
+    if (pendingCount > 0) {
+      workflow.phase = "inquiry_sending";
+      workflow.distribution_outcome_status = "fallback_in_progress";
+      workflow.next_action = "fallback_send_next_individual_mcn";
+      workflow.waiting_for = null;
+    } else if (workflow.sent_supplier_count > 0) {
+      workflow.phase = "waiting_mcn_return";
+      workflow.distribution_outcome_status = workflow.sent_supplier_count === statuses.length
+        ? "all_sent_individually"
+        : "partial_individual";
+      workflow.next_action = "sync_sent_mcn_inquiry_status_individually";
+      workflow.waiting_for = "provider";
+    } else {
+      workflow.phase = "inquiry_fields_ready";
+      workflow.distribution_outcome_status = "none_sent";
+      workflow.next_action = "report_distribution_result";
+      workflow.waiting_for = null;
+    }
   } else if (!ok) {
+    if (tool === "rank_mcns") {
+      workflow.rank_mcn_inquiry_evidence_status = envelopeOk ? "invalid" : "unavailable";
+      workflow.rank_mcn_inquiry_evidence_error = envelopeOk
+        ? "missing_inquiry_id"
+        : "provider_call_failed_or_unknown";
+    }
     if (tool === "manual_source_creators") {
       workflow.manual_sourcing_evidence_status = envelopeOk ? "invalid" : "unavailable";
       workflow.manual_sourcing_evidence_error = envelopeOk
         ? "missing_or_conflicting_task_evidence"
         : "provider_call_failed_or_unknown";
+    }
+    if (tool === "create_with_distributions") {
+      workflow.distribution_outcome_status = envelopeOk ? "incomplete" : "unavailable";
+      workflow.distribution_outcome_error = envelopeOk
+        ? "missing_or_conflicting_per_supplier_send_evidence"
+        : "provider_call_failed_or_unknown";
+      for (const key of [
+        "project_id", "requested_supplier_count", "sent_supplier_count", "unbound_supplier_count",
+        "distribution_retry_active", "distribution_initial_requested_supplier_count",
+        "distribution_excluded_unbound_supplier_count", "distribution_retry_supplier_count",
+        "distribution_supplier_statuses", "failed_supplier_count", "unknown_supplier_count",
+      ]) delete workflow[key];
     }
     workflow.next_action = `recover_${tool}`;
     workflow.waiting_for = "user";
@@ -586,8 +1057,13 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
       }
       case "rank_mcns": {
         workflow.phase = "mcn_planning";
-        workflow.next_action = "confirm_mcn_selection";
-        workflow.waiting_for = "user";
+        workflow.rank_mcn_inquiry_id = rankInquiryId;
+        workflow.rank_mcn_inquiry_evidence_status = "valid";
+        delete workflow.rank_mcn_inquiry_evidence_error;
+        const manualRequested = Number.isInteger(workflow.pending_manual_target_count) &&
+          workflow.pending_manual_target_count > 0;
+        workflow.next_action = manualRequested ? "manual_source_creators" : "confirm_mcn_selection";
+        workflow.waiting_for = manualRequested ? null : "user";
         if (Number.isInteger(input.minimum_mcn_count)) workflow.mcn_race_size = input.minimum_mcn_count;
         const recipients = collectMcnRecipientDirectory(root);
         if (recipients.length > 0 && text(input.id)) {
@@ -597,11 +1073,43 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
         break;
       }
       case "create_with_distributions":
-        workflow.phase = "waiting_mcn_return";
-        workflow.next_action = "sync_mcn_inquiry_status";
-        workflow.waiting_for = "provider";
+        if (!distributionEvidence) break;
         if (text(input.requirement_id)) workflow.requirement_id = input.requirement_id.trim();
-        workflow.supplier_count = Array.isArray(input.supplierIds) ? input.supplierIds.length : 0;
+        if (distributionEvidence.projectId) workflow.project_id = distributionEvidence.projectId;
+        else delete workflow.project_id;
+        delete workflow.supplier_count;
+        const excludedUnboundCount = Number.isInteger(workflow.distribution_excluded_unbound_supplier_count)
+          ? workflow.distribution_excluded_unbound_supplier_count
+          : 0;
+        const initialRequestedCount = excludedUnboundCount > 0 &&
+          Number.isInteger(workflow.distribution_initial_requested_supplier_count)
+          ? workflow.distribution_initial_requested_supplier_count
+          : distributionEvidence.requestedCount;
+        const totalUnboundCount = excludedUnboundCount + distributionEvidence.unboundCount;
+        workflow.requested_supplier_count = initialRequestedCount;
+        workflow.sent_supplier_count = distributionEvidence.sentCount;
+        workflow.unbound_supplier_count = totalUnboundCount;
+        workflow.distribution_supplier_statuses = distributionEvidence.outcomes.map(({ supplierId, status }) => ({
+          supplier_id_sha256: sha256Text(supplierId),
+          status,
+          ...(status === "sent" && distributionEvidence.projectId
+            ? { project_id: distributionEvidence.projectId }
+            : {}),
+        }));
+        delete workflow.distribution_retry_active;
+        delete workflow.distribution_retry_supplier_count;
+        delete workflow.distribution_outcome_error;
+        if (distributionEvidence.sentCount === 0) {
+          workflow.phase = "inquiry_fields_ready";
+          workflow.next_action = "report_distribution_result";
+          workflow.waiting_for = null;
+          workflow.distribution_outcome_status = "none_sent";
+        } else {
+          workflow.phase = "waiting_mcn_return";
+          workflow.next_action = "sync_mcn_inquiry_status";
+          workflow.waiting_for = "provider";
+          workflow.distribution_outcome_status = totalUnboundCount > 0 ? "partial" : "all_sent";
+        }
         break;
       case "ingest_mcn_submissions":
         workflow.phase = "candidate_pool_enriched";
@@ -633,6 +1141,7 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
       case "manual_source_creators":
         if (!manualEvidence) break;
         workflow.manual_sourcing_task_id = manualEvidence.taskId;
+        workflow.manual_sourcing_inquiry_id = manualEvidence.inquiryId;
         workflow.manual_sourcing_status = manualEvidence.status;
         workflow.manual_sourcing_operation = manualEvidence.operation;
         workflow.manual_sourcing_target_count = manualEvidence.targetCount;
@@ -641,8 +1150,8 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
         workflow.manual_sourcing_evidence_status = "valid";
         delete workflow.manual_sourcing_evidence_error;
         delete workflow.pending_manual_target_count;
-        workflow.next_action = "rank_mcns";
-        workflow.waiting_for = null;
+        workflow.next_action = "confirm_mcn_selection";
+        workflow.waiting_for = "user";
         break;
       case "audit_manual_adjustment":
         workflow.next_action = "confirm_creator_recommendation";
@@ -721,7 +1230,7 @@ function externalSendQuestion(input: Json, summary: Json): string {
   return [
     "⚠️ 不可逆企微外发",
     "",
-    `确认后将立即向 ${summary.supplier_count} 家机构发送以下企微消息。`,
+    `确认后将立即向 ${summary.supplier_count} 家机构执行企微群聊绑定校验；仅向已绑定的机构发送，未绑定的机构不会发送并会在结果中列出。`,
     "",
     `发送对象（${summary.supplier_count} 家）`,
     ...(recipientNames.length > 0
@@ -751,7 +1260,7 @@ function externalSendAskInputForQuestion(question: string, summary: Json): Json 
       options: [
         {
           label: EXTERNAL_SEND_CONFIRM_LABEL,
-          description: `立即向上述 ${summary.supplier_count} 家机构发送这条企微消息`,
+          description: `校验上述 ${summary.supplier_count} 家机构的群聊绑定，仅向已绑定机构发送并返回未绑定名单`,
         },
         {
           label: EXTERNAL_SEND_CANCEL_LABEL,
@@ -784,14 +1293,25 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
   const requestFingerprint = fingerprint(input);
   const current = store(rootDir);
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.kind === "external_send" && receipt.confirmation_mode === "ask_user_question" &&
+    receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
     receipt.status === "in_flight" && receipt.request_fingerprint === requestFingerprint &&
     receipt.tool_call_id === (toolCallId ?? null)
   );
   if (inFlight) return undefined;
 
+  const completedFallbackStatus = completedIndividualFallbackStatus(
+    current.data.workflow as Json,
+    input,
+  );
+  if (completedFallbackStatus) {
+    return denyStructured(
+      "INTEGRATION_REQUIRED",
+      `该机构在本次逐个发送中的状态已记录为 ${completedFallbackStatus}，禁止重复发送。`,
+    );
+  }
+
   const approved = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.kind === "external_send" && receipt.confirmation_mode === "ask_user_question" &&
+    receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
     receipt.status === "approved" && receipt.request_fingerprint === requestFingerprint
   );
   if (approved) {
@@ -822,7 +1342,10 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
 
   const now = Date.now();
   for (const [id, receipt] of Object.entries<Json>(current.data.confirmations)) {
-    if (receipt.kind !== "external_send" || !["pending", "approved"].includes(receipt.status)) continue;
+    if (
+      receipt.kind !== "external_send" || !EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) ||
+      !["pending", "approved"].includes(receipt.status)
+    ) continue;
     receipt.status = "denied" satisfies ConfirmationStatus;
     receipt.resolution = "superseded";
     receipt.updated_at_ms = now;
@@ -835,9 +1358,13 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
     save(current.path, current.data);
     return denyStructured(
       "INTEGRATION_REQUIRED",
-      "发送对象所属需求与最近一次 MCN 赛马结果不一致，请返回 MCN 方案修改或重新选择后再发送。",
+      "发送对象所属需求与最近一次 MCN排序结果不一致，请返回 MCN 方案修改或重新选择后再发送。",
     );
   }
+  for (const key of [
+    "distribution_retry_active", "distribution_initial_requested_supplier_count",
+    "distribution_excluded_unbound_supplier_count", "distribution_retry_supplier_count",
+  ]) delete current.data.workflow[key];
   const askInput = externalSendAskInput(input, summary);
   current.data.confirmations[id] = {
     kind: "external_send",
@@ -873,15 +1400,71 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): vo
   const requestFingerprint = fingerprint(input);
   const afterToolCallId = text(event.toolCallId) ? event.toolCallId.trim() : undefined;
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) => {
-    if (receipt.kind !== "external_send" || receipt.confirmation_mode !== "ask_user_question") return false;
+    if (
+      receipt.kind !== "external_send" ||
+      !EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode)
+    ) return false;
     if (receipt.status !== "in_flight" || receipt.input_fingerprint !== requestFingerprint) return false;
     if (afterToolCallId && text(receipt.tool_call_id)) return receipt.tool_call_id === afterToolCallId;
     return true;
   });
   if (!inFlight) return;
   const [id, receipt] = inFlight;
-  receipt.status = successful(event.error ? { isError: true } : event.result) ? "consumed" : "unknown";
-  receipt.updated_at_ms = Date.now();
+  const now = Date.now();
+  const unboundRejection = distributionUnboundRejectionEvidence(
+    event,
+    input,
+    current.data.workflow as Json,
+  );
+  const batchFallback = unboundRejection ? undefined : distributionBatchFallbackEvidence(event, input);
+  if (unboundRejection) {
+    receipt.status = "consumed" satisfies ConfirmationStatus;
+    receipt.resolution = "batch-group-mapping-rejected-individual-fallback";
+    for (const supplierId of unboundRejection.remainingSupplierIds) {
+      const retryInput = { ...input, supplierIds: [supplierId] };
+      const retryId = randomUUID();
+      current.data.confirmations[retryId] = {
+        kind: "external_send",
+        confirmation_mode: "individual_fallback_continuation",
+        request_fingerprint: fingerprint(retryInput),
+        input_fingerprint: fingerprint(retryInput),
+        safe_summary: createSummary(retryInput, current.data.workflow as Json),
+        status: "approved" satisfies ConfirmationStatus,
+        parent_confirmation_id: id,
+        excluded_supplier_count: unboundRejection.unboundCount,
+        created_at_ms: now,
+        updated_at_ms: now,
+        expires_at_ms: receipt.expires_at_ms,
+      };
+      current.data.latest_external_confirmation_id = retryId;
+    }
+  } else if (batchFallback) {
+    receipt.status = "consumed" satisfies ConfirmationStatus;
+    receipt.resolution = "batch-pre-send-rejected-individual-fallback";
+    for (const supplierId of batchFallback.supplierIds) {
+      const fallbackInput = { ...input, supplierIds: [supplierId] };
+      const fallbackId = randomUUID();
+      current.data.confirmations[fallbackId] = {
+        kind: "external_send",
+        confirmation_mode: "individual_fallback_continuation",
+        request_fingerprint: fingerprint(fallbackInput),
+        input_fingerprint: fingerprint(fallbackInput),
+        safe_summary: createSummary(fallbackInput, current.data.workflow as Json),
+        status: "approved" satisfies ConfirmationStatus,
+        parent_confirmation_id: id,
+        created_at_ms: now,
+        updated_at_ms: now,
+        expires_at_ms: receipt.expires_at_ms,
+      };
+      current.data.latest_external_confirmation_id = fallbackId;
+    }
+  } else if (!event.error && definiteFailureEnvelope(event.result) && !hasDistributionWriteEvidence(event.result)) {
+    receipt.status = "consumed" satisfies ConfirmationStatus;
+    receipt.resolution = "definite-no-write-failure";
+  } else {
+    receipt.status = successful(event.error ? { isError: true } : event.result) ? "consumed" : "unknown";
+  }
+  receipt.updated_at_ms = now;
   delete receipt.tool_call_id;
   current.data.confirmations[id] = receipt;
   save(current.path, current.data);

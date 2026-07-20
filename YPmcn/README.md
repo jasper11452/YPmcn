@@ -8,12 +8,12 @@ YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。
 validate_requirement
 → search_creators(id)
 → 展示 Provider 风险、硬缺口与缓冲补量 → AskUserQuestion 确认
-→ 高风险可 manual_source_creators(requirement_id, target_count) 启动/复用手扒任务
-→ rank_mcns(id, platform, 动态赛马数量)
-→ 按名称展示 MCN 赛马结果 → 确认
+→ rank_mcns(id, platform, 动态排序数量) 创建并返回 inquiry_id
+→ 高风险且确认拓展时 manual_source_creators(requirement_id, target_count) 启动/复用关联任务
+→ 按名称展示 MCN排序结果 → 确认
 → select_inquiry_form_fields()
-→ create_with_distributions(requirement_id, supplierIds, columns, description)
-→ Native Approval 警告；确认后宿主续传原调用
+→ create_with_distributions(requirement_id, supplierIds, columns, description, wechatNotificationMessage=description)
+→ Native Approval 警告；确认后宿主续传原调用（明确未绑定导致整批无写入拒绝时，自动剔除后续发剩余机构）
 → sync_mcn_inquiry_status(requirement_id, project_id, supplierIds)
 → waiting_mcn_return
 → sync / ingest_mcn_submissions(inquiry_ids) / sync（完成回收）
@@ -22,7 +22,7 @@ validate_requirement
 → record_client_feedback(run_id, feedback_items)
 ```
 
-高风险供给的手扒确认只授权两字段任务启动和后续 MCN 赛马；只有远程返回完整持久任务证据才算已启动，不能直接进入外发。发送成功并能从真实 project/distribution 镜像询价后进入 `waiting_mcn_return`。只有企微发送成功且回收完成才能进入 `candidate_pool_enriched` 并调用 `rank_creators`；手扒任务不能替代这两个状态事实。
+高风险供给的达人拓展确认先授权 MCN排序建立询价关联，再授权两字段任务启动；`rank_mcns` 缺少真实 `inquiry_id` 时不得调用达人拓展，任务回执未回显同一询价关联时也不得声称已启动。该 `inquiry_id` 不作为达人拓展额外入参。发送成功并能从真实 project/distribution 镜像询价后进入 `waiting_mcn_return`。只有企微发送成功且回收完成才能进入 `candidate_pool_enriched` 并调用 `rank_creators`；达人拓展任务不能替代这两个状态事实。
 
 ## Hook 边界
 
@@ -33,7 +33,7 @@ validate_requirement
 - 本地 JSON 是 Agent 编排状态权威，但 Hook 不对普通 Tool 做严格顺序/参数阻断；Provider 状态仅用于业务事实和未知写对账。
 - shell、PowerShell、curl 直连 provider 的企微外发接口会被阻断，避免绕过最终确认。
 - provider 发送调用会触发 Native Approval；Allow 由宿主继续同一待执行调用，Reject/超时/取消不触达 Provider。
-- 参数变化、重放或未知写结果都必须产生新的 Native Approval；不会复用旧确认。
+- 参数变化、重放或未知写结果都必须产生新的 Native Approval；唯一例外是 Provider 明确无写入并指出未绑定机构时，只缩减这些机构的续发可继承原确认。
 - Hook 不记录客户 Brief、消息正文或完整 payload。
 
 ## Provider 状态

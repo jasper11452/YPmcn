@@ -14,14 +14,14 @@
 - 硬缺口：<Provider hard_shortfall_count>
 - 风险缓冲缺口：<Provider buffer_shortfall_count>
 - 供给风险：<Provider supply_risk_level>
-- 建议手扒新增：<Provider suggested_expansion_count>
-- 下一步：<高风险时启动手扒并继续 MCN 赛马；其他情况按实际建议>
+- 建议达人拓展新增：<Provider suggested_expansion_count>
+- 下一步：<高风险时先执行 MCN排序生成询价关联，再启动达人拓展；其他情况按实际建议>
 ```
 
-只用同一 Provider 记录；缺失/矛盾或高风险补量非正数时显示“供给计划不完整”，禁止用 `max(需求量-命中数,0)` 回退。高风险“供给确认”用真实换行重复事实，三项为“启动手扒并开始MCN赛马”“仅开始MCN赛马”“调整手扒数量”；调整只收一个正整数，其他结果不调用业务 Tool。
+只用同一 Provider 记录；缺失/矛盾或高风险补量非正数时显示“供给计划不完整”，禁止用 `max(需求量-命中数,0)` 回退。高风险“供给确认”用真实换行重复事实，三项为“启动达人拓展并开始MCN排序”“仅开始MCN排序”“调整达人拓展数量”；调整只收一个正整数，其他结果不调用业务 Tool。
 
-`manual_source_creators({requirement_id,target_count})` 只有同一记录返回完整任务证据时才展示“已启动/已沿用”并继续 `rank_mcns`；不展示任务 ID。证据不足即恢复，不能跳到外发。赛马结果只显示实际规模、机构名、覆盖和缺口。
+拓展分支先执行 `rank_mcns`；成功返回 `inquiry_id` 后才调用 `manual_source_creators({requirement_id,target_count})`。回执须匹配询价并含完整任务证据，才展示“已启动/已沿用”并进入 MCN 确认。内部 ID 不展示；证据不足即恢复。排序结果只显示规模、机构名、覆盖和缺口。
 
-企微 `description` 仅据确认需求生成微信纯文本，不得 JSON 化、暴露字段或杜撰；价格用平台内容形式/时长。首次 `create_with_distributions` 仅预检，原样使用 `<AskUserQuestionInput>`；只有“确认发送”才同参数外发。
+企微 `description` 只据确认需求生成微信纯文本，`wechatNotificationMessage` 传入完全相同的内容。首次 `create_with_distributions` 预检后仅“确认发送”可外发。若 Provider 明确未写入且返回未绑定机构，只删这些机构、继承原确认续发其余机构，不再询问。结束仅提示一次“未绑定群聊，未发送：<机构名>；已发送：<机构名>”；无逐项回执不得声称已发送，写结果未知不得续发。
 
 批次实际成功后才按 `../assets/ypmcn_submission_template.csv` 调宿主 `export_csv`。表头逐字节一致；仅填 MCP 返回值，缺失留空。只有源字段明确为 cents 或 0–1 比例时才换算。文件名固定为 `ypmcn_submission_<demandId>_v<demandVersion>_batch_<batchNo>.csv`。

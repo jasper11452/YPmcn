@@ -85,6 +85,7 @@ describe("Spec governance", () => {
     assert.deepEqual(mediaAssistant.toolPolicy.preconditions.manual_source_creators, [
       "provider_supply_evidence_is_complete_and_high_risk_with_positive_suggested_expansion",
       "submitted_supply_command_binds_requirement_id_and_one_positive_target_count",
+      "rank_mcns_succeeded_for_the_same_requirement_and_returned_inquiry_id",
       "no_distribution_has_been_sent",
     ]);
     assert.equal(
@@ -151,6 +152,8 @@ describe("Spec governance", () => {
     assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.mcn_inquiries, ["sync_mcn_inquiry_status"]);
     assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.mcn_inquiry_status_syncs, ["sync_mcn_inquiry_status"]);
     assert.match(database.toolDatabaseEffects.sync_mcn_inquiry_status.currentLimitation, /not yet deployed/);
+    assert.deepEqual(database.toolDatabaseEffects.rank_mcns.targetWrites, ["mcn_inquiries"]);
+    assert.match(database.toolDatabaseEffects.rank_mcns.targetInquiryBehavior, /inquiry_id.*manual_source_creators/);
     assert.match(database.toolDatabaseEffects.manual_source_creators.targetWriteBoundary, /persist.*durable manual-sourcing task/);
     assert.ok(database.knownGaps.some(({ id, severity }) =>
       id === "manual-sourcing-task-store-unverified" && severity === "high"
@@ -405,7 +408,7 @@ describe("Spec governance", () => {
       "buffer_shortfall_count", "supply_risk_level", "suggested_expansion_count", "recommended_action",
     ]);
     assert.deepEqual(mcp.outputContracts.manual_source_creators.successSchema.properties.data.required, [
-      "task_id", "requirement_id", "target_count", "status", "operation", "started_at", "accepted_count",
+      "task_id", "requirement_id", "inquiry_id", "target_count", "status", "operation", "started_at", "accepted_count",
     ]);
     assert.deepEqual(mcp.tools.manual_source_creators.required, ["requirement_id", "target_count"]);
     assert.equal(mcp.tools.manual_source_creators.properties.target_count.minimum, 1);

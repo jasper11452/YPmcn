@@ -84,7 +84,7 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 | 搜索响应没有权威工作流状态 | P0 | `success=true`、`candidate_pool_written=true`，但 `workflow_state=null`、`allowed_actions=[]` | 写池响应没有返回与数据库一致的 phase、state version 和 allowed actions | 所有成功写池响应返回同一事务提交后的唯一状态快照；0 候选明确返回 blocked/high-risk |
 | 风险、门禁和状态版本没有原子落库 | P0 | 搜索为 `high_risk` 且写池成功；恢复却为 `risk_level=null`、`pending_gate=null`、`state_version=1`，并曾错误允许 `rank_mcns/manual_source_creators` | 搜索事实和恢复状态互相矛盾 | 将候选池、风险、pending gate 和 state version 在同一事务中持久化，`allowed_actions` 从同一快照派生 |
 | 不存在或无关联的 ID 也能写库 | P0 | 历史错误写入返回 `success=true`、`operation="created"`、`sync_id=1`，trace `c8c0631e-137b-4b47-8554-7aa8070c2a57` | Provider 写库前没有验证 requirement、project、MCN 的存在性、归属和关联关系；也缺少完整服务端幂等/对账机制 | 对每个写工具增加服务端存在性、所有权/关联关系、幂等键和事务校验；本地 Hook 仅作为纵深防御 |
-| MCN 和询价前置数据缺失 | P1 | `NO_MCN_MATCHED`、`existing_candidate_count=0`、`candidate_mcn_count=0`、`INQUIRY_NOT_FOUND` | 当前没有候选达人可映射到 MCN，也没有关联询价单，无法生成后续真实业务 ID | 优先修复检索并准备隔离测试 MCN/询价数据；未确认测试联系人前不向生产联系人外发 |
+| MCN 和询价前置数据缺失 | P1 | `NO_MCN_MATCHED`、`existing_candidate_count=0`、`candidate_mcn_count=0`；直接调用达人拓展返回 `INQUIRY_NOT_FOUND` | 达人拓展要求先有关联询价，正确顺序必须是 `rank_mcns` 持久化并返回 `inquiry_id` 后再调用达人拓展；当前排名写入仍被 Schema 漂移阻断 | 优先修复检索与排名写入，验证 `rank_mcns → inquiry_id → manual_source_creators` 隔离链路；未确认测试联系人前不向生产联系人外发 |
 
 ### 最新有效复现
 
@@ -107,7 +107,7 @@ Skill 和 Hook 已提供 fail-closed 止血措施，但不能代替 MCP、Provid
 
 | 顺序 | 要修什么 | 验收标准 |
 |---|---|---|
-| 1 | 对齐 `mcn_recommendation_items` 迁移、ORM 和实际表 | `rank_mcns` 可原子落库，`get_workflow_state` 与 `rank_creators` 不再出现未知列；失败事务有可验证回滚 |
+| 1 | 对齐 `mcn_recommendation_items` / inquiry 迁移、ORM 和实际表 | `rank_mcns` 可原子落库并返回同需求真实 `inquiry_id`，`get_workflow_state` 与 `rank_creators` 不再出现未知列；失败事务有可验证回滚 |
 | 2 | 修复宽价格仍为 0，并补齐向量配置 | 宽范围能命中符合条件的真实达人；向量可用或按契约明确降级，排除原因可解释 |
 | 3 | 修复搜索写池、风险门禁和状态版本的原子持久化 | 搜索响应与随后 `get_workflow_state` 的 phase、risk、pending gate、version、allowed actions 完全一致 |
 | 4 | Provider 增加服务端 ID 完整性和幂等校验 | 不存在、跨需求或无关联 ID 均无法写入；重复请求不会产生重复记录 |

@@ -308,7 +308,7 @@
       "primaryKey": [
         "mcn_recommendation_id"
       ],
-      "comment": "rank_mcns 输出的逐 MCN 排序结果，包含供需关系、建议手扒比例和建议询价列表",
+      "comment": "rank_mcns 输出的逐 MCN排序结果，包含供需关系、建议达人拓展比例和建议询价列表",
       "columns": [
         { "name": "mcn_recommendation_id", "type": "char(32)", "key": "PRI", "comment": "当前MCN推荐主键" },
         { "name": "mcn_run_id", "type": "char(32)", "comment": "本次推荐批次ID" },
@@ -405,7 +405,12 @@
       ],
       "writes": [
         "mcn_recommendation_items"
-      ]
+      ],
+      "targetWrites": [
+        "mcn_inquiries"
+      ],
+      "targetInquiryBehavior": "In the same successful transaction as the current requirement's MCN recommendation plan, create or resolve its inquiry association and return the real inquiry_id. A success response without inquiry_id cannot precede manual_source_creators.",
+      "currentLimitation": "The remote Provider has not been write-verified to persist and return this inquiry association from rank_mcns."
     },
     "select_inquiry_form_fields": {
       "reads": [],
@@ -462,6 +467,7 @@
     "manual_source_creators": {
       "reads": [
         "customer_demands",
+        "mcn_inquiries",
         "creator_supply_offers"
       ],
       "writes": [
@@ -470,7 +476,7 @@
         "xhs_creator_accounts",
         "dy_creator_accounts"
       ],
-      "targetWriteBoundary": "Before returning started or running, the Provider must persist or idempotently reuse a durable manual-sourcing task; executor results later write only hard-filtered, deduplicated creators and offers to the observed tables listed here.",
+      "targetWriteBoundary": "Require the current requirement's inquiry_id created by rank_mcns; before returning started or running, persist or idempotently reuse a durable manual-sourcing task linked to that inquiry. Executor results later write only hard-filtered, deduplicated creators and offers to the observed tables listed here.",
       "currentLimitation": "No observed manual-sourcing task table or production Provider task implementation is present in this repository; local Hook evidence checks cannot substitute for that durable server fact."
     },
     "rank_creators": {
@@ -583,9 +589,14 @@
       "effect": "Some advertised include flags do not change the current response."
     },
     {
+      "id": "rank-inquiry-link-unverified",
+      "severity": "high",
+      "effect": "The production rank_mcns path has not been verified to atomically create and return inquiry_id, so the inquiry-linked manual-sourcing branch must remain disabled until Provider and database tests pass."
+    },
+    {
       "id": "manual-sourcing-task-store-unverified",
       "severity": "high",
-      "effect": "The observed database contract has no verified durable manual-sourcing task entity; production start, idempotency, recovery, and executor ownership must be implemented and verified in the Provider repository before enabling the 3.3.9 manual branch."
+      "effect": "The observed database contract has no verified durable manual-sourcing task entity; production start, idempotency, recovery, and executor ownership must be implemented and verified in the Provider repository before enabling the 3.4.0 manual branch."
     }
   ],
   "invariants": [
@@ -611,7 +622,7 @@
     },
     {
       "id": "authoritative-inquiry-sync",
-      "requirement": "Sync reads provider state and maintains mcn_inquiries before ingest.",
+      "requirement": "rank_mcns creates the inquiry association before manual sourcing; sync later reads provider state and maintains that inquiry before ingest.",
       "status": "not-implemented"
     }
   ]
