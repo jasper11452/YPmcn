@@ -20,8 +20,14 @@ const EXTERNAL_SEND_CONFIRM_LABEL = "确认发送";
 const EXTERNAL_SEND_CANCEL_LABEL = "取消发送";
 const EXTERNAL_SEND_CONFIRMATION_MARKER = "EXTERNAL_SEND_CONFIRMATION_REQUIRED";
 const SEARCH_CONFIRMATION_HEADER = "供给确认";
+const MANUAL_TARGET_CONFIRMATION_HEADER = "手扒数量";
 const MCN_CONFIRMATION_HEADER = "MCN确认";
 const FIELD_CONFIRMATION_HEADER = "字段确认";
+const START_MANUAL_AND_MCN_LABEL = "启动手扒并开始MCN赛马";
+const MCN_ONLY_LABEL = "仅开始MCN赛马";
+const ADJUST_MANUAL_TARGET_LABEL = "调整手扒数量";
+const MANUAL_TASK_STATUSES = new Set(["started", "running", "completed"]);
+const MANUAL_TASK_OPERATIONS = new Set(["created", "reused"]);
 const MCN_ID_KEYS = [
   "supplier_id", "supplierId", "mcn_id", "mcnId", "institution_id", "institutionId",
   "agency_id", "agencyId", "vendor_id", "vendorId",
@@ -163,6 +169,27 @@ function answerForQuestion(event: Json, input: Json): string | undefined {
   return undefined;
 }
 
+function freeformAnswerForQuestion(event: Json, input: Json): string | undefined {
+  if (event.error) return undefined;
+  const question = firstQuestion(input);
+  if (!question || !text(question.question)) return undefined;
+  const questionText = question.question.trim();
+  for (const candidate of answerValues(event.result ?? event.message)) {
+    const prefix = `${questionText}: `;
+    if (candidate.startsWith(prefix)) return candidate.slice(prefix.length).trim();
+    if (candidate !== questionText) return candidate;
+  }
+  return undefined;
+}
+
+function positiveManualTarget(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const matched = /^(?:手扒新增|新增|目标)?\s*(\d+)\s*(?:位|个)?$/u.exec(value.normalize("NFKC").trim());
+  if (!matched) return undefined;
+  const target = Number(matched[1]);
+  return Number.isSafeInteger(target) && target > 0 ? target : undefined;
+}
+
 function echoedExternalSendSelection(event: Json): { question: string; answer: string } | undefined {
   if (event.error) return undefined;
   for (const candidate of answerValues(event.result ?? event.message)) {
@@ -207,9 +234,140 @@ function resultText(root: unknown, keys: string[]): string | undefined {
   return text(value) ? value.trim() : undefined;
 }
 
-function resultNumber(root: unknown, keys: string[]): number | undefined {
-  const value = findValue(root, keys, (candidate) => typeof candidate === "number" && Number.isFinite(candidate));
-  return typeof value === "number" ? value : undefined;
+function objectRecords(root: unknown): Json[] {
+  const queue: unknown[] = [unwrap(root)];
+  const records: Json[] = [];
+  const seen = new Set<unknown>();
+  while (queue.length > 0) {
+    const value = queue.shift();
+    if (!value || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      queue.push(...value);
+      continue;
+    }
+    const record = value as Json;
+    records.push(record);
+    queue.push(...Object.values(record));
+  }
+  return records;
+}
+
+function approvedTargetData(root: unknown): Json | undefined {
+  const envelope = unwrap(root);
+  if (
+    !envelope || typeof envelope !== "object" || Array.isArray(envelope) ||
+    envelope.success !== true || envelope.error !== null ||
+    !envelope.data || typeof envelope.data !== "object" || Array.isArray(envelope.data)
+  ) return undefined;
+  return envelope.data as Json;
+}
+
+type SearchSupplyEvidence = {
+  demandCount: number;
+  eligibleCreatorCount: number;
+  supplyRatio: number;
+  hardShortfallCount: number;
+  bufferShortfallCount: number;
+  supplyRiskLevel: "low_risk" | "medium_risk" | "high_risk";
+  suggestedExpansionCount: number;
+  recommendedAction: string;
+};
+
+function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEvidence | undefined {
+  const data = approvedTargetData(root);
+  if (!data) return undefined;
+  const riskLevels = new Set(["low_risk", "medium_risk", "high_risk"]);
+  for (const record of objectRecords(data)) {
+    const demandCount = record.demand_count;
+    const eligibleCreatorCount = record.eligible_creator_count;
+    const supplyRatio = record.supply_ratio;
+    const hardShortfallCount = record.hard_shortfall_count;
+    const bufferShortfallCount = record.buffer_shortfall_count;
+    const supplyRiskLevel = record.supply_risk_level;
+    const suggestedExpansionCount = record.suggested_expansion_count;
+    const recommendedAction = record.recommended_action;
+    if (
+      !Number.isInteger(demandCount) || demandCount < 1 ||
+      !Number.isInteger(eligibleCreatorCount) || eligibleCreatorCount < 0 ||
+      typeof supplyRatio !== "number" || !Number.isFinite(supplyRatio) || supplyRatio < 0 ||
+      !Number.isInteger(hardShortfallCount) || hardShortfallCount < 0 ||
+      !Number.isInteger(bufferShortfallCount) || bufferShortfallCount < 0 ||
+      !text(supplyRiskLevel) || !riskLevels.has(supplyRiskLevel) ||
+      !Number.isInteger(suggestedExpansionCount) || suggestedExpansionCount < 0 ||
+      !text(recommendedAction)
+    ) continue;
+    if (Number.isInteger(workflow.quantity_total) && workflow.quantity_total !== demandCount) continue;
+    if (hardShortfallCount !== Math.max(demandCount - eligibleCreatorCount, 0)) continue;
+    if (Math.abs(supplyRatio - eligibleCreatorCount / demandCount) > 0.01) continue;
+    if (
+      supplyRiskLevel === "high_risk" &&
+      (suggestedExpansionCount < 1 || bufferShortfallCount < 1 || recommendedAction !== "mcn_and_manual")
+    ) continue;
+    return {
+      demandCount,
+      eligibleCreatorCount,
+      supplyRatio,
+      hardShortfallCount,
+      bufferShortfallCount,
+      supplyRiskLevel: supplyRiskLevel as SearchSupplyEvidence["supplyRiskLevel"],
+      suggestedExpansionCount,
+      recommendedAction: recommendedAction.trim(),
+    };
+  }
+  return undefined;
+}
+
+type ManualSourcingEvidence = {
+  taskId: string;
+  targetCount: number;
+  status: string;
+  operation: string;
+  startedAt: string;
+  acceptedCount: number;
+};
+
+function manualSourcingEvidence(
+  root: unknown,
+  input: Json,
+  workflow: Json,
+): ManualSourcingEvidence | undefined {
+  const data = approvedTargetData(root);
+  if (!data) return undefined;
+  const expectedRequirementId = text(workflow.requirement_id) ? workflow.requirement_id.trim() : undefined;
+  const expectedTarget = workflow.pending_manual_target_count;
+  if (
+    !expectedRequirementId || !Number.isInteger(expectedTarget) || expectedTarget < 1 ||
+    !text(input.requirement_id) || input.requirement_id.trim() !== expectedRequirementId ||
+    input.target_count !== expectedTarget
+  ) return undefined;
+
+  const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+  for (const record of objectRecords(data)) {
+    const taskId = record.task_id;
+    const requirementId = record.requirement_id;
+    const targetCount = record.target_count;
+    const status = record.status;
+    const operation = record.operation;
+    const startedAt = record.started_at;
+    const acceptedCount = record.accepted_count;
+    if (
+      !text(taskId) || !text(requirementId) || requirementId.trim() !== expectedRequirementId ||
+      targetCount !== expectedTarget || !text(status) || !MANUAL_TASK_STATUSES.has(status) ||
+      !text(operation) || !MANUAL_TASK_OPERATIONS.has(operation) ||
+      !text(startedAt) || !timestampPattern.test(startedAt) || Number.isNaN(Date.parse(startedAt)) ||
+      !Number.isInteger(acceptedCount) || acceptedCount < 0
+    ) continue;
+    return {
+      taskId: taskId.trim(),
+      targetCount,
+      status,
+      operation,
+      startedAt,
+      acceptedCount,
+    };
+  }
+  return undefined;
 }
 
 function recordText(record: Json, keys: string[]): string | undefined {
@@ -267,8 +425,15 @@ function appendWorkflowEvent(data: Json, event: Json): void {
 function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): void {
   if (event.error) return;
   const header = firstQuestionHeader(input);
-  if (![SEARCH_CONFIRMATION_HEADER, MCN_CONFIRMATION_HEADER, FIELD_CONFIRMATION_HEADER].includes(header ?? "")) return;
-  const answer = answerForQuestion(event, input);
+  if (![
+    SEARCH_CONFIRMATION_HEADER,
+    MANUAL_TARGET_CONFIRMATION_HEADER,
+    MCN_CONFIRMATION_HEADER,
+    FIELD_CONFIRMATION_HEADER,
+  ].includes(header ?? "")) return;
+  const answer = header === MANUAL_TARGET_CONFIRMATION_HEADER
+    ? freeformAnswerForQuestion(event, input)
+    : answerForQuestion(event, input);
   if (!answer) return;
 
   const current = store(rootDir);
@@ -277,9 +442,42 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
   workflow.updated_at_ms = Date.now();
 
   if (header === SEARCH_CONFIRMATION_HEADER) {
-    const approved = ["确认并开始MCN赛马", "按建议开始MCN赛马", "确认继续"].includes(answer);
-    workflow.next_action = approved ? "rank_mcns" : "confirm_search_results";
-    workflow.waiting_for = approved ? null : "user";
+    const validPlan = workflow.supply_plan_status === "valid";
+    const highRisk = workflow.supply_risk_level === "high_risk";
+    const suggested = workflow.suggested_expansion_count;
+    if (
+      answer === START_MANUAL_AND_MCN_LABEL && validPlan && highRisk &&
+      Number.isInteger(suggested) && suggested > 0
+    ) {
+      workflow.pending_manual_target_count = suggested;
+      workflow.next_action = "manual_source_creators";
+      workflow.waiting_for = null;
+    } else if (
+      [MCN_ONLY_LABEL, "确认并开始MCN赛马", "按建议开始MCN赛马", "确认继续"].includes(answer) &&
+      validPlan
+    ) {
+      delete workflow.pending_manual_target_count;
+      workflow.next_action = "rank_mcns";
+      workflow.waiting_for = null;
+    } else if (answer === ADJUST_MANUAL_TARGET_LABEL && validPlan && highRisk) {
+      delete workflow.pending_manual_target_count;
+      workflow.next_action = "confirm_manual_target_count";
+      workflow.waiting_for = "user";
+    } else {
+      workflow.next_action = validPlan ? "confirm_search_results" : "recover_search_supply_plan";
+      workflow.waiting_for = "user";
+    }
+  } else if (header === MANUAL_TARGET_CONFIRMATION_HEADER) {
+    const target = positiveManualTarget(answer);
+    if (target && workflow.supply_plan_status === "valid" && workflow.supply_risk_level === "high_risk") {
+      workflow.pending_manual_target_count = target;
+      workflow.next_action = "manual_source_creators";
+      workflow.waiting_for = null;
+    } else {
+      delete workflow.pending_manual_target_count;
+      workflow.next_action = "confirm_manual_target_count";
+      workflow.waiting_for = "user";
+    }
   } else if (header === MCN_CONFIRMATION_HEADER) {
     const approved = ["确认MCN方案", "确认继续"].includes(answer);
     workflow.next_action = approved ? "select_inquiry_form_fields" : "confirm_mcn_selection";
@@ -312,7 +510,11 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
 
   const current = store(rootDir);
   const workflow = current.data.workflow as Json;
-  const ok = successful(event.error ? { isError: true } : event.result);
+  const envelopeOk = successful(event.error ? { isError: true } : event.result);
+  const manualEvidence = tool === "manual_source_creators" && envelopeOk
+    ? manualSourcingEvidence(event.result, input, workflow)
+    : undefined;
+  const ok = envelopeOk && (tool !== "manual_source_creators" || manualEvidence !== undefined);
   const now = Date.now();
   workflow.last_tool = tool;
   workflow.last_tool_status = ok ? "success" : "failed";
@@ -326,6 +528,12 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
     workflow.next_action = "confirm_inquiry_fields";
     workflow.waiting_for = "user";
   } else if (!ok) {
+    if (tool === "manual_source_creators") {
+      workflow.manual_sourcing_evidence_status = envelopeOk ? "invalid" : "unavailable";
+      workflow.manual_sourcing_evidence_error = envelopeOk
+        ? "missing_or_conflicting_task_evidence"
+        : "provider_call_failed_or_unknown";
+    }
     workflow.next_action = `recover_${tool}`;
     workflow.waiting_for = "user";
   } else {
@@ -344,16 +552,36 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
       }
       case "search_creators": {
         workflow.phase = "candidate_pool_ready";
-        workflow.next_action = "confirm_search_results";
         workflow.waiting_for = "user";
-        const matched = resultNumber(root, [
-          "matched_creator_count", "eligible_creator_count", "candidate_count", "creator_count", "total_count",
-        ]);
-        const suggested = resultNumber(root, [
-          "suggested_expansion_count", "recommended_expansion_count", "expansion_count",
-        ]);
-        if (matched !== undefined) workflow.matched_creator_count = matched;
-        if (suggested !== undefined) workflow.suggested_expansion_count = suggested;
+        const supply = searchSupplyEvidence(root, workflow);
+        if (!supply) {
+          for (const key of [
+            "demand_count",
+            "matched_creator_count",
+            "supply_ratio",
+            "hard_shortfall_count",
+            "buffer_shortfall_count",
+            "supply_risk_level",
+            "suggested_expansion_count",
+            "recommended_action",
+            "pending_manual_target_count",
+          ]) delete workflow[key];
+          workflow.supply_plan_status = "invalid";
+          workflow.supply_plan_error = "missing_or_contradictory_provider_evidence";
+          workflow.next_action = "recover_search_supply_plan";
+          break;
+        }
+        workflow.supply_plan_status = "valid";
+        delete workflow.supply_plan_error;
+        workflow.demand_count = supply.demandCount;
+        workflow.matched_creator_count = supply.eligibleCreatorCount;
+        workflow.supply_ratio = supply.supplyRatio;
+        workflow.hard_shortfall_count = supply.hardShortfallCount;
+        workflow.buffer_shortfall_count = supply.bufferShortfallCount;
+        workflow.supply_risk_level = supply.supplyRiskLevel;
+        workflow.suggested_expansion_count = supply.suggestedExpansionCount;
+        workflow.recommended_action = supply.recommendedAction;
+        workflow.next_action = "confirm_search_results";
         break;
       }
       case "rank_mcns": {
@@ -403,7 +631,17 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
         workflow.waiting_for = "provider";
         break;
       case "manual_source_creators":
-        workflow.next_action = "create_with_distributions";
+        if (!manualEvidence) break;
+        workflow.manual_sourcing_task_id = manualEvidence.taskId;
+        workflow.manual_sourcing_status = manualEvidence.status;
+        workflow.manual_sourcing_operation = manualEvidence.operation;
+        workflow.manual_sourcing_target_count = manualEvidence.targetCount;
+        workflow.manual_sourcing_started_at = manualEvidence.startedAt;
+        workflow.manual_sourcing_accepted_count = manualEvidence.acceptedCount;
+        workflow.manual_sourcing_evidence_status = "valid";
+        delete workflow.manual_sourcing_evidence_error;
+        delete workflow.pending_manual_target_count;
+        workflow.next_action = "rank_mcns";
         workflow.waiting_for = null;
         break;
       case "audit_manual_adjustment":

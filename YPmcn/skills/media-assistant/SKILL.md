@@ -12,18 +12,18 @@ description: "Use for YPmcn requirement validation, sourcing, distribution, rank
 - Endpoint schema 优先，并与根 `spec/manifest.json` 指向的正式契约核对；只传 live schema 字段。必需 Tool 缺失、契约冲突或证据不足即 `integration_required`。
 - 本地 `state/confirmation_guard.json` 的 `workflow.phase/next_action` 是编排权威；Provider 状态只作业务事实与未知写对账，不得覆盖本地 phase。连续步骤复用实际成功响应。
 - 逐项核对 ID 血缘，只复制当前工作流中实际成功响应或已验证状态返回的 ID；不得猜测、串用或用虚构 ID 探测详情。
-- 只有实际 MCP 返回算成功证据。`validate_requirement` 参数校验失败且用户已确认信息足以唯一修复时，保持原始需求语义，只修报错字段、序列化、映射或审计计数，并在同一轮持续重新调用直到成功；需要新增业务选择时才询问。普通服务失败不改参数、不换 Tool、不自动重试，写结果未知先对账；`recovered`、`closed` 后不得重复写入。
+- 只有实际 MCP 返回算成功证据。`validate_requirement` 参数校验失败且已确认信息可唯一修复时，保持原始需求语义，只修报错字段、序列化、映射或审计计数，并在同一轮持续重新调用直到成功；需业务选择才询问，其他失败按执行门禁恢复。
 - 每次调用前必须先读 `references/tools/<tool>.json`。Hook 只硬拦 shell/curl 外发绕过，并用 AskUserQuestion 多行警告绑定企微参数指纹；其他 Tool 不做严格门禁。本地状态只按实际成功结果推进；没有远程证据时来源写“未知”。
 
 ## 主链
 
-`validate_requirement → 自动 search_creators → 固定供需结果与用户确认 → rank_mcns 赛马 → MCN 确认 → select_inquiry_form_fields → 可选 manual_source_creators → create_with_distributions 本地预检 → AskUserQuestion 确认 → 同参数 create_with_distributions → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
+`validate_requirement → 自动 search_creators → Provider 风险/缓冲补量与供给确认 → 高风险时 manual_source_creators(requirement_id,target_count) 启动或复用任务 → rank_mcns 赛马 → MCN 确认 → select_inquiry_form_fields → create_with_distributions 本地预检 → AskUserQuestion 确认 → 同参数 create_with_distributions → sync → ingest → sync → rank_creators → create_submission_batch → export_csv → record_client_feedback`
 
-任一弹窗的已提交选择都是执行指令，必须同轮继续所选动作，不能只回复已确认。企微 Tool 只传 live key `requirement_id`、`supplierIds`、`columns` 和 `description`；`columns` 每项必须含选择器原始 `key`，旧 `field_key` 调用前改名。AI 仅根据已确认用户需求将 `description` 整理为可直接发送的微信纯文本，可按需换行，禁止 JSON、代码块或杜撰。业务说法 `requirement_ID/colums` 不可作为参数名。首次调用只做本地预检：Hook 从最近一次成功的 `rank_mcns` 结果核对 `supplierIds`，并在 `EXTERNAL_SEND_CONFIRMATION_REQUIRED` 中给出唯一允许的 AskUserQuestion 参数。必须原样调用该弹窗；它用多行正文逐项展示 MCN 名称、字段和完整消息。只有“确认发送”才可同轮以完全相同参数再次调用企微 Tool；拒绝、关闭、超时、弹窗被改写或参数变化均不得外发。
+弹窗提交即同轮执行所选安全动作。高风险手扒只传 Hook 保存的确认数量；远程任务证据不完整时不得声称启动。企微参数与 `EXTERNAL_SEND_CONFIRMATION_REQUIRED` 规则见执行门禁；供给确认不授权外发。
 宿主若注入标准 Brief preview，将其作为解析参考：未决值主动询问，完整后优先调用 `validate_requirement`，但 preview 不限制 Skill 读取或其他 Tool。
 ## 用户引导
 
-用户首次使用时不知道要填什么。当用户输入太模糊（不满足 `isStandardBrief` 或解析出大量 `missing_required`）时，必须主动展示需求模板，**先输出这段模板再弹窗**：
+Brief 太模糊或有大量 `missing_required` 时，**先输出模板再弹窗**：
 
 ```
 请按以下模板补充需求信息（可复制粘贴修改）：
@@ -38,7 +38,7 @@ description: "Use for YPmcn requirement validation, sourcing, distribution, rank
 【内容要求】图文为主 / 视频为主 / 其他
 ```
 
-用一次 AskUserQuestion 收集缺失字段，每题聚焦一个字段，选项覆盖常见值 + "其他"供自由输入。
+用一次 AskUserQuestion 收集缺失字段，每题一个字段并允许“其他”。
 
 ## 按需读取
 

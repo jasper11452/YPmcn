@@ -44,8 +44,13 @@ describe("current Endpoint contract loader", () => {
     assert.equal(profile.outputEnvelopes["observed-runtime"].additionalProperties, true);
     for (const name of CURRENT_TOOLS) {
       assert.equal(profile.outputContracts[name].advertisedOutputSchema, false, name);
-      assert.deepEqual(profile.outputContracts[name].errorCodes, [], name);
+      if (name !== "manual_source_creators") {
+        assert.deepEqual(profile.outputContracts[name].errorCodes, [], name);
+      }
     }
+    assert.deepEqual(profile.outputContracts.manual_source_creators.errorCodes, [
+      "INVALID_INPUT", "STATE_CONFLICT", "WRITE_RESULT_UNKNOWN",
+    ]);
   });
 
   it("loads local-JSON workflow authority without making it Provider success evidence", () => {
@@ -69,6 +74,12 @@ describe("current Endpoint contract loader", () => {
     assert.equal(workflow.transitions.some((item) =>
       item.from === "waiting_mcn_return" && item.trigger?.name === "manual_source_creators"
     ), false);
+    const manualTransitions = workflow.transitions.filter((item) =>
+      item.trigger?.name === "manual_source_creators"
+    );
+    assert.equal(manualTransitions.length, 1);
+    assert.equal(manualTransitions[0].from, "candidate_pool_ready");
+    assert.match(workflow.policies.manualSourcingEvidence, /task_id.*target_count.*started_at/);
     assert.equal(Object.isFrozen(workflow), true);
     assert.equal(loadDatabaseContract().profile, "mvp-v2");
     assert.equal(loadErrorCatalog().profile, "mvp-v2");
@@ -110,7 +121,7 @@ describe("current Endpoint input validation", () => {
         requirement_id: "req-1", project_id: "project-1", supplierIds: ["supplier-1"],
       }],
       ["ingest_mcn_submissions", { inquiry_ids: ["1"] }],
-      ["manual_source_creators", { requirement_id: "req-1" }],
+      ["manual_source_creators", { requirement_id: "req-1", target_count: 4 }],
       ["rank_creators", { requirement_id: "req-1", limit: 20 }],
       ["create_submission_batch", { run_id: "1", risk_confirmation: null }],
       ["record_client_feedback", { run_id: "1", feedback_items: [{ status: "accepted" }] }],
@@ -165,6 +176,25 @@ describe("current Endpoint input validation", () => {
         description: "```json\n{\"title\":\"项目 A\"}\n```",
       }))[0].message,
       /not a code block/,
+    );
+  });
+
+  it("requires the minimal positive manual-sourcing target", () => {
+    assert.deepEqual(
+      validateToolParams("manual_source_creators", { requirement_id: "req-1" }).map(({ path }) => path),
+      ["$.target_count"],
+    );
+    for (const target_count of [0, -1, 1.5, "4"]) {
+      assert.equal(
+        validateToolParams("manual_source_creators", { requirement_id: "req-1", target_count })[0].path,
+        "$.target_count",
+      );
+    }
+    assert.deepEqual(
+      validateToolParams("manual_source_creators", {
+        requirement_id: "req-1", target_count: 4, platform: "xiaohongshu",
+      }).map(({ path }) => path),
+      ["$.platform"],
     );
   });
 

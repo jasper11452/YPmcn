@@ -49,8 +49,8 @@ const EXPECTED_INPUTS = {
     properties: { inquiry_ids: "array" },
   },
   manual_source_creators: {
-    required: ["requirement_id"],
-    properties: { requirement_id: "string" },
+    required: ["requirement_id", "target_count"],
+    properties: { requirement_id: "string", target_count: "integer" },
   },
   rank_creators: {
     required: ["requirement_id", "limit"],
@@ -164,8 +164,23 @@ describe("current Endpoint MCP contract", () => {
       assert.equal(output.advertisedOutputSchema, false, name);
       assert.equal(output.successEnvelope, "observed-runtime", name);
       assert.equal(output.failureEnvelope, "observed-runtime", name);
-      assert.deepEqual(output.successSchema, { type: "object", additionalProperties: true }, name);
+      assert.equal(output.successSchema.type, "object", name);
+      assert.equal(output.successSchema.additionalProperties, true, name);
+      if (!["search_creators", "manual_source_creators"].includes(name)) {
+        assert.deepEqual(output.successSchema, { type: "object", additionalProperties: true }, name);
+      }
     }
+    assert.deepEqual(profile.outputContracts.search_creators.successSchema.properties.data.required, [
+      "demand_count", "eligible_creator_count", "supply_ratio", "hard_shortfall_count",
+      "buffer_shortfall_count", "supply_risk_level", "suggested_expansion_count", "recommended_action",
+    ]);
+    assert.deepEqual(profile.outputContracts.manual_source_creators.successSchema.properties.data.required, [
+      "task_id", "requirement_id", "target_count", "status", "operation", "started_at", "accepted_count",
+    ]);
+    assert.deepEqual(
+      profile.outputContracts.manual_source_creators.successSchema.properties.data.properties.status.enum,
+      ["started", "running", "completed"],
+    );
     assert.match(profile.outputContracts.rank_creators.evidenceBasis, /run_id/);
     assert.match(profile.outputContracts.select_inquiry_form_fields.evidenceBasis, /数据库字段名：字段备注/);
   });

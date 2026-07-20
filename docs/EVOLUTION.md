@@ -19,11 +19,12 @@
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:c0f9fc98a3c14d4264b97ad7e37a855df17203f1a470c1da402d0c483b8fa8e1`
-变更记录摘要：`sha256:ca3764eaf01e948f2b18a60622f8e40c899a3075644b20f46ead0410ba78a267`
+当前 Spec：`mvp-v2` · `sha256:3aed67204d0b43c3f2053a711e93d35feae0ca7296ec2046ab5926a3fc929e68`
+变更记录摘要：`sha256:97e7e9c50c7bd91ddf331510a8b20f6357f6cdf0c192e0a976ac15ff0f06fa43`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-015 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [高风险供给启动手扒](../changes/CHG-2026-015-manual-sourcing-workflow.md) |
 | CHG-2026-014 | `IMPLEMENTED_LOCAL_TEST_ONLY` | [本地独立向量管线](../changes/CHG-2026-014-local-vector-integration.md) |
 | CHG-2026-013 | `SPEC_APPROVED` | [建立向量检索 MVP 正式契约基线](../changes/CHG-2026-013-vector-contract-baseline.md) |
 | CHG-2026-011 | `SPEC_APPROVED` | [修正 Hook 与 OpenClaw 宿主接口对接](../changes/CHG-2026-011-hook-host-integration.md) |

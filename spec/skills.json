@@ -28,7 +28,12 @@
         "incompatibleProviderAction": "integration_required",
         "automaticLegacyFallback": false,
         "preconditions": {
-        "create_with_distributions": [
+          "manual_source_creators": [
+            "provider_supply_evidence_is_complete_and_high_risk_with_positive_suggested_expansion",
+            "submitted_supply_command_binds_requirement_id_and_one_positive_target_count",
+            "no_distribution_has_been_sent"
+          ],
+          "create_with_distributions": [
           "local_orchestration_state_has_confirmed_supply_mcn_and_columns",
           "request_identity_resolves_one_requirement",
           "description_is_plain_text_wechat_message_from_confirmed_user_requirement_not_json",

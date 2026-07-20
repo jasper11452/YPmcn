@@ -7,11 +7,11 @@ YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。
 ```text
 validate_requirement
 → search_creators(id)
-→ 固定格式展示供需比与建议拓展数 → AskUserQuestion 确认
+→ 展示 Provider 风险、硬缺口与缓冲补量 → AskUserQuestion 确认
+→ 高风险可 manual_source_creators(requirement_id, target_count) 启动/复用手扒任务
 → rank_mcns(id, platform, 动态赛马数量)
 → 按名称展示 MCN 赛马结果 → 确认
 → select_inquiry_form_fields()
-→ manual_source_creators（可选，仅企微外发前）
 → create_with_distributions(requirement_id, supplierIds, columns, description)
 → Native Approval 警告；确认后宿主续传原调用
 → sync_mcn_inquiry_status(requirement_id, project_id, supplierIds)
@@ -22,7 +22,7 @@ validate_requirement
 → record_client_feedback(run_id, feedback_items)
 ```
 
-发送成功并能从真实 project/distribution 镜像询价后进入 `waiting_mcn_return`。只有企微发送成功且回收完成才能进入 `candidate_pool_enriched` 并调用 `rank_creators`；手扒仅可在企微外发前补量，不能替代这两个状态事实。
+高风险供给的手扒确认只授权两字段任务启动和后续 MCN 赛马；只有远程返回完整持久任务证据才算已启动，不能直接进入外发。发送成功并能从真实 project/distribution 镜像询价后进入 `waiting_mcn_return`。只有企微发送成功且回收完成才能进入 `candidate_pool_enriched` 并调用 `rank_creators`；手扒任务不能替代这两个状态事实。
 
 ## Hook 边界
 

@@ -99,6 +99,46 @@ async function recordTool(toolName, params, result, context = {}, toolCallId) {
   await hooks.get("after_tool_call")({ toolName, params, result, toolCallId }, context);
 }
 
+const highRiskSupply = (overrides = {}) => ({
+  demand_count: 5,
+  eligible_creator_count: 6,
+  supply_ratio: 1.2,
+  hard_shortfall_count: 0,
+  buffer_shortfall_count: 4,
+  supply_risk_level: "high_risk",
+  suggested_expansion_count: 4,
+  recommended_action: "mcn_and_manual",
+  ...overrides,
+});
+
+const supplyQuestion = {
+  questions: [{
+    header: "供给确认",
+    question: "需求达人数量：5\n当前符合条件达人数量：6\n供需比：6/5（1.2:1）\n硬缺口：0\n风险缓冲缺口：4\n建议手扒新增：4\n\n请选择执行方案。",
+    options: ["启动手扒并开始MCN赛马", "仅开始MCN赛马", "调整手扒数量"],
+  }],
+};
+
+async function recordHighRiskSupply() {
+  await recordTool(
+    "mcp__ypmcn__validate_requirement",
+    { payload: { platform: "xiaohongshu", quantityTotal: 5 } },
+    { success: true, data: { id: "requirement-local" }, error: null },
+  );
+  await recordTool(
+    "mcp__ypmcn__search_creators",
+    { id: "requirement-local" },
+    { success: true, data: highRiskSupply(), error: null },
+  );
+}
+
+async function answerSupply(answer) {
+  await recordTool("AskUserQuestion", supplyQuestion, {
+    status: "submitted",
+    answers: [{ selected_labels: [answer] }],
+  });
+}
+
 describe("YP Action native hooks", () => {
   it("registers the expected runtime hooks", () => {
     assert.deepEqual(
@@ -110,8 +150,11 @@ describe("YP Action native hooks", () => {
   it("injects the local JSON orchestration state without turning ordinary tools into gates", async () => {
     const prompt = await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     assert.equal(prompt.prependSystemContext, YPMCN_FAST_PATH);
-    assert.match(YPMCN_FAST_PATH, /需求达人数量：<quantityTotal>\n当前符合条件达人数量：<actual count>\n供需比：/);
-    assert.match(YPMCN_FAST_PATH, /Never replace these details with “以上”/);
+    assert.match(YPMCN_FAST_PATH, /buffer_shortfall_count/);
+    assert.match(YPMCN_FAST_PATH, /Never derive risk locally/);
+    assert.match(YPMCN_FAST_PATH, /启动手扒并开始MCN赛马/);
+    assert.match(YPMCN_FAST_PATH, /manual_source_creators\(\{requirement_id,pending_manual_target_count\}\)/);
+    assert.doesNotMatch(YPMCN_FAST_PATH, /max\(quantityTotal-actual count,0\)/);
     assert.match(prompt.prependContext, /authoritative local orchestration state/);
     assert.match(prompt.prependContext, /"next_action":"validate_requirement"/);
     assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 14);
@@ -396,7 +439,7 @@ describe("YP Action native hooks", () => {
     }
   });
 
-  it("records successful local transitions and popup commands without blocking ordinary calls", async () => {
+  it("turns a high-risk supply command into a verified manual task before MCN racing", async () => {
     const validateInput = { payload: { platform: "xiaohongshu", quantityTotal: 5 } };
     await recordTool(
       "mcp__ypmcn__validate_requirement",
@@ -412,27 +455,48 @@ describe("YP Action native hooks", () => {
     await recordTool(
       "mcp__ypmcn__search_creators",
       { id: "requirement-local" },
-      { success: true, data: { candidate_count: 12, suggested_expansion_count: 3 }, error: null },
+      { success: true, data: highRiskSupply(), error: null },
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.next_action, "confirm_search_results");
     assert.equal(state.workflow.waiting_for, "user");
-    assert.equal(state.workflow.matched_creator_count, 12);
+    assert.equal(state.workflow.matched_creator_count, 6);
+    assert.equal(state.workflow.supply_risk_level, "high_risk");
+    assert.equal(state.workflow.buffer_shortfall_count, 4);
+    assert.equal(state.workflow.suggested_expansion_count, 4);
+    assert.equal(state.workflow.supply_plan_status, "valid");
 
-    const question = {
-      questions: [{
-        header: "供给确认",
-        question: "需求达人数量：5\n当前符合条件达人数量：12\n供需比：12/5（2.4:1）\n建议拓展达人数量：3\n\n是否按此供给建议开始MCN赛马？",
-        options: ["确认并开始MCN赛马", "调整拓展数量"],
-      }],
-    };
-    await recordTool("AskUserQuestion", question, {
-      status: "submitted",
-      answers: [{ selected_labels: ["确认并开始MCN赛马"] }],
-    });
+    await answerSupply("启动手扒并开始MCN赛马");
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "manual_source_creators");
+    assert.equal(state.workflow.pending_manual_target_count, 4);
+    assert.equal(state.workflow.waiting_for, null);
+
+    await recordTool(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-local", target_count: 4 },
+      {
+        success: true,
+        data: {
+          task_id: "manual-task-1",
+          requirement_id: "requirement-local",
+          target_count: 4,
+          status: "started",
+          operation: "created",
+          started_at: "2026-07-20T12:00:00+08:00",
+          accepted_count: 0,
+        },
+        error: null,
+      },
+    );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.next_action, "rank_mcns");
-    assert.equal(state.workflow.waiting_for, null);
+    assert.equal(state.workflow.manual_sourcing_status, "started");
+    assert.equal(state.workflow.manual_sourcing_operation, "created");
+    assert.equal(state.workflow.manual_sourcing_target_count, 4);
+    assert.equal(state.workflow.manual_sourcing_task_id, "manual-task-1");
+    assert.equal(state.workflow.pending_manual_target_count, undefined);
+    assert.notEqual(state.workflow.next_action, "create_with_distributions");
 
     await recordTool(
       "mcp__ypmcn__rank_mcns",
@@ -443,7 +507,120 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.phase, "mcn_planning");
     assert.equal(state.workflow.mcn_race_size, 7);
     assert.equal(state.workflow.next_action, "confirm_mcn_selection");
-    assert.ok(state.workflow_events.length >= 4);
+    assert.ok(state.workflow_events.length >= 5);
+  });
+
+  it("fails closed when high-risk supply evidence recommends zero manual additions", async () => {
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload: { platform: "xiaohongshu", quantityTotal: 5 } },
+      { success: true, data: { id: "requirement-local" }, error: null },
+    );
+    await recordTool(
+      "mcp__ypmcn__search_creators",
+      { id: "requirement-local" },
+      { success: true, data: highRiskSupply({ suggested_expansion_count: 0 }), error: null },
+    );
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "candidate_pool_ready");
+    assert.equal(state.workflow.supply_plan_status, "invalid");
+    assert.equal(state.workflow.next_action, "recover_search_supply_plan");
+    assert.equal(state.workflow.suggested_expansion_count, undefined);
+  });
+
+  it("does not treat success=true without matching task evidence as a started task", async () => {
+    await recordHighRiskSupply();
+    await answerSupply("启动手扒并开始MCN赛马");
+    await recordTool(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-local", target_count: 4 },
+      { success: true, data: { message: "started" }, error: null },
+    );
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.last_tool_status, "failed");
+    assert.equal(state.workflow.manual_sourcing_evidence_status, "invalid");
+    assert.equal(state.workflow.next_action, "recover_manual_source_creators");
+    assert.equal(state.workflow.manual_sourcing_task_id, undefined);
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    await recordHighRiskSupply();
+    await answerSupply("启动手扒并开始MCN赛马");
+    await recordTool(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-local", target_count: 4 },
+      {
+        success: true,
+        data: {
+          task_id: "manual-task-mismatch",
+          requirement_id: "requirement-local",
+          target_count: 5,
+          status: "running",
+          operation: "reused",
+          started_at: "2026-07-20T12:00:00+08:00",
+          accepted_count: 2,
+        },
+        error: null,
+      },
+    );
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "recover_manual_source_creators");
+    assert.equal(state.workflow.manual_sourcing_evidence_status, "invalid");
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    await recordHighRiskSupply();
+    await answerSupply("启动手扒并开始MCN赛马");
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__manual_source_creators",
+      params: { requirement_id: "requirement-local", target_count: 4 },
+      error: "connection lost",
+    }, {});
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "recover_manual_source_creators");
+    assert.equal(state.workflow.manual_sourcing_evidence_status, "unavailable");
+    assert.equal(state.workflow.pending_manual_target_count, 4);
+  });
+
+  it("maps MCN-only and one adjusted positive target without guessing", async () => {
+    await recordHighRiskSupply();
+    await answerSupply("仅开始MCN赛马");
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "rank_mcns");
+    assert.equal(state.workflow.pending_manual_target_count, undefined);
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    await recordHighRiskSupply();
+    await answerSupply("调整手扒数量");
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "confirm_manual_target_count");
+    assert.equal(state.workflow.waiting_for, "user");
+
+    const targetQuestion = {
+      questions: [{
+        header: "手扒数量",
+        question: "请输入本次手扒新增数量（正整数）？",
+        options: ["手扒新增 4 位", "取消调整"],
+      }],
+    };
+    await recordTool("AskUserQuestion", targetQuestion, {
+      status: "submitted",
+      answers: [{ value: "7" }],
+    });
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "manual_source_creators");
+    assert.equal(state.workflow.pending_manual_target_count, 7);
+
+    await recordTool("AskUserQuestion", targetQuestion, {
+      status: "submitted",
+      answers: [{ value: "4 或 6" }],
+    });
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "confirm_manual_target_count");
+    assert.equal(state.workflow.pending_manual_target_count, undefined);
+
+    await recordTool("AskUserQuestion", targetQuestion, { status: "cancelled" });
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "confirm_manual_target_count");
+    assert.equal(state.workflow.pending_manual_target_count, undefined);
   });
 
   it("keeps failed Tool results from advancing the local phase", async () => {

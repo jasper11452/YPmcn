@@ -82,6 +82,11 @@ describe("Spec governance", () => {
       ...mcp.optionalTools,
     ]);
     assert.equal(mediaAssistant.toolPolicy.contract, "mcp.json");
+    assert.deepEqual(mediaAssistant.toolPolicy.preconditions.manual_source_creators, [
+      "provider_supply_evidence_is_complete_and_high_risk_with_positive_suggested_expansion",
+      "submitted_supply_command_binds_requirement_id_and_one_positive_target_count",
+      "no_distribution_has_been_sent",
+    ]);
     assert.equal(
       existsSync(join(repoRoot, mediaAssistant.implementation)),
       true,
@@ -146,6 +151,10 @@ describe("Spec governance", () => {
     assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.mcn_inquiries, ["sync_mcn_inquiry_status"]);
     assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.mcn_inquiry_status_syncs, ["sync_mcn_inquiry_status"]);
     assert.match(database.toolDatabaseEffects.sync_mcn_inquiry_status.currentLimitation, /not yet deployed/);
+    assert.match(database.toolDatabaseEffects.manual_source_creators.targetWriteBoundary, /persist.*durable manual-sourcing task/);
+    assert.ok(database.knownGaps.some(({ id, severity }) =>
+      id === "manual-sourcing-task-store-unverified" && severity === "high"
+    ));
     assert.equal(database.toolDatabaseEffects.audit_manual_adjustment.writes.includes("audit_events"), false);
   });
 
@@ -367,7 +376,7 @@ describe("Spec governance", () => {
     assert.equal(requirements.dictionary.customerContentAllowed, false);
   });
 
-  it("represents the provider's unadvertised outputs without inventing fields", () => {
+  it("keeps outputs unadvertised while declaring approved continuation evidence", () => {
     const mcp = json("mcp.json");
     const errors = json("errors.json");
     const toolNames = [...mcp.requiredTools, ...mcp.optionalTools];
@@ -391,6 +400,15 @@ describe("Spec governance", () => {
       mcp.outputContracts.select_inquiry_form_fields.evidenceBasis,
       /数据库字段名：字段备注/,
     );
+    assert.deepEqual(mcp.outputContracts.search_creators.successSchema.properties.data.required, [
+      "demand_count", "eligible_creator_count", "supply_ratio", "hard_shortfall_count",
+      "buffer_shortfall_count", "supply_risk_level", "suggested_expansion_count", "recommended_action",
+    ]);
+    assert.deepEqual(mcp.outputContracts.manual_source_creators.successSchema.properties.data.required, [
+      "task_id", "requirement_id", "target_count", "status", "operation", "started_at", "accepted_count",
+    ]);
+    assert.deepEqual(mcp.tools.manual_source_creators.required, ["requirement_id", "target_count"]);
+    assert.equal(mcp.tools.manual_source_creators.properties.target_count.minimum, 1);
   });
 
   it("keeps the approved finding registry one-to-one with authoritative Spec paths", () => {

@@ -469,7 +469,9 @@
         "creator_supply_offers",
         "xhs_creator_accounts",
         "dy_creator_accounts"
-      ]
+      ],
+      "targetWriteBoundary": "Before returning started or running, the Provider must persist or idempotently reuse a durable manual-sourcing task; executor results later write only hard-filtered, deduplicated creators and offers to the observed tables listed here.",
+      "currentLimitation": "No observed manual-sourcing task table or production Provider task implementation is present in this repository; local Hook evidence checks cannot substitute for that durable server fact."
     },
     "rank_creators": {
       "reads": [
@@ -579,6 +581,11 @@
       "id": "query-flags-ignored",
       "severity": "medium",
       "effect": "Some advertised include flags do not change the current response."
+    },
+    {
+      "id": "manual-sourcing-task-store-unverified",
+      "severity": "high",
+      "effect": "The observed database contract has no verified durable manual-sourcing task entity; production start, idempotency, recovery, and executor ownership must be implemented and verified in the Provider repository before enabling the 3.3.9 manual branch."
     }
   ],
   "invariants": [

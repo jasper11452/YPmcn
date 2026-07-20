@@ -111,11 +111,75 @@
     },
     "search_creators": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "No provider outputSchema is advertised; retain the actual response as evidence before deriving downstream identifiers.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. The fields below are the approved target evidence required to continue a supply decision; retain the actual response and fail closed when they are absent or contradictory.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
         "type": "object",
+        "required": [
+          "success",
+          "data",
+          "error"
+        ],
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "demand_count",
+              "eligible_creator_count",
+              "supply_ratio",
+              "hard_shortfall_count",
+              "buffer_shortfall_count",
+              "supply_risk_level",
+              "suggested_expansion_count",
+              "recommended_action"
+            ],
+            "properties": {
+              "demand_count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "eligible_creator_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "supply_ratio": {
+                "type": "number",
+                "minimum": 0
+              },
+              "hard_shortfall_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "buffer_shortfall_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "supply_risk_level": {
+                "type": "string",
+                "enum": [
+                  "low_risk",
+                  "medium_risk",
+                  "high_risk"
+                ]
+              },
+              "suggested_expansion_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "recommended_action": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "null"
+          }
+        },
         "additionalProperties": true
       },
       "errorCodes": []
@@ -177,14 +241,81 @@
     },
     "manual_source_creators": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "No provider outputSchema is advertised; retain the actual response as evidence before deriving downstream identifiers.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. Continuing requires the approved target task evidence below from one response record; a success envelope alone never proves that manual sourcing started.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
         "type": "object",
+        "required": [
+          "success",
+          "data",
+          "error"
+        ],
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "task_id",
+              "requirement_id",
+              "target_count",
+              "status",
+              "operation",
+              "started_at",
+              "accepted_count"
+            ],
+            "properties": {
+              "task_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "requirement_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target_count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "started",
+                  "running",
+                  "completed"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "reused"
+                ]
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "accepted_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "null"
+          }
+        },
         "additionalProperties": true
       },
-      "errorCodes": []
+      "errorCodes": [
+        "INVALID_INPUT",
+        "STATE_CONFLICT",
+        "WRITE_RESULT_UNKNOWN"
+      ]
     },
     "rank_creators": {
       "advertisedOutputSchema": false,
@@ -552,11 +683,18 @@
     "manual_source_creators": {
       "name": "manual_source_creators",
       "required": [
-        "requirement_id"
+        "requirement_id",
+        "target_count"
       ],
       "properties": {
         "requirement_id": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
+        },
+        "target_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "本次需要手扒新增的达人数量"
         }
       },
       "forbidden": [],
@@ -568,11 +706,12 @@
       "retry": {
         "policy": "no-blind-retry",
         "blindRetry": false,
-        "unknownOutcome": "stop-and-request-returned-evidence",
-        "reconcileWith": null
+        "unknownOutcome": "stop-and-reconcile-authoritative-task-state",
+        "reconcileWith": "get_workflow_state"
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
+        "one returned data record contains task_id, echoed requirement_id and target_count, allowed status and operation, started_at, and accepted_count",
         "retain actual returned payload as downstream evidence"
       ]
     },

@@ -15,7 +15,7 @@
 
 要保证“真的启动手扒”，不能只改输入 Schema 或提示词。Provider 必须先持久化可恢复的手扒任务，再返回真实 `task_id` 和 `status`。只有收到 `started`、`running` 或 `completed`，Agent 才能向用户报告手扒已启动。高风险供给确认后，先调用 `manual_source_creators`，成功后同轮继续 `rank_mcns`；手扒成功绝不能直接跳到询价外发。
 
-本文是实施方案，不代表当前插件、Provider 或数据库已经完成这些改动。
+实施状态（3.3.9）：本仓库已完成目标输入契约、高风险命令传递、Hook 任务证据门禁、Skill 文案和本地回放测试；2026-07-20 只读 Provider 检查确认远端仍是一字段契约，尚无 `target_count`。本仓库不含生产 Provider、任务执行器或数据库 migration，因此生产启用保持阻断，必须先部署两字段契约、真实任务证据并通过隔离 Live E2E。
 
 ## 目标与验收边界
 
