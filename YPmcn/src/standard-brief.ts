@@ -184,7 +184,10 @@ function priceRange(match: RegExpExecArray): string | undefined {
     return JSON.stringify([lower, upper]);
   }
   if (match.groups?.upperOnly) return JSON.stringify([0, lower]);
-  return JSON.stringify([lower, lower]);
+  return JSON.stringify([
+    Math.round(lower * 9) / 10,
+    Math.round(lower * 11) / 10,
+  ]);
 }
 
 function priceTarget(source: string, brief: string): string | undefined {

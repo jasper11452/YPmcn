@@ -113,6 +113,8 @@ const highRiskSupply = (overrides = {}) => ({
   buffer_shortfall_count: 4,
   supply_risk_level: "high_risk",
   suggested_expansion_count: 4,
+  mcn_covered_creator_count: 6,
+  mcn_manual_creator_ratio: "6:4",
   recommended_action: "mcn_and_manual",
   ...overrides,
 });
@@ -120,7 +122,7 @@ const highRiskSupply = (overrides = {}) => ({
 const supplyQuestion = {
   questions: [{
     header: "供给确认",
-    question: "需求达人数量：5\n当前符合条件达人数量：6\n供需比：6/5（1.2:1）\n硬缺口：0\n风险缓冲缺口：4\n建议达人拓展新增：4\n\n请选择执行方案。",
+    question: "需求达人数量：5\n当前符合条件达人数量：6\n供需比：6/5（1.2:1）\n硬缺口：0\n风险缓冲缺口：4\n建议手动拓展达人数量：4\nMCN 覆盖达人数量：6\n建议提报比例（MCN达人:拓展达人）：6:4\n\n请选择执行方案。",
     options: ["启动达人拓展并开始MCN排序", "仅开始MCN排序", "调整达人拓展数量"],
   }],
 };
@@ -738,6 +740,8 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.supply_risk_level, "high_risk");
     assert.equal(state.workflow.buffer_shortfall_count, 4);
     assert.equal(state.workflow.suggested_expansion_count, 4);
+    assert.equal(state.workflow.mcn_covered_creator_count, 6);
+    assert.equal(state.workflow.mcn_manual_creator_ratio, "6:4");
     assert.equal(state.workflow.supply_plan_status, "valid");
 
     await answerSupply("启动达人拓展并开始MCN排序");
@@ -831,6 +835,23 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.supply_plan_status, "invalid");
     assert.equal(state.workflow.next_action, "recover_search_supply_plan");
     assert.equal(state.workflow.suggested_expansion_count, undefined);
+  });
+
+  it("fails closed when the MCN-to-manual creator ratio contradicts the recommended counts", async () => {
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload: { platform: "xiaohongshu", quantityTotal: 5 } },
+      { success: true, data: { id: "requirement-local" }, error: null },
+    );
+    await recordTool(
+      "mcp__ypmcn__search_creators",
+      { id: "requirement-local" },
+      { success: true, data: highRiskSupply({ mcn_manual_creator_ratio: "5:4" }), error: null },
+    );
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.supply_plan_status, "invalid");
+    assert.equal(state.workflow.next_action, "recover_search_supply_plan");
+    assert.equal(state.workflow.mcn_manual_creator_ratio, undefined);
   });
 
   it("does not treat success=true without matching task evidence as a started task", async () => {

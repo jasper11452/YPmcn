@@ -120,6 +120,43 @@ describe("deterministic standard Brief parser", () => {
     assert.equal(preview.atoms.find((atom) => atom.field === "creatorPriceTier")?.sourceText, "单达人 L1 官方报价：4万元以内");
   });
 
+  it("expands exact single-creator official prices by 10% for every supported tier", () => {
+    for (const [platform, label, expectedField] of [
+      ["小红书", "单达人 L1 官方报价", "kolOfficialPriceL1"],
+      ["小红书", "单达人 L2 官方报价", "kolOfficialPriceL2"],
+      ["抖音", "单达人 L3 官方报价", "kolOfficialPriceL3"],
+    ]) {
+      const brief = [
+        `平台：${platform}`,
+        "数量：1位达人",
+        `${label}：4万元`,
+        "提报截止：2026-07-20 18:00",
+      ].join("\n");
+      const preview = parseStandardBrief(brief);
+
+      assert.equal(preview.gate, "ready");
+      assert.equal(preview.projection[expectedField], "[36000,44000]");
+    }
+  });
+
+  it("keeps explicit upper bounds and closed official-price ranges unchanged", () => {
+    for (const [price, expected] of [
+      ["4万元以内", "[0,40000]"],
+      ["3万-5万元", "[30000,50000]"],
+    ]) {
+      const brief = [
+        "平台：小红书",
+        "数量：1位达人",
+        `单达人 L1 官方报价：${price}`,
+        "提报截止：2026-07-20 18:00",
+      ].join("\n");
+      const preview = parseStandardBrief(brief);
+
+      assert.equal(preview.gate, "ready");
+      assert.equal(preview.projection.kolOfficialPriceL1, expected);
+    }
+  });
+
   it("rejects the third internal price field for Xiaohongshu and asks with platform wording", () => {
     const brief = [
       "平台：小红书",

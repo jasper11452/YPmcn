@@ -204,7 +204,8 @@ describe("current Endpoint MCP contract", () => {
     }
     assert.deepEqual(profile.outputContracts.search_creators.successSchema.properties.data.required, [
       "demand_count", "eligible_creator_count", "supply_ratio", "hard_shortfall_count",
-      "buffer_shortfall_count", "supply_risk_level", "suggested_expansion_count", "recommended_action",
+      "buffer_shortfall_count", "supply_risk_level", "suggested_expansion_count",
+      "mcn_covered_creator_count", "mcn_manual_creator_ratio", "recommended_action",
     ]);
     assert.deepEqual(profile.outputContracts.rank_mcns.successSchema.properties.data.required, [
       "inquiry_id",

@@ -287,6 +287,8 @@ type SearchSupplyEvidence = {
   bufferShortfallCount: number;
   supplyRiskLevel: "low_risk" | "medium_risk" | "high_risk";
   suggestedExpansionCount: number;
+  mcnCoveredCreatorCount: number;
+  mcnManualCreatorRatio: string;
   recommendedAction: string;
 };
 
@@ -302,7 +304,12 @@ function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEviden
     const bufferShortfallCount = record.buffer_shortfall_count;
     const supplyRiskLevel = record.supply_risk_level;
     const suggestedExpansionCount = record.suggested_expansion_count;
+    const mcnCoveredCreatorCount = record.mcn_covered_creator_count;
+    const mcnManualCreatorRatio = record.mcn_manual_creator_ratio;
     const recommendedAction = record.recommended_action;
+    const ratio = text(mcnManualCreatorRatio)
+      ? /^(\d+)\s*:\s*(\d+)$/.exec(mcnManualCreatorRatio.trim())
+      : undefined;
     if (
       !Number.isInteger(demandCount) || demandCount < 1 ||
       !Number.isInteger(eligibleCreatorCount) || eligibleCreatorCount < 0 ||
@@ -311,6 +318,9 @@ function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEviden
       !Number.isInteger(bufferShortfallCount) || bufferShortfallCount < 0 ||
       !text(supplyRiskLevel) || !riskLevels.has(supplyRiskLevel) ||
       !Number.isInteger(suggestedExpansionCount) || suggestedExpansionCount < 0 ||
+      !Number.isInteger(mcnCoveredCreatorCount) || mcnCoveredCreatorCount < 0 ||
+      !ratio || Number(ratio[1]) !== mcnCoveredCreatorCount ||
+      Number(ratio[2]) !== suggestedExpansionCount ||
       !text(recommendedAction)
     ) continue;
     if (Number.isInteger(workflow.quantity_total) && workflow.quantity_total !== demandCount) continue;
@@ -328,6 +338,8 @@ function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEviden
       bufferShortfallCount,
       supplyRiskLevel: supplyRiskLevel as SearchSupplyEvidence["supplyRiskLevel"],
       suggestedExpansionCount,
+      mcnCoveredCreatorCount,
+      mcnManualCreatorRatio: `${mcnCoveredCreatorCount}:${suggestedExpansionCount}`,
       recommendedAction: recommendedAction.trim(),
     };
   }
@@ -1034,6 +1046,8 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
             "buffer_shortfall_count",
             "supply_risk_level",
             "suggested_expansion_count",
+            "mcn_covered_creator_count",
+            "mcn_manual_creator_ratio",
             "recommended_action",
             "pending_manual_target_count",
           ]) delete workflow[key];
@@ -1051,6 +1065,8 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
         workflow.buffer_shortfall_count = supply.bufferShortfallCount;
         workflow.supply_risk_level = supply.supplyRiskLevel;
         workflow.suggested_expansion_count = supply.suggestedExpansionCount;
+        workflow.mcn_covered_creator_count = supply.mcnCoveredCreatorCount;
+        workflow.mcn_manual_creator_ratio = supply.mcnManualCreatorRatio;
         workflow.recommended_action = supply.recommendedAction;
         workflow.next_action = "confirm_search_results";
         break;

@@ -135,6 +135,8 @@
               "buffer_shortfall_count",
               "supply_risk_level",
               "suggested_expansion_count",
+              "mcn_covered_creator_count",
+              "mcn_manual_creator_ratio",
               "recommended_action"
             ],
             "properties": {
@@ -169,6 +171,14 @@
               "suggested_expansion_count": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "mcn_covered_creator_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mcn_manual_creator_ratio": {
+                "type": "string",
+                "pattern": "^\\d+\\s*:\\s*\\d+$"
               },
               "recommended_action": {
                 "type": "string"
