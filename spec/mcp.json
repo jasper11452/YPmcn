@@ -293,7 +293,7 @@
     },
     "manual_source_creators": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "Provider tools/list does not advertise outputSchema. Continue only when the successful response contains the actual non-empty inquiry_ids produced for the requested requirement_id and size.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. The request requirement_id must be the fresh ID returned by the immediately preceding successful validate_requirement call and is one-time for this invocation. Continue only when the successful response contains the actual non-empty inquiry_ids produced for that requirement_id and size.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -704,6 +704,10 @@
         }
       },
       "forbidden": [],
+      "agentSemanticRequirements": {
+        "requirement_id": "must exactly equal the fresh non-empty ID returned by the immediately preceding successful validate_requirement call and may authorize only this one manual_source_creators invocation",
+        "eligibility": "independent of current workflow phase, historical creator search, and completion of other workflow steps"
+      },
       "sideEffects": "business-write",
       "writers": {
         "always": [],

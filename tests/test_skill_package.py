@@ -83,18 +83,21 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertEqual(1 + len(EXPECTED_REFERENCE_FILES), len(markdown))
         self.assertLessEqual(sum(count_han(read(path)) for path in markdown), 3000)
 
-    def test_skill_declares_the_direct_flow_without_a_global_hook_gate(self):
+    def test_skill_declares_phase_independent_manual_sourcing_with_a_fresh_id_gate(self):
         text = "\n".join((
             read(SKILL),
             read(REFERENCES / "requirement-intake.md"),
             read(REFERENCES / "execution-gates.md"),
         ))
         for required in (
-            "select_inquiry_form_fields → manual_source_creators → rank_creators → create_submission_batch",
+            "select_inquiry_form_fields → validate_requirement → manual_source_creators → rank_creators → create_submission_batch",
             "manual_source_creators({requirement_id,size})",
             "create_submission_batch({requirement_id,size,number})",
             "任一步失败都停止后续业务 Tool",
-            "不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序",
+            "手扒不受当前流程阶段限制",
+            "新生成的 `requirement_id` 用于紧邻的一次手扒",
+            "不检查该需求是否历史检索过或其他流程是否完成",
+            "Hook 只硬校验手扒的一次性新需求 ID",
             "preview 不限制 Skill 读取或其他 Tool",
             "本地状态只按实际成功结果推进",
             "用户要求失败即停时绝不重试",
@@ -116,10 +119,11 @@ class SkillPackageContractTest(unittest.TestCase):
         routing = read(REFERENCES / "execution-gates.md")
         for mapping in (
             "select_inquiry_form_fields({platform})",
+            "validate_requirement",
             "manual_source_creators({requirement_id,size})",
             "无实际 `inquiry_ids` 不 rank",
             "create_submission_batch({requirement_id,size,number})",
-            "禁止在本链发送 `target_count`、`run_id`",
+            "禁止发送 `target_count`、`run_id`",
         ):
             self.assertIn(mapping, routing)
         for obsolete in (
@@ -138,7 +142,9 @@ class SkillPackageContractTest(unittest.TestCase):
             "workflow_state",
             "allowed_actions",
             "state/confirmation_guard.json",
-            "首个业务 Tool 固定为 `select_inquiry_form_fields({platform})`",
+            "仅导出时先调用 `select_inquiry_form_fields({platform})`",
+            "每次手扒前都重新解析完整 Brief 并调用 `validate_requirement`",
+            "不检查历史库是否检索过该需求，也不检查其他流程是否完成",
             "成功后同轮调用 `create_submission_batch({requirement_id,size,number})`",
             "禁止盲重试",
         ):
@@ -151,7 +157,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "写结果未知",
             "只有实际 MCP 成功响应才是后续证据",
             "字段页面取消、超时或返回无效字段时停止",
-            "只接受本轮成功响应中的非空、唯一字符串 `inquiry_ids`",
+            "只接受该手扒成功响应中的非空、唯一字符串 `inquiry_ids`",
             "不得改用旧 `run_id`",
             "禁止盲重试",
         ):
@@ -457,8 +463,8 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_hook_reference_keeps_state_projection_advisory(self):
         text = read(REFERENCES / "execution-gates.md")
         for required in (
-            "Hook 不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序",
-            "只记录实际结果",
+            "Hook 仅消费并核对本次手扒的新需求 ID",
+            "不用 phase、历史检索或其他流程完成度阻断",
             "本地成功投影不等于 Provider 成功",
         ):
             self.assertIn(required, text)

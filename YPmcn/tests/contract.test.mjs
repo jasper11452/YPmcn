@@ -67,7 +67,7 @@ describe("current Endpoint contract loader", () => {
     assert.equal(workflow.stateAuthority.ledger.status, "schema-present-not-used-by-current-tools");
     assert.match(workflow.stateAuthority.currentProviderGaps.create_submission_batch, /not yet deployed/);
     assert.deepEqual(workflow.primaryFlow.sequence, [
-      "select_inquiry_form_fields", "manual_source_creators",
+      "select_inquiry_form_fields", "validate_requirement", "manual_source_creators",
       "rank_creators", "create_submission_batch",
     ]);
     assert.match(workflow.policies.rankCreatorsPrerequisite, /manual_source_creators.*inquiry_ids/i);
@@ -85,8 +85,10 @@ describe("current Endpoint contract loader", () => {
       item.trigger?.name === "manual_source_creators"
     );
     assert.equal(manualTransitions.length, 1);
-    assert.equal(manualTransitions[0].from, "inquiry_fields_ready");
-    assert.match(workflow.policies.directFlowEntry, /select_inquiry_form_fields.*first business Tool/);
+    assert.equal(manualTransitions[0].from, "requirement_ready");
+    assert.match(workflow.policies.directFlowEntry, /any existing phase/);
+    assert.match(workflow.policies.manualSourcingPlacement, /do not require historical search/);
+    assert.match(workflow.policies.manualRequirementIdentity, /exactly one immediately following/);
     assert.match(workflow.policies.manualSourcingEvidence, /inquiry_ids/);
     assert.equal(Object.isFrozen(workflow), true);
     assert.equal(loadDatabaseContract().profile, "mvp-v2");

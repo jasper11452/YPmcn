@@ -132,11 +132,19 @@ describe("current Endpoint MCP contract", () => {
     }
   });
 
-  it("keeps the two provider semantic constraints explicit", () => {
+  it("keeps provider and manual-sourcing semantic constraints explicit", () => {
     assert.match(profile.tools.get_workflow_state.semanticRequirement, /demand_id.*demand_version.*trace_id/);
     assert.match(profile.tools.get_recommendation_run_detail.semanticRequirement, /positive integer/);
     assert.deepEqual(profile.tools.rank_creators.agentRequired, ["requirement_id", "columns"]);
     assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /manual_source_creators/);
+    assert.match(
+      profile.tools.manual_source_creators.agentSemanticRequirements.requirement_id,
+      /fresh non-empty ID.*immediately preceding successful validate_requirement.*one manual_source_creators invocation/,
+    );
+    assert.match(
+      profile.tools.manual_source_creators.agentSemanticRequirements.eligibility,
+      /independent of current workflow phase, historical creator search, and completion of other workflow steps/,
+    );
     assert.match(
       profile.tools.rank_creators.agentSemanticRequirements.columns,
       /field-selection submission/,

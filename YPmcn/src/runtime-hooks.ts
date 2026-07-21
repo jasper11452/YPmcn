@@ -27,6 +27,11 @@ export function isExternalSendAttempt(event: Json): boolean {
   return normalize(raw) === "create_with_distributions";
 }
 
+export function isManualSourcingAttempt(event: Json): boolean {
+  const raw = String(event.toolName ?? event.name ?? "").trim();
+  return normalize(raw) === "manual_source_creators";
+}
+
 export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | undefined {
   const raw = String(event.toolName ?? event.name ?? "").trim();
   const input = event.params && typeof event.params === "object" ? event.params :
@@ -39,7 +44,7 @@ export function beforeTool(event: Json, _ctx: Json, rootDir: string): Json | und
       ? denyStructured("INTEGRATION_REQUIRED", "Provider writes must use the declared MCP tool, not shell or curl.")
       : undefined;
   }
-  if (tool !== "create_with_distributions") return undefined;
+  if (tool !== "create_with_distributions" && tool !== "manual_source_creators") return undefined;
   const current = store(rootDir);
   return guardWorkflowTool(event, tool, input, current, rootDir);
 }

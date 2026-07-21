@@ -119,6 +119,15 @@ async function recordTool(toolName, params, result, context = {}, toolCallId) {
   await hooks.get("after_tool_call")({ toolName, params, result, toolCallId }, context);
 }
 
+async function recordFreshRequirement(requirementId, context = {}) {
+  await recordTool(
+    "mcp__ypmcn__validate_requirement",
+    { payload: { platform: "xiaohongshu", quantityTotal: 1 } },
+    { success: true, data: { id: requirementId }, error: null },
+    context,
+  );
+}
+
 const preRaceSupply = (overrides = {}) => ({
   demand_count: 5,
   eligible_creator_count: 6,
@@ -204,13 +213,15 @@ describe("YP Action native hooks", () => {
     );
   });
 
-  it("injects the local JSON orchestration state without turning ordinary tools into gates", async () => {
+  it("injects the local JSON orchestration state and the fresh-ID manual flow", async () => {
     const prompt = await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     assert.equal(prompt.prependSystemContext, YPMCN_FAST_PATH);
-    assert.match(YPMCN_FAST_PATH, /select_inquiry_form_fields -> manual_source_creators -> rank_creators -> create_submission_batch/);
-    assert.match(YPMCN_FAST_PATH, /First call select_inquiry_form_fields\(\{platform\}\)/);
+    assert.match(YPMCN_FAST_PATH, /select_inquiry_form_fields -> validate_requirement -> manual_source_creators -> rank_creators -> create_submission_batch/);
+    assert.match(YPMCN_FAST_PATH, /Manual sourcing may start from any current workflow phase/);
+    assert.match(YPMCN_FAST_PATH, /fresh non-empty requirement ID[^]*immediately following manual call only/);
+    assert.match(YPMCN_FAST_PATH, /Do not check whether that requirement was searched before/);
     assert.match(YPMCN_FAST_PATH, /manual_source_creators\(\{requirement_id,size\}\)/);
-    assert.match(YPMCN_FAST_PATH, /actual successful response provides[^]*inquiry_ids/);
+    assert.match(YPMCN_FAST_PATH, /actual successful manual response provides[^]*inquiry_ids/);
     assert.match(YPMCN_FAST_PATH, /create_submission_batch\(\{requirement_id,size,number\}\)/);
     assert.match(YPMCN_FAST_PATH, /This Tool is the spreadsheet exporter/);
     assert.match(YPMCN_FAST_PATH, /age1Rate\.\.age6Rate are direct JSON numbers/);
@@ -222,7 +233,7 @@ describe("YP Action native hooks", () => {
     assert.doesNotMatch(YPMCN_FAST_PATH, /max\(quantityTotal-actual count,0\)/);
     assert.match(prompt.prependContext, /authoritative local orchestration state/);
     assert.match(prompt.prependContext, /"next_action":"select_inquiry_form_fields"/);
-    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 17);
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 18);
 
     for (const [toolName, params] of [
       ["read", { file_path: "/tmp/SKILL.md" }],
@@ -234,14 +245,84 @@ describe("YP Action native hooks", () => {
     }
   });
 
-  it("allows every declared business Tool except that send requires AskUserQuestion confirmation", async () => {
+  it("allows declared business Tools while guarding manual freshness and send confirmation", async () => {
     for (const name of [...contract.requiredTools, ...contract.optionalTools]) {
-      const params = name === "create_with_distributions" ? distributionParams() : {};
+      let params = name === "create_with_distributions" ? distributionParams() : {};
       if (name === "create_with_distributions") await recordMcnRecipients(params);
+      if (name === "manual_source_creators") {
+        params = { requirement_id: "requirement-manual-allow", size: "1" };
+        await recordFreshRequirement(params.requirement_id);
+      }
       const result = await guard(`mcp__ypmcn__${name}`, params);
       if (name === "create_with_distributions") askInputFrom(result);
       else assert.equal(result, undefined, name);
     }
+  });
+
+  it("requires and consumes the immediately preceding fresh requirement ID for every manual call", async () => {
+    const withoutParse = await guard(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-old", size: "3" },
+    );
+    assert.equal(withoutParse?.block, true);
+    assert.match(withoutParse.blockReason, /INVALID_INPUT.*fresh requirement_id/);
+
+    await recordFreshRequirement("requirement-fresh-1");
+    const mismatched = await guard(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-old", size: "3" },
+    );
+    assert.equal(mismatched?.block, true);
+    assert.match(mismatched.blockReason, /immediately preceding successful validate_requirement/);
+    const expiredAfterMismatch = await guard(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-fresh-1", size: "3" },
+    );
+    assert.equal(expiredAfterMismatch?.block, true);
+
+    await recordFreshRequirement("requirement-fresh-2");
+    assert.equal(await guard(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-fresh-2", size: "3" },
+    ), undefined);
+    const replay = await guard(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-fresh-2", size: "3" },
+    );
+    assert.equal(replay?.block, true);
+
+    await recordFreshRequirement("requirement-fresh-3");
+    await recordTool(
+      "mcp__ypmcn__get_creator_detail",
+      { creator_id: "creator-1" },
+      { success: true, data: {}, error: null },
+    );
+    const intervened = await guard(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-fresh-3", size: "3" },
+    );
+    assert.equal(intervened?.block, true);
+
+    await recordTool(
+      "mcp__ypmcn__record_client_feedback",
+      {},
+      { success: true, data: {}, error: null },
+    );
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "feedback_routing");
+    await recordFreshRequirement("requirement-from-late-phase");
+    assert.equal(await guard(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-from-late-phase", size: "3" },
+    ), undefined);
+
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.manual_sourcing_requirement_receipt.status, "consumed");
+    assert.equal(state.manual_sourcing_requirement_receipt.requirement_id, undefined);
+    assert.notEqual(
+      state.manual_sourcing_requirement_receipt.requirement_id_sha256,
+      "requirement-from-late-phase",
+    );
   });
 
   it("blocks only provider send bypasses through shell", async () => {
@@ -1075,19 +1156,26 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.next_action, "recover_validate_requirement");
   });
 
-  it("projects the direct field-selection, manual, rank, and export sequence", async () => {
+  it("projects the direct field-selection, fresh validation, manual, rank, and export sequence", async () => {
     await recordTool(
       "mcp__ypmcn__select_inquiry_form_fields",
       { platform: "xiaohongshu" },
       { success: true, data: { description: "kwUid：达人 ID\nnickname：达人昵称" }, error: null },
     );
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.workflow.next_action, "manual_source_creators");
+    assert.equal(state.workflow.next_action, "validate_requirement");
     assert.equal(state.workflow.platform, "xiaohongshu");
 
+    await recordFreshRequirement("requirement-direct");
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "requirement_ready");
+    assert.equal(state.workflow.next_action, "manual_source_creators");
+
+    const manualParams = { requirement_id: "requirement-direct", size: "8" };
+    assert.equal(await guard("mcp__ypmcn__manual_source_creators", manualParams), undefined);
     await recordTool(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-direct", size: "8" },
+      manualParams,
       { success: true, data: { inquiry_ids: ["31", "32"] }, error: null },
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -1215,7 +1303,7 @@ describe("YP Action native hooks", () => {
     askInputFrom(result);
   });
 
-  it("fails open for ordinary tools and closed for external send when the guard itself throws", async () => {
+  it("fails open for ordinary tools and closed for guarded manual or external-send calls", async () => {
     const localHooks = new Map();
     const errors = [];
     createYpmcnPlugin({ beforeTool() { throw new Error("guard exploded"); } }).register({
@@ -1229,6 +1317,11 @@ describe("YP Action native hooks", () => {
       params: distributionParams(),
     }, {});
     assert.deepEqual(result, { block: true, blockReason: "YPmcn guard unavailable: guard exploded" });
-    assert.equal(errors.length, 2);
+    const manual = await localHooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__manual_source_creators",
+      params: { requirement_id: "requirement-new", size: "1" },
+    }, {});
+    assert.deepEqual(manual, { block: true, blockReason: "YPmcn guard unavailable: guard exploded" });
+    assert.equal(errors.length, 3);
   });
 });

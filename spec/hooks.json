@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "profile": "mvp-v2",
   "implementation": "YPmcn/src/index.ts",
   "handlerImplementation": "YPmcn/src/runtime-hooks.ts",
@@ -11,7 +11,7 @@
       "script": "YPmcn/src/index.ts"
     },
     "before_tool_call": {
-      "responsibility": "native_exact_call_external_send_approval_and_shell_bypass_guard",
+      "responsibility": "one_time_fresh_manual_requirement_binding_plus_native_exact_call_external_send_approval_and_shell_bypass_guard",
       "mayBlock": true,
       "script": "YPmcn/src/runtime-hooks.ts"
     },
@@ -32,7 +32,7 @@
       "oneTimeConfirmations": "10m",
       "unknownExternalSend": "10m; every retry requires a fresh explicit confirmation"
     },
-    "format": "confirmation_guard_schema_v17",
+    "format": "confirmation_guard_schema_v18",
     "storesBusinessPayload": false,
     "storesWorkflowIdentifiers": true,
     "authoritativeForOrchestration": true,
@@ -44,6 +44,8 @@
       "external_send_request_fingerprint_binding",
       "provider_send_shell_bypass_blocking",
       "one_time_confirmation_fingerprints",
+      "manual_sourcing_fresh_requirement_receipt_binding",
+      "one_time_manual_requirement_consumption",
       "local_workflow_phase_and_next_action_recording"
     ],
     "doesNotOwn": [
@@ -51,7 +53,9 @@
       "requirement_input_validation",
       "tool_parameter_validation",
       "workflow_order_enforcement",
-      "identifier_provenance_enforcement",
+      "identifier_provenance_enforcement_beyond_current_manual_requirement_receipt",
+      "historical_requirement_or_search_lookup",
+      "provider_requirement_id_uniqueness",
       "database_schema",
       "mcp_tool_schema",
       "provider_business_fact_authority",
@@ -67,6 +71,15 @@
       "mayDenyOrdinaryToolOrder": false,
       "advancesOnlyOnActualSuccess": true,
       "authoritativeContract": "workflow.json#stateAuthority"
+    },
+    "manualSourcingGuard": {
+      "phaseIndependent": true,
+      "requiredPredecessor": "validate_requirement",
+      "requiredEvidence": "fresh non-empty requirement ID from the immediately preceding successful response",
+      "oneTime": true,
+      "checksHistoricalSearch": false,
+      "checksOtherWorkflowCompletion": false,
+      "storesRawRequirementId": false
     }
   },
   "legacyArtifacts": {

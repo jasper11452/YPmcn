@@ -1,25 +1,27 @@
 # YPmcn 媒介助手插件
 
-YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。插件只对不可逆企微外发做本地硬确认；参数与业务状态由 MCP/Provider 校验并从数据库派生。
+YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。插件对每次手扒绑定当次新需求 ID，并对不可逆企微外发做本地硬确认；业务结果仍由 MCP/Provider 提供。
 
 ## 完整链路
 
 ```text
 select_inquiry_form_fields(platform) → 网页选择字段
+→ validate_requirement(payload) → 生成本次新 requirement_id
 → manual_source_creators(requirement_id, size)
 → rank_creators(inquiry_ids, requirement_id, columns) 筛选去重
 → create_submission_batch(requirement_id, size, number) 导出表格
 ```
 
-`size` 与 `number` 使用正整数十进制字符串。只有字段选择成功后才启动手扒；`rank_creators` 只消费本轮手扒实际返回的 `inquiry_ids`，并沿用相同需求和所选字段。排序成功后由 `create_submission_batch` 直接导出，不再调用宿主 `export_csv`，也不使用旧 `target_count` 或 `run_id` 参数。
+`manual_source_creators` 可从任意既有阶段发起，但每次调用前必须重新解析完整需求并成功执行 `validate_requirement`；只允许把该响应新生成的 ID 用于紧邻的一次手扒。系统不查询该需求是否历史检索过，也不要求其他流程完成。只手扒时不要求字段选择；导出时字段选择必须发生在本次需求解析之前。`size` 与 `number` 使用正整数十进制字符串，排序只消费本轮手扒实际返回的 `inquiry_ids`，导出不再使用宿主 `export_csv`、旧 `target_count` 或 `run_id`。
 
 ## Hook 边界
 
 插件注册 `before_prompt_build`、`before_tool_call`、`after_tool_call`、`session_end`。
 
 - Hook 按会话把本地 phase、next_action 和脱敏事件写入 `state/confirmation_guard.json`；实际 MCP 结果仍是业务事实证据。
-- 需求 preview 只作为提示上下文，不形成 Tool 权限门禁；Skill、resources、prompts、普通宿主工具和除企微外发外的 YPmcn Tool 均不被 Hook 阻断。
-- 本地 JSON 是 Agent 编排状态权威，但 Hook 不对普通 Tool 做严格顺序/参数阻断；Provider 状态仅用于业务事实和未知写对账。
+- 需求 preview 只作为提示上下文，不形成通用 Tool 权限门禁；Skill、resources、prompts 和普通宿主工具均不被 Hook 阻断。
+- Hook 对手扒只核对当前会话中紧邻成功解析返回的新需求 ID，并在调用前一次性消费；不按 phase、历史检索或其他流程完成度阻断，也不保存原始需求 ID。
+- 本地 JSON 是 Agent 编排状态权威；除上述一次性手扒 ID 与企微外发确认外，Hook 不对普通 Tool 做严格顺序/参数阻断。Provider 状态仅用于业务事实和未知写对账。
 - shell、PowerShell、curl 直连 provider 的企微外发接口会被阻断，避免绕过最终确认。
 - provider 发送调用会触发 Native Approval；Allow 由宿主继续同一待执行调用，Reject/超时/取消不触达 Provider。
 - 参数变化、重放或未知写结果都必须产生新的 Native Approval；唯一例外是 Provider 明确无写入并指出未绑定机构时，只缩减这些机构的续发可继承原确认。
@@ -27,7 +29,7 @@ select_inquiry_form_fields(platform) → 网页选择字段
 
 ## Provider 状态
 
-开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。2026-07-21 只读检查已确认字段选择、手扒和排序的新输入；三参数 `create_submission_batch` 尚待 Provider 发布，生产导出当前保持 `integration_required`。
+开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。2026-07-21 只读检查已确认字段选择、手扒和排序的新输入，但 Provider 未广告“每次解析生成唯一新需求 ID”的保证；三参数 `create_submission_batch` 也尚待发布，生产导出当前保持 `integration_required`。
 
 ```bash
 npm run mcp:dev

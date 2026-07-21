@@ -9,6 +9,7 @@ export type Json = Record<string, any>;
 export type ConfirmationStatus = "pending" | "approved" | "in_flight" | "consumed" | "unknown" | "denied";
 export type GuardStore = { path: string; data: Json };
 const STATE_SCOPE = new AsyncLocalStorage<string>();
+const STATE_SCHEMA_VERSION = 18;
 
 export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 
@@ -91,8 +92,8 @@ export function denyStructured(code: string, context: string): Json {
 function storeAtPath(path: string): GuardStore {
   const data = load(path);
   const previousSchemaVersion = data.schema_version;
-  let changed = previousSchemaVersion !== 17;
-  data.schema_version = 17;
+  let changed = previousSchemaVersion !== STATE_SCHEMA_VERSION;
+  data.schema_version = STATE_SCHEMA_VERSION;
   if (!data.confirmations || typeof data.confirmations !== "object" || Array.isArray(data.confirmations)) {
     data.confirmations = {};
     changed = true;
@@ -101,7 +102,7 @@ function storeAtPath(path: string): GuardStore {
     data.workflow = initialWorkflowState();
     changed = true;
   }
-  if (previousSchemaVersion !== undefined && previousSchemaVersion !== 17) {
+  if (previousSchemaVersion !== undefined && Number(previousSchemaVersion) < 17) {
     for (const key of [
       "supply_plan_status", "supply_plan_error", "matched_creator_count", "supply_ratio",
       "hard_shortfall_count", "buffer_shortfall_count", "supply_risk_level",
@@ -119,6 +120,14 @@ function storeAtPath(path: string): GuardStore {
       data.workflow.next_action === "validate_requirement"
     ) {
       data.workflow.next_action = "select_inquiry_form_fields";
+      data.workflow.waiting_for = null;
+    }
+    changed = true;
+  }
+  if (previousSchemaVersion !== undefined && previousSchemaVersion !== STATE_SCHEMA_VERSION) {
+    delete data.manual_sourcing_requirement_receipt;
+    if (data.workflow.next_action === "manual_source_creators") {
+      data.workflow.next_action = "validate_requirement";
       data.workflow.waiting_for = null;
     }
     changed = true;

@@ -475,8 +475,8 @@
         "xhs_creator_accounts",
         "dy_creator_accounts"
       ],
-      "targetWriteBoundary": "Resolve the current requirement_id, execute the requested positive size, persist only matching sourced creators and offers, and return the actual inquiry_ids that own those results. The same request must be safe against blind duplication.",
-      "currentLimitation": "The live input accepts requirement_id and size, but outputSchema and server-side idempotency evidence are not advertised; local Hook evidence cannot substitute for returned inquiry_ids."
+      "targetWriteBoundary": "Resolve the fresh requirement_id created by the immediately preceding requirement validation, execute the requested positive size without depending on historical search or other workflow completion, persist only matching sourced creators and offers, and return the actual inquiry_ids that own those results. The same request must be safe against blind duplication.",
+      "currentLimitation": "The live input accepts requirement_id and size, but per-call requirement ID freshness, outputSchema, and server-side idempotency evidence are not advertised; the local one-time receipt cannot substitute for Provider uniqueness or returned inquiry_ids."
     },
     "rank_creators": {
       "reads": [

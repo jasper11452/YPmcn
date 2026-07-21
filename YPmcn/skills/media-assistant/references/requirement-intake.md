@@ -23,7 +23,7 @@
 - 相对时间用宿主 `currentLocalDateTime + timeZone` 唯一换算为 `YYYY-MM-DD HH:mm:ss`；不能唯一确定即询问。
 - 每个 atom 只映射一个真实字段或逐字 preserved；`sourceText` 必须非空，可引用原始 Brief 或本轮 AskUserQuestion 的明确补充答案，不能为了满足审计而篡改 `originalBrief`。`rawMessagesJson` 保存完整原文、非空 atoms 与计数一致且 `unresolvedCount=0` 的 coverage。
 
-`ready` 时展示并原样调用 `{"payload": {..., "status": "ready"}}`。新建省略 `id/demandVersion`；补充版本只沿用上一成功响应的 `demandId`。仅实际返回成功、需求主键和 `status=ready` 后推进本地状态；Provider `workflow_state/allowed_actions` 不覆盖本地 phase，未知写结果先对账。
+`ready` 时展示并原样调用 `{"payload": {..., "status": "ready"}}`。每次手扒前都按新建需求处理并省略旧 `id/demandVersion`；仅实际成功响应新生成的需求主键可授权紧邻的一次手扒，禁止复用。非手扒的补充版本才沿用上一成功响应的 `demandId`。Provider `workflow_state/allowed_actions` 不覆盖本地 phase，未知写结果先对账。
 
 ## 参数自修复
 

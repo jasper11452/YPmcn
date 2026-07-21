@@ -331,6 +331,75 @@ type DirectManualSourcingEvidence = {
   inquiryIds: string[];
 };
 
+const MANUAL_REQUIREMENT_RECEIPT_KEY = "manual_sourcing_requirement_receipt";
+
+function validationRequirementId(root: unknown): string | undefined {
+  const data = approvedTargetData(root);
+  if (!data) return undefined;
+  const candidates = [data.id, data.requirement_id]
+    .map(identifierText)
+    .filter(text);
+  const unique = [...new Set(candidates)];
+  return unique.length === 1 ? unique[0] : undefined;
+}
+
+function recordManualRequirementReceipt(
+  event: Json,
+  tool: string,
+  rootDir: string,
+): void {
+  const current = store(rootDir);
+  const existing = current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
+  const now = Date.now();
+
+  if (tool === "validate_requirement") {
+    const requirementId = event.error ? undefined : validationRequirementId(event.result);
+    if (requirementId) {
+      current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = {
+        requirement_id_sha256: sha256Text(requirementId),
+        status: "fresh",
+        issued_at_ms: now,
+      };
+    } else {
+      delete current.data[MANUAL_REQUIREMENT_RECEIPT_KEY];
+    }
+    save(current.path, current.data);
+    return;
+  }
+
+  if (!existing || existing.status !== "fresh") return;
+  existing.status = tool === "manual_source_creators" ? "consumed" : "expired";
+  existing.updated_at_ms = now;
+  current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = existing;
+  save(current.path, current.data);
+}
+
+function authorizeFreshManualRequirement(input: Json, current: GuardStore): Json | undefined {
+  const receipt = current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
+  const matches = text(input.requirement_id) &&
+    receipt?.status === "fresh" &&
+    text(receipt.requirement_id_sha256) &&
+    sha256Text(input.requirement_id.trim()) === receipt.requirement_id_sha256;
+  if (!matches) {
+    if (receipt?.status === "fresh") {
+      receipt.status = "expired";
+      receipt.updated_at_ms = Date.now();
+      current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = receipt;
+      save(current.path, current.data);
+    }
+    return denyStructured(
+      "INVALID_INPUT",
+      "manual_source_creators requires the fresh requirement_id returned by the immediately preceding successful validate_requirement call; parse the requirement again instead of reusing an old ID.",
+    );
+  }
+
+  receipt.status = "consumed";
+  receipt.updated_at_ms = Date.now();
+  current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = receipt;
+  save(current.path, current.data);
+  return undefined;
+}
+
 type DistributionOutcomeEvidence = {
   projectId?: string;
   requestedCount: number;
@@ -916,6 +985,11 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
 
   const current = store(rootDir);
   const workflow = current.data.workflow as Json;
+  const continueToManualAfterValidation = tool === "validate_requirement" &&
+    workflow.next_action === "validate_requirement" && (
+      workflow.phase === "inquiry_fields_ready" ||
+      (Number.isInteger(workflow.pending_manual_target_count) && workflow.pending_manual_target_count > 0)
+    );
   const envelopeOk = successful(event.error ? { isError: true } : event.result);
   const rankEvidence = tool === "rank_mcns" && envelopeOk
     ? rankMcnCoverageEvidence(event.result, input, workflow)
@@ -959,7 +1033,7 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
     // The Tool waits for the out-of-band web selector. Keep the submitted fields
     // in the Agent context and project only the safe next action locally.
     workflow.phase = "inquiry_fields_ready";
-    workflow.next_action = "manual_source_creators";
+    workflow.next_action = "validate_requirement";
     workflow.waiting_for = null;
     if (text(input.platform)) workflow.platform = input.platform.trim();
   } else if (tool === "create_with_distributions" && distributionUnboundRejection) {
@@ -1081,7 +1155,9 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
     switch (tool) {
       case "validate_requirement": {
         workflow.phase = "requirement_ready";
-        workflow.next_action = "search_creators";
+        workflow.next_action = continueToManualAfterValidation
+          ? "manual_source_creators"
+          : "search_creators";
         workflow.waiting_for = null;
         const requirementId = resultText(root, ["id", "requirement_id"]);
         if (requirementId) workflow.requirement_id = requirementId;
@@ -1503,9 +1579,11 @@ export function guardWorkflowTool(
   _current: GuardStore,
   rootDir: string,
 ): Json | undefined {
-  return tool === "create_with_distributions"
-    ? authorizeExternalSend(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined)
-    : undefined;
+  if (tool === "manual_source_creators") return authorizeFreshManualRequirement(input, _current);
+  if (tool === "create_with_distributions") {
+    return authorizeExternalSend(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined);
+  }
+  return undefined;
 }
 
 function recordExternalSendResult(event: Json, input: Json, rootDir: string): void {
@@ -1652,4 +1730,5 @@ export function recordWorkflowToolResult(
   if (!tool) return;
   if (tool === "create_with_distributions") recordExternalSendResult(event, input, rootDir);
   updateLocalWorkflow(event, tool, input, rootDir);
+  recordManualRequirementReceipt(event, tool, rootDir);
 }

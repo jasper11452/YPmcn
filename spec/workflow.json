@@ -16,11 +16,12 @@
     "initialAction": "select_inquiry_form_fields",
     "sequence": [
       "select_inquiry_form_fields",
+      "validate_requirement",
       "manual_source_creators",
       "rank_creators",
       "create_submission_batch"
     ],
-    "requiredUserInputs": ["platform", "requirement_id", "size", "number"],
+    "requiredUserInputs": ["platform", "requirement_brief", "size", "number"],
     "failurePolicy": "stop-before-next-business-tool"
   },
   "phases": [
@@ -102,7 +103,7 @@
       "create_with_distributions": "writes the external API but does not persist project or distribution identifiers in the local ledger",
       "sync_mcn_inquiry_status": "records sync metadata only; it does not query provider state or upsert mcn_inquiries",
       "rank_mcns": "the production Provider has not been verified to bind inquiry_id to the actual selected supplier set and return its (platform, kwUid)-deduplicated coverage union",
-      "manual_source_creators": "the live input accepts requirement_id and size, but its unadvertised output still requires runtime inquiry_ids evidence before ranking",
+      "manual_source_creators": "the live input accepts requirement_id and size, but the Provider does not advertise the fresh per-call requirement ID guarantee or an output schema; runtime inquiry_ids evidence is still required before ranking",
       "create_submission_batch": "the requirement_id, size, number target input is approved locally but not yet deployed on the production Provider",
       "maximumRecoverablePhase": "recommendation_ready until the target create_submission_batch input is deployed"
     }
@@ -113,11 +114,12 @@
     "unsupportedProviderArguments": ["candidate_pool_id", "mcn_recommendation_id", "preview_only", "remindAt", "trigger"],
     "stateRefresh": "read local JSON on every prompt; use get_workflow_state only for context loss or unknown write reconciliation",
     "unknownWriteRecovery": "current provider: get_workflow_state by demand identity from existing business facts; ledger trace_id reconciliation is target-only and an unknown external create remains blocked; never blind retry",
-    "postValidationContinuation": "a successful validate_requirement result immediately continues to search_creators in the same turn",
+    "postValidationContinuation": "a successful validate_requirement result immediately continues to manual_source_creators when the current intent is manual sourcing; otherwise it continues to search_creators in the same turn",
     "postSearchContinuation": "before MCN racing, render only the deduplicated eligible rate-card creator count, its multiplier against demand, and the approved <20 / 20-<30 / >=30 risk advice; never compute, display, or retain an exact manual target",
     "mcnRace": "after the media operator selects actual inquiry suppliers, rank_mcns persists the inquiry association and returns that exact supplier set plus its (platform, kwUid)-deduplicated coverage union; never hardcode five recommendations or display IDs",
-    "directFlowEntry": "for manual sourcing and export, select_inquiry_form_fields is the first business Tool and must complete before manual_source_creators",
-    "manualSourcingPlacement": "after field selection, call manual_source_creators with exactly the current requirement_id and positive integer decimal string size",
+    "directFlowEntry": "manual sourcing may be initiated from any existing phase; field selection is required only for the export continuation and, when needed, completes before the fresh requirement validation",
+    "manualSourcingPlacement": "from any existing phase, run validate_requirement for this call and make manual_source_creators the next business Tool with exactly its newly returned requirement_id and a positive integer decimal string size; do not require historical search or another workflow completion",
+    "manualRequirementIdentity": "one successful validate_requirement response binds its fresh requirement_id to exactly one immediately following manual_source_creators call; a missing, mismatched, intervened, or already consumed ID requires a new requirement parse",
     "selectedSupplierBinding": "create_with_distributions supplierIds must equal the supplier set bound to the latest selected-supplier coverage calculation; any set change requires recalculation",
     "manualSourcingEvidence": "advance only when the successful manual_source_creators response supplies actual non-empty inquiry_ids for the current requirement and size",
     "rankCreatorsPrerequisite": "manual_source_creators succeeded and rank_creators receives those exact inquiry_ids plus the current requirement and selected columns",
@@ -176,9 +178,9 @@
     },
     {
       "id": "direct-manual-sourcing-ready",
-      "from": "inquiry_fields_ready",
+      "from": "requirement_ready",
       "trigger": {"type": "tool", "name": "manual_source_creators"},
-      "guards": ["field selection completed", "requirement_id resolves the current demand", "size is a positive integer decimal string"],
+      "guards": ["the immediately preceding successful validate_requirement returned this fresh requirement_id", "the one-time fresh requirement receipt is consumed by this call", "size is a positive integer decimal string", "no phase, historical search, or other workflow-completion gate is applied"],
       "evidence": ["successful manual response with actual non-empty inquiry_ids"],
       "nextPhase": "candidate_pool_enriched"
     },

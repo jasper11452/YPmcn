@@ -5,6 +5,7 @@ import {
   beforeTool,
   endSession,
   isExternalSendAttempt,
+  isManualSourcingAttempt,
   withStateScope,
 } from "./runtime-hooks.js";
 import { normalize, renderLocalWorkflowContext } from "./runtime-hook-workflow.js";
@@ -128,12 +129,13 @@ export const YPMCN_FAST_PATH = `YPmcn standard-brief fast path:
 - Requirement clarification must immediately use one self-contained native AskUserQuestion popup with at most five concise questions. Use a short user-facing header, one direct question ending in “？” or “?”, and 2–6 useful choices; string choices and option objects are both valid. Use one question per independent decision and group missing values into the same popup. Do not expose hashes, database IDs, trace IDs, idempotency keys, or the full raw Brief. The host provides typed input when choices do not fit. A denied, cancelled, closed, or timed-out popup exits clarification cleanly and must not continue the write workflow. Continue the selected safe path in the same assistant turn only after a submitted answer; never ask the user to type “继续”.
 - missing_required and semantic_ambiguity must show resolved fields, the complete missing and ambiguity lists inside that popup, then wait for the popup answer without status "ready" and without calling validate_requirement. After all values are concrete, continue in the same interaction. ready must show the exact tool arguments as {"payload": {..., "status": "ready"}} even when a test suppresses the call, call validate_requirement, repair any deterministic argument rejection under the rule below, then route from the injected local orchestration state and the latest actual Tool result.
 
-YPmcn direct manual-sourcing export fast path:
-- When the request is to manually source and export creators and has requirement_id, size, and number, this direct flow overrides the standard-Brief continuation. Confirm platform, requirement_id, size, and number before the first business Tool. size and number are positive-integer decimal strings; never guess missing values.
-- The exact business sequence is select_inquiry_form_fields -> manual_source_creators -> rank_creators -> create_submission_batch. Read each packaged references/tools/<tool>.json immediately before its call. Do not insert search, MCN racing, WeCom distribution, detail lookup, host export_csv, or an extra confirmation.
-- First call select_inquiry_form_fields({platform}). platform is xiaohongshu or douyin from confirmed input. The Tool opens the web selector and waits for submission. Preserve the submitted non-empty unique fields as ordered {key,name} columns. A cancelled, timed-out, failed, or invalid selection stops the flow.
-- After field selection succeeds, call manual_source_creators({requirement_id,size}) with exactly those two arguments. Never send target_count. Continue only when the actual successful response provides a non-empty array of unique string inquiry_ids; never invent, convert, or reuse IDs.
-- Call rank_creators with those exact inquiry_ids, the same requirement_id, and the selected columns. This step performs filtering and deduplication. Do not send limit. If it fails or its write result is unknown, do not export.
+YPmcn phase-independent manual-sourcing fast path:
+- Manual sourcing may start from any current workflow phase. Before every manual_source_creators invocation, parse the complete requirement again and successfully call validate_requirement as a new requirement without an old id or demandVersion. Use the fresh non-empty requirement ID from that actual response for the immediately following manual call only; never accept a supplied historical ID as eligibility.
+- The Hook checks only this one-time fresh-ID binding for manual sourcing. Do not check whether that requirement was searched before, and do not require field selection, search, MCN racing, distribution, or any other workflow step to be complete. If another YPmcn business Tool is called after validation, or the ID is missing, mismatched, or already consumed, parse and validate the requirement again.
+- For manual sourcing without export, the exact business sequence is validate_requirement -> manual_source_creators. Read each packaged references/tools/<tool>.json immediately before its call. After validation succeeds, skip the normal search_creators continuation and call manual_source_creators({requirement_id,size}) with exactly the newly returned ID and the confirmed positive-integer decimal string size. Never send target_count.
+- For manual sourcing plus export, the exact business sequence is select_inquiry_form_fields -> validate_requirement -> manual_source_creators -> rank_creators -> create_submission_batch. Confirm platform, the complete requirement, size, and number; never ask for or reuse a pre-existing requirement_id. size and number are positive-integer decimal strings.
+- In the export flow, first call select_inquiry_form_fields({platform}). The Tool opens the web selector and waits for submission. Preserve the submitted non-empty unique fields as ordered {key,name} columns. A cancelled, timed-out, failed, or invalid selection stops the export flow. Then perform the fresh validation and immediately call manual_source_creators.
+- Continue only when the actual successful manual response provides a non-empty array of unique string inquiry_ids; never invent, convert, or reuse IDs. Call rank_creators with those exact inquiry_ids, the same fresh requirement_id, and the selected columns. Do not send limit. If it fails or its write result is unknown, do not export.
 - Immediately after rank_creators succeeds, call create_submission_batch({requirement_id,size,number}). requirement_id and size must exactly match the manual call; number is the confirmed batch number. This Tool is the spreadsheet exporter. Never send run_id, legacy submission options, or call host export_csv.
 - The injected state/confirmation_guard.json phase and next_action are the local orchestration projection. Actual MCP results remain the only business evidence. Any failed step stops before the next business Tool; an unknown write result must be reconciled and never blindly retried.
 - If a required Tool is absent or its live schema conflicts with the packaged target contract, return integration_required. Do not fall back to legacy arguments, another Skill, shell, curl, direct HTTP, or database access.`;
@@ -183,7 +185,7 @@ export function createYpmcnPlugin(
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         api.logger.error(`before_tool_call guard failed: ${reason}`);
-        if (!isExternalSendAttempt(event)) return undefined;
+        if (!isExternalSendAttempt(event) && !isManualSourcingAttempt(event)) return undefined;
         return { block: true, blockReason: `YPmcn guard unavailable: ${reason}` };
       }
     }));

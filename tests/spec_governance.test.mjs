@@ -84,13 +84,19 @@ describe("Spec governance", () => {
     assert.equal(mediaAssistant.toolPolicy.contract, "mcp.json");
     assert.deepEqual(mediaAssistant.toolPolicy.primarySequence, [
       "select_inquiry_form_fields",
+      "validate_requirement",
       "manual_source_creators",
       "rank_creators",
       "create_submission_batch",
     ]);
+    assert.equal(
+      mediaAssistant.toolPolicy.phasePolicy.manual_source_creators,
+      "phase-independent-after-fresh-requirement-validation",
+    );
     assert.deepEqual(mediaAssistant.toolPolicy.preconditions.manual_source_creators, [
-      "field_selector_completed_for_the_confirmed_platform",
-      "requirement_id_is_the_current_confirmed_requirement",
+      "validate_requirement_succeeded_immediately_before_this_call",
+      "requirement_id_equals_the_fresh_id_returned_by_that_validation",
+      "fresh_requirement_id_receipt_is_consumed_by_this_call",
       "size_is_a_positive_integer_decimal_string",
     ]);
     assert.equal(
