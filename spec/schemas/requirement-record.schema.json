@@ -41,9 +41,9 @@
     "kwIpDependency": {"type": ["string", "null"], "maxLength": 128},
     "kwUserUrl": {"type": ["string", "null"], "maxLength": 1024},
     "organization": {"type": ["string", "null"], "maxLength": 255},
-    "hasOrganization": {"type": ["integer", "null"], "enum": [0, 1, null]},
-    "hasOrder30day": {"type": ["integer", "null"], "enum": [0, 1, null]},
-    "hasSocial30day": {"type": ["integer", "null"], "enum": [0, 1, null]},
+    "hasOrganization": {"type": ["boolean", "null"]},
+    "hasOrder30day": {"type": ["boolean", "null"]},
+    "hasSocial30day": {"type": ["boolean", "null"]},
     "interactionRate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
     "clickMedium": {"type": ["integer", "null"], "minimum": 0},
     "viewMedium": {"type": ["integer", "null"], "minimum": 0},
@@ -59,12 +59,12 @@
     "avgcollect": {"$ref": "#/$defs/nullableRange"},
     "avginteract": {"$ref": "#/$defs/nullableRange"},
     "femaleRate": {"$ref": "#/$defs/nullableRange"},
-    "age1Rate": {"$ref": "#/$defs/nullableRange"},
-    "age2Rate": {"$ref": "#/$defs/nullableRange"},
-    "age3Rate": {"$ref": "#/$defs/nullableRange"},
-    "age4Rate": {"$ref": "#/$defs/nullableRange"},
-    "age5Rate": {"$ref": "#/$defs/nullableRange"},
-    "age6Rate": {"$ref": "#/$defs/nullableRange"},
+    "age1Rate": {"$ref": "#/$defs/nullableRate"},
+    "age2Rate": {"$ref": "#/$defs/nullableRate"},
+    "age3Rate": {"$ref": "#/$defs/nullableRate"},
+    "age4Rate": {"$ref": "#/$defs/nullableRate"},
+    "age5Rate": {"$ref": "#/$defs/nullableRate"},
+    "age6Rate": {"$ref": "#/$defs/nullableRate"},
     "cpeL1": {"$ref": "#/$defs/nullableRange"},
     "cpeL2": {"$ref": "#/$defs/nullableRange"},
     "cpeL3": {"$ref": "#/$defs/nullableRange"},
@@ -85,7 +85,9 @@
   "x-constraints": [
     "projectStartStart <= projectStartEnd when both are present",
     "every [min,max] string has finite non-negative bounds and min <= max",
-    "photoInteract, femaleRate and age1Rate..age6Rate bounds are <= 1",
+    "photoInteract and femaleRate bounds are <= 1",
+    "age1Rate..age6Rate are direct numeric rates from 0 through 1 using platform-specific age bands",
+    "hasOrganization, hasOrder30day and hasSocial30day are booleans",
     "at least one kolOfficialPriceL1/L2/L3 has a positive upper bound before status=ready"
   ],
   "$defs": {
@@ -108,6 +110,11 @@
         {"$ref": "#/$defs/range"},
         {"type": "null"}
       ]
+    },
+    "nullableRate": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
     },
     "nullableLabelJson": {
       "type": ["array", "object", "null"]

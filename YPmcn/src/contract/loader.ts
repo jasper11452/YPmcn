@@ -748,6 +748,11 @@ export function loadRequirementsContract(): RequirementsContract {
   }
   const valuePolicies = requireRecord(value.valuePolicies, "requirements valuePolicies");
   const mappedRanges = requireRecord(valuePolicies.mappedRanges, "requirements range policy");
+  const fanAgeRates = requireRecord(valuePolicies.fanAgeRates, "requirements fan age rate policy");
+  const fanAgeBands = requireRecord(fanAgeRates.platformBands, "requirements fan age platform bands");
+  const xiaohongshuAgeBands = requireRecord(fanAgeBands.xiaohongshu, "requirements Xiaohongshu age bands");
+  const douyinAgeBands = requireRecord(fanAgeBands.douyin, "requirements Douyin age bands");
+  const booleanFields = requireRecord(valuePolicies.booleanFields, "requirements boolean field policy");
   const creatorUnitPrice = requireRecord(
     valuePolicies.creatorUnitPrice,
     "requirements creator unit price policy",
@@ -769,6 +774,29 @@ export function loadRequirementsContract(): RequirementsContract {
     mappedRanges.rateMaximum !== 1
   ) {
     throw new Error("requirements mapped range policy is invalid");
+  }
+  const ageFields = ["age1Rate", "age2Rate", "age3Rate", "age4Rate", "age5Rate", "age6Rate"];
+  if (
+    JSON.stringify(fanAgeRates.fields) !== JSON.stringify(ageFields) ||
+    fanAgeRates.transportType !== "number" ||
+    fanAgeRates.minimum !== 0 ||
+    fanAgeRates.maximum !== 1 ||
+    fanAgeRates.percentNormalization !== "x% => x/100" ||
+    fanAgeRates.rangeSerializationAllowed !== false ||
+    fanAgeRates.platformMismatchBehavior !== "do-not-map-to-nearest-band" ||
+    JSON.stringify(Object.keys(xiaohongshuAgeBands)) !== JSON.stringify(ageFields) ||
+    JSON.stringify(Object.values(xiaohongshuAgeBands)) !==
+      JSON.stringify(["<18", "18-23", "24-29", "30-39", "40-49", "50+"]) ||
+    JSON.stringify(Object.keys(douyinAgeBands)) !== JSON.stringify(ageFields) ||
+    JSON.stringify(Object.values(douyinAgeBands)) !==
+      JSON.stringify(["<18", "18-23", "24-30", "31-40", "41-50", "50+"]) ||
+    JSON.stringify(booleanFields.fields) !==
+      JSON.stringify(["hasOrganization", "hasOrder30day", "hasSocial30day"]) ||
+    booleanFields.transportType !== "boolean" ||
+    booleanFields.integerAliasesAllowed !== false ||
+    booleanFields.stringAliasesAllowed !== false
+  ) {
+    throw new Error("requirements scalar field policy is invalid");
   }
   if (
     JSON.stringify(creatorUnitPrice.fields) !==

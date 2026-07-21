@@ -26,7 +26,7 @@
     },
     "requirementRecord": {
       "path": "schemas/requirement-record.schema.json",
-      "hash": "2ddef5430cd6499ad4b3b9ebb7bce516fc26bad71e4cdf2bbb905d813ec7e22c"
+      "hash": "cb87b3b5e4ffa7ee49c957b64163f061be01bffc840006f8623dd1fa1802e8de"
     },
     "requirementSnapshot": {
       "path": "schemas/requirement-snapshot.schema.json",
@@ -61,10 +61,43 @@
       "exactValueRepresentation": "min === max",
       "upperBoundRepresentation": "min === 0",
       "lowerOnlyBehavior": "clarification-required-unless-a-finite-upper-bound-is-confirmed",
-      "rateFields": ["photoInteract", "femaleRate", "age1Rate", "age2Rate", "age3Rate", "age4Rate", "age5Rate", "age6Rate"],
+      "rateFields": ["photoInteract", "femaleRate"],
       "rateMaximum": 1,
       "mappingAuthority": "field_match_mapping",
       "onViolation": "VALUE_RANGE_INVALID"
+    },
+    "fanAgeRates": {
+      "fields": ["age1Rate", "age2Rate", "age3Rate", "age4Rate", "age5Rate", "age6Rate"],
+      "transportType": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "percentNormalization": "x% => x/100",
+      "rangeSerializationAllowed": false,
+      "platformBands": {
+        "xiaohongshu": {
+          "age1Rate": "<18",
+          "age2Rate": "18-23",
+          "age3Rate": "24-29",
+          "age4Rate": "30-39",
+          "age5Rate": "40-49",
+          "age6Rate": "50+"
+        },
+        "douyin": {
+          "age1Rate": "<18",
+          "age2Rate": "18-23",
+          "age3Rate": "24-30",
+          "age4Rate": "31-40",
+          "age5Rate": "41-50",
+          "age6Rate": "50+"
+        }
+      },
+      "platformMismatchBehavior": "do-not-map-to-nearest-band"
+    },
+    "booleanFields": {
+      "fields": ["hasOrganization", "hasOrder30day", "hasSocial30day"],
+      "transportType": "boolean",
+      "integerAliasesAllowed": false,
+      "stringAliasesAllowed": false
     },
     "creatorUnitPrice": {
       "fields": ["kolOfficialPriceL1", "kolOfficialPriceL2", "kolOfficialPriceL3"],

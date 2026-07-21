@@ -18,6 +18,8 @@
 
 - 平台只用 `xiaohongshu|douyin`。用户侧只说“小红书图文价格/视频价格”或“抖音1–20秒/21–60秒/60秒以上视频价格”，绝不显示 L1/L2/L3。内部映射使用 `kolOfficialPriceL1`、`kolOfficialPriceL2`、`kolOfficialPriceL3`；小红书禁止 `kolOfficialPriceL3`。
 - 范围传无空格 `"[min,max]"`：只说预算单值 `x` 且无“以内/不超过”等上限词或区间端点时，按默认最大预算基准扩为 `[x*0.9,x*1.1]`；明确上限 `x→[0,x]`，闭区间 `a-b→[a,b]`。先换算元、万等单位再计算；比例先除以 100。仅下限除返点外必须询问；返点 `30%+→[0.3,1]`。
+- 粉丝年龄 `age1Rate..age6Rate` 直接传 0–1 JSON 数值（`20%→0.2`），不用范围。档位：小红书 `<18/18–23/24–29/30–39/40–49/50+`；抖音 `<18/18–23/24–30/31–40/41–50/50+`；跨档或错平台不映射。
+- `hasOrganization`、`hasOrder30day`、`hasSocial30day` 只传 JSON 布尔值 `true/false`，不用 `0/1` 或字符串。
 - 相对时间用宿主 `currentLocalDateTime + timeZone` 唯一换算为 `YYYY-MM-DD HH:mm:ss`；不能唯一确定即询问。
 - 每个 atom 只映射一个真实字段或逐字 preserved；`sourceText` 必须非空，可引用原始 Brief 或本轮 AskUserQuestion 的明确补充答案，不能为了满足审计而篡改 `originalBrief`。`rawMessagesJson` 保存完整原文、非空 atoms 与计数一致且 `unresolvedCount=0` 的 coverage。
 

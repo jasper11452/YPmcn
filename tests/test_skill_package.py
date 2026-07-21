@@ -221,6 +221,9 @@ class SkillPackageContractTest(unittest.TestCase):
             "21–60",
             "60秒以上",
             '"[min,max]"',
+            "age1Rate..age6Rate",
+            "20%→0.2",
+            "true/false",
             "不得杜撰字段",
         ):
             self.assertIn(required, intake)
@@ -380,10 +383,10 @@ class SkillPackageContractTest(unittest.TestCase):
                 self.assertIsInstance(json.loads(example), list, field)
             elif shape == "json-object":
                 self.assertIsInstance(json.loads(example), dict, field)
-            elif shape in {"integer", "boolean-integer 0|1"}:
-                value = int(example)
-                if shape == "boolean-integer 0|1":
-                    self.assertIn(value, (0, 1), field)
+            elif shape == "integer":
+                int(example)
+            elif shape == "boolean":
+                self.assertIsInstance(json.loads(example), bool, field)
             elif shape == "number":
                 self.assertIsInstance(float(example), float, field)
             elif shape == "datetime-string YYYY-MM-DD HH:mm:ss":
@@ -404,7 +407,18 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertEqual("美妆,护肤", by_field["contentTag"]["Example"])
         self.assertEqual("json-array", by_field["pgyBloggerTypeLabel"]["InputShape"])
         self.assertIsInstance(json.loads(by_field["pgyBloggerTypeLabel"]["Example"]), list)
-        self.assertEqual("boolean-integer 0|1", by_field["hasOrganization"]["InputShape"])
+        for field in ("hasOrganization", "hasOrder30day", "hasSocial30day"):
+            self.assertEqual("boolean", by_field[field]["InputShape"])
+            self.assertIs(json.loads(by_field[field]["Example"]), True)
+            self.assertIn("禁止0或1", by_field[field]["Comment"])
+        for field in ("age1Rate", "age2Rate", "age3Rate", "age4Rate", "age5Rate", "age6Rate"):
+            self.assertEqual("decimal(10,4)", by_field[field]["Type"])
+            self.assertEqual("number", by_field[field]["InputShape"])
+            self.assertEqual(0.2, float(by_field[field]["Example"]))
+            self.assertEqual("-", by_field[field]["FilterMode"])
+            self.assertIn("直接写0至1 JSON数值", by_field[field]["Comment"])
+        self.assertIn("小红书：24至29岁", by_field["age3Rate"]["Comment"])
+        self.assertIn("抖音：24至30岁", by_field["age3Rate"]["Comment"])
         self.assertEqual("datetime-string YYYY-MM-DD HH:mm:ss", by_field["submissionDeadlineAt"]["InputShape"])
         self.assertEqual("[min,max]", by_field["followercount"]["FilterMode"])
         self.assertEqual("向量查询", by_field["pgyBloggerTypeLabel"]["FilterMode"])

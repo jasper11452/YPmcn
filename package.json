@@ -1,6 +1,6 @@
 {
   "name": "ypmcn-contract-first-automation",
-  "version": "3.4.3",
+  "version": "3.4.4",
   "private": true,
   "type": "module",
   "workspaces": [

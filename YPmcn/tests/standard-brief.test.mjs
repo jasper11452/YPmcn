@@ -187,6 +187,74 @@ describe("deterministic standard Brief parser", () => {
     assert.equal(preview.projection.kolOfficialPriceL3, "[0,8000]");
   });
 
+  it("maps fan-age percentages to direct numbers with platform-specific age bands", () => {
+    for (const [platform, ageRequirement, expected] of [
+      [
+        "小红书",
+        "18岁以下占比5%，18-23岁占比10%，24-29岁占比20%，30-39岁占比25%，40-49岁占比25%，50岁以上占比15%",
+        [0.05, 0.1, 0.2, 0.25, 0.25, 0.15],
+      ],
+      [
+        "抖音",
+        "18岁以下占比5%，18-23岁占比10%，24-30岁占比20%，31-40岁占比25%，41-50岁占比25%，50岁以上占比15%",
+        [0.05, 0.1, 0.2, 0.25, 0.25, 0.15],
+      ],
+    ]) {
+      const brief = [
+        `平台：${platform}`,
+        "数量：3位达人",
+        "单达人 L1 官方报价：8000元以内",
+        `粉丝年龄：${ageRequirement}`,
+        "提报截止：2026-07-20 18:00",
+      ].join("\n");
+      const preview = parseStandardBrief(brief);
+
+      assert.equal(preview.gate, "ready");
+      expected.forEach((value, index) => {
+        const field = `age${index + 1}Rate`;
+        assert.equal(preview.projection[field], value, `${platform}:${field}`);
+        assert.equal(typeof preview.projection[field], "number", `${platform}:${field}`);
+      });
+    }
+  });
+
+  it("does not coerce a platform-mismatched fan-age band to the nearest field", () => {
+    const brief = [
+      "平台：小红书",
+      "数量：3位达人",
+      "单达人 L1 官方报价：8000元以内",
+      "粉丝年龄：24-30岁占比20%",
+      "提报截止：2026-07-20 18:00",
+    ].join("\n");
+    const preview = parseStandardBrief(brief);
+
+    assert.equal(preview.gate, "ready");
+    assert.equal(preview.projection.age3Rate, undefined);
+    assert.ok(preview.atoms.some((atom) =>
+      atom.disposition === "preserved" && /24-30岁占比20%/.test(atom.sourceText)
+    ));
+  });
+
+  it("normalizes legacy 0/1 and yes/no wording to JSON booleans", () => {
+    const brief = [
+      "平台：小红书",
+      "数量：3位达人",
+      "单达人 L1 官方报价：8000元以内",
+      "是否有机构：0",
+      "近30天是否有订单：是",
+      "近30天是否有发文：否",
+      "提报截止：2026-07-20 18:00",
+    ].join("\n");
+    const preview = parseStandardBrief(brief);
+
+    assert.equal(preview.gate, "ready");
+    assert.equal(preview.projection.hasOrganization, false);
+    assert.equal(preview.projection.hasOrder30day, true);
+    assert.equal(preview.projection.hasSocial30day, false);
+    assert.ok(["hasOrganization", "hasOrder30day", "hasSocial30day"]
+      .every((field) => typeof preview.projection[field] === "boolean"));
+  });
+
   it("selects the last complete structured Brief instead of a field label quoted in operator instructions", () => {
     const brief = [
       "品牌：阿里巴巴",

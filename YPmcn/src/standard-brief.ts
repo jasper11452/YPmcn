@@ -34,8 +34,31 @@ type LocatedAtom = StandardBriefPreviewAtom & { start: number; end: number };
 
 const REQUIRED_FIELDS = ["platform", "quantityTotal", "submissionDeadlineAt", "creatorPriceTier"] as const;
 const PRICE_FIELD_LABEL = "(?:(?:单达人|达人)?[ \\t]*(?:L[ \\t]*[123][ \\t]*)?(?:官方)?(?:价格|单价|预算|报价))";
-const FIELD_LABEL = `(?:品牌|产品|项目|(?:发布|传播)?平台|档期|${PRICE_FIELD_LABEL}|返点(?:要求)?|返佣|内容|账号类型|达人类型|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?(?:时间)?)`;
+const FAN_AGE_FIELD_LABEL = "(?:粉丝年龄(?:占比|要求)?|粉丝画像年龄)";
+const BOOLEAN_FIELD_LABEL = "(?:是否有机构|有无机构|机构情况|近30天(?:是否)?有订单|近30天(?:是否)?有(?:社交互动|发文))";
+const FIELD_LABEL = `(?:品牌|产品|项目|(?:发布|传播)?平台|档期|${PRICE_FIELD_LABEL}|返点(?:要求)?|返佣|内容|账号类型|达人类型|${FAN_AGE_FIELD_LABEL}|${BOOLEAN_FIELD_LABEL}|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?(?:时间)?)`;
 const BRIEF_BLOCK_LABEL = `(?:${FIELD_LABEL}|合作形式|参考账号)`;
+
+type RequirementPlatform = "xiaohongshu" | "douyin";
+
+const FAN_AGE_FIELDS: Record<RequirementPlatform, Record<string, string>> = {
+  xiaohongshu: {
+    "<18": "age1Rate",
+    "18-23": "age2Rate",
+    "24-29": "age3Rate",
+    "30-39": "age4Rate",
+    "40-49": "age5Rate",
+    "50+": "age6Rate",
+  },
+  douyin: {
+    "<18": "age1Rate",
+    "18-23": "age2Rate",
+    "24-30": "age3Rate",
+    "31-40": "age4Rate",
+    "41-50": "age5Rate",
+    "50+": "age6Rate",
+  },
+};
 
 type BriefCandidate = {
   start: number;
@@ -106,6 +129,67 @@ function labeledFieldPattern(label: string, flags = "g"): RegExp {
     `(?:^|(?<=[\\n；;，,]))\\s*${label}\\s*[：:]\\s*([\\s\\S]*?)(?=\\s*(?:[；;\\n]|[，,](?=\\s*${FIELD_LABEL}\\s*[：:])|$))`,
     flags,
   );
+}
+
+function requirementPlatform(brief: string): RequirementPlatform | undefined {
+  const isXiaohongshu = /小红书|红书|XHS/i.test(brief);
+  const isDouyin = /抖音|Douyin|\bDY\b/i.test(brief);
+  if (isXiaohongshu === isDouyin) return undefined;
+  return isDouyin ? "douyin" : "xiaohongshu";
+}
+
+function ageBandKey(value: string): string | undefined {
+  const normalized = value
+    .replace(/周岁|岁/g, "")
+    .replace(/[\s]/g, "")
+    .replace(/[~～—至到]/g, "-")
+    .replace(/及/g, "");
+  if (/^(?:<|＜|低于)?18(?:以下|以内)$/.test(normalized) || /^(?:<|＜)18$/.test(normalized)) return "<18";
+  if (/^50(?:以上|\+)$/.test(normalized)) return "50+";
+  return /^\d{1,2}-\d{1,2}$/.test(normalized) ? normalized : undefined;
+}
+
+function addFanAgeRateMatches(brief: string, matches: LocatedAtom[]): void {
+  const platform = requirementPlatform(brief);
+  if (!platform) return;
+  const fieldPattern = labeledFieldPattern(FAN_AGE_FIELD_LABEL, "gi");
+  let fieldMatch: RegExpExecArray | null;
+  while ((fieldMatch = fieldPattern.exec(brief)) !== null) {
+    const entryPattern = /(?<band>(?:(?:<|＜)\s*\d{1,2}|\d{1,2}\s*(?:岁|周岁)?\s*(?:以下|以内)|\d{1,2}\s*(?:岁|周岁)?\s*[-~～—至到]\s*\d{1,2}\s*(?:岁|周岁)?|\d{1,2}\s*(?:岁|周岁)?\s*(?:以上|及以上|\+)))[^\d%\n]{0,16}(?<rate>\d+(?:\.\d+)?)\s*%/gi;
+    const entries = [...fieldMatch[1].matchAll(entryPattern)];
+    const mapped = entries.map((entry) => {
+      const key = ageBandKey(entry.groups?.band ?? "");
+      const targetField = key ? FAN_AGE_FIELDS[platform][key] : undefined;
+      const value = Number(entry.groups?.rate) / 100;
+      if (!targetField || !Number.isFinite(value) || value < 0 || value > 1) return undefined;
+      return { targetField, value };
+    });
+    if (mapped.length === 0 || mapped.some((entry) => entry === undefined)) continue;
+    const start = fieldMatch.index;
+    const end = start + fieldMatch[0].length;
+    for (const entry of mapped) {
+      if (!entry) continue;
+      matches.push({
+        sourceText: fieldMatch[0],
+        field: entry.targetField,
+        resolution: "mapped",
+        disposition: "mapped",
+        targetField: entry.targetField,
+        value: entry.value,
+        confidence: 1,
+        inferred: false,
+        start,
+        end,
+      });
+    }
+  }
+}
+
+function booleanFieldValue(value: string): boolean | undefined {
+  const normalized = value.trim().toLowerCase().replace(/[。.!！?？]/g, "");
+  if (/^(?:0|否|无|没有|不需要|无需|不要|false|无机构|无订单|未发文)$/.test(normalized)) return false;
+  if (/^(?:1|是|有|需要|必须|true|有机构|有订单|有发文)$/.test(normalized)) return true;
+  return undefined;
 }
 
 function localDate(now: Date, timeZone: string): Date {
@@ -268,6 +352,28 @@ export function parseStandardBrief(
     confidence: 1,
     inferred: false,
   }));
+
+  for (const [label, field] of [
+    ["(?:是否有机构|有无机构|机构情况)", "hasOrganization"],
+    ["近30天(?:是否)?有订单", "hasOrder30day"],
+    ["近30天(?:是否)?有(?:社交互动|发文)", "hasSocial30day"],
+  ] as const) {
+    addMatch(brief, matches, labeledFieldPattern(label, "gi"), (match) => {
+      const value = booleanFieldValue(match[1]);
+      if (value === undefined) return undefined;
+      return {
+        field,
+        resolution: "mapped",
+        disposition: "mapped",
+        targetField: field,
+        value,
+        confidence: 1,
+        inferred: false,
+      };
+    });
+  }
+
+  addFanAgeRateMatches(brief, matches);
 
   addMatch(brief, matches, /(?:预计定号数|达人数量|数量|招募)[ \t]*[：:]?[ \t]*(\d+)[ \t]*(?:位|名|个)?(?:达人|博主)?/gi, (match) => {
     const quantity = Number(match[1]);

@@ -88,7 +88,25 @@ describe("current Endpoint contract loader", () => {
     assert.equal(loadDatabaseContract().profile, "mvp-v2");
     assert.equal(loadErrorCatalog().profile, "mvp-v2");
     assert.equal(loadRequirementDictionary().profile, "mvp-v2");
-    assert.equal(loadRequirementsContract().profile, "mvp-v2");
+    const requirements = loadRequirementsContract();
+    assert.equal(requirements.profile, "mvp-v2");
+    assert.deepEqual(requirements.valuePolicies.fanAgeRates.platformBands, {
+      xiaohongshu: {
+        age1Rate: "<18", age2Rate: "18-23", age3Rate: "24-29",
+        age4Rate: "30-39", age5Rate: "40-49", age6Rate: "50+",
+      },
+      douyin: {
+        age1Rate: "<18", age2Rate: "18-23", age3Rate: "24-30",
+        age4Rate: "31-40", age5Rate: "41-50", age6Rate: "50+",
+      },
+    });
+    assert.equal(requirements.valuePolicies.fanAgeRates.transportType, "number");
+    assert.deepEqual(requirements.valuePolicies.booleanFields, {
+      fields: ["hasOrganization", "hasOrder30day", "hasSocial30day"],
+      transportType: "boolean",
+      integerAliasesAllowed: false,
+      stringAliasesAllowed: false,
+    });
   });
 
   it("keeps parsed validation isolated and rejects advertised-output inventions", () => {
