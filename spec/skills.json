@@ -27,12 +27,27 @@
         "readFormatBeforeEveryCall": "skills/media-assistant/references/tools/<tool>.json",
         "incompatibleProviderAction": "integration_required",
         "automaticLegacyFallback": false,
+        "primarySequence": [
+          "select_inquiry_form_fields",
+          "manual_source_creators",
+          "rank_creators",
+          "create_submission_batch"
+        ],
         "preconditions": {
           "manual_source_creators": [
-            "rank_mcns_bound_the_actual_selected_supplier_set_and_returned_inquiry_id",
-            "selected_supplier_coverage_union_multiplier_is_below_twenty",
-            "submitted_post_race_one_click_command_binds_the_formula_gap_as_one_positive_target_count",
-            "no_distribution_has_been_sent"
+            "field_selector_completed_for_the_confirmed_platform",
+            "requirement_id_is_the_current_confirmed_requirement",
+            "size_is_a_positive_integer_decimal_string"
+          ],
+          "rank_creators": [
+            "manual_source_creators_succeeded_for_the_same_requirement_and_size",
+            "inquiry_ids_are_copied_from_that_actual_success_response",
+            "columns_preserve_the_current_field_selection_order"
+          ],
+          "create_submission_batch": [
+            "rank_creators_succeeded_for_the_same_manual_inquiries",
+            "requirement_id_and_size_match_the_manual_sourcing_call",
+            "number_is_a_positive_integer_decimal_string"
           ],
           "create_with_distributions": [
           "local_orchestration_state_has_confirmed_supply_mcn_and_columns",

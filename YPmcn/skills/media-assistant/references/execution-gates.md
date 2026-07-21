@@ -1,31 +1,24 @@
 # 执行门禁
 
-## 契约与本地状态
+## 契约与状态
 
-以根 `spec/manifest.json` 指向的 `spec/mcp.json`、`spec/workflow.json` 和运行时 schema 为准。每次业务 Tool 调用前先读 `tools/<tool>.json`；只传其中字段。Tool 存在不等于成功，只有实际 MCP 返回是业务证据。
+以根 `spec/manifest.json` 指向的 `spec/mcp.json`、`spec/workflow.json` 和运行时 schema 为准。每次业务 Tool 调用前先读 `tools/<tool>.json`；只传其中字段。Endpoint schema 优先；与目标导出契约冲突时返回 `integration_required`，不得自动回退。
 
-会话编排状态写入本地 `state/confirmation_guard.json` 的 `workflow` 与 `workflow_events`。`phase/next_action` 是 Agent 编排权威，Provider 的 `workflow_state/allowed_actions` 只作业务事实或未知写对账，不能覆盖本地 phase。Hook 只按实际成功响应推进；失败保留阶段并进入恢复。本地状态不伪造 Provider 成功。
+会话状态写入 `state/confirmation_guard.json`。`phase/next_action` 是 Agent 编排权威，Provider 的 `workflow_state/allowed_actions` 只能提供业务事实或未知写对账，不能覆盖本地 phase。本地状态只按实际成功响应推进，失败不授权下一步。
 
-需求身份来自 `validate_requirement.data.id`，用于搜索/排序的 `id` 和后续 `requirement_id`。`rank_mcns` 返回的单个 `inquiry_id` 绑定达人拓展前置询价；`inquiry_ids` 绑定回收 → `rank_creators`，不得混用。`rank_creators.columns = create_with_distributions.columns`。`demand_id+demand_version` 只用于对账；`project_id+supplierIds+requirement_id` 绑定 distribution；`run_id` 来自精排。其他 ID 只复制实际结果，不猜测或展示给用户。
+## 四步链路
 
-## 连续执行与人工确认
+1. 先确认 `platform`、`requirement_id`、`size`、`number`；`size`、`number` 必须匹配 `^[1-9][0-9]*$`。
+2. 首个业务 Tool 固定为 `select_inquiry_form_fields({platform})`。等待网页提交；把每行“字段名：备注”转为 `{key: 字段名, name: 备注}`，保持原序。
+3. 字段成功后调用 `manual_source_creators({requirement_id,size})`。只接受本轮成功响应中的非空、唯一字符串 `inquiry_ids`，无实际 `inquiry_ids` 不 rank。
+4. 用这些 `inquiry_ids`、相同 `requirement_id` 和本轮 `columns` 调用 `rank_creators`。成功后同轮调用 `create_submission_batch({requirement_id,size,number})` 导出表格。
 
-`validate_requirement` 成功后同轮调用 `search_creators`。赛前仅用需求数、刊例人数和倍率，按 `需求数×20/30` 判档，不算精确手扒数。开始/继续赛马后同轮调用 `rank_mcns`；选择先补资源则不调用业务 Tool。
+禁止在本链发送 `target_count`、`run_id`、`limit` 或旧批次选项。不得把需求 ID、询价 ID、数量或批次号互相替代，也不得复用其他轮次的字段和 ID。
 
-`rank_mcns` 不固定 5 家，并把 `inquiry_id`、已选机构及其 `(platform, kwUid)` 去重覆盖并集绑定。`<20` 时缺口为 `需求数×20−覆盖数`，仅一键确认后调用 `manual_source_creators`；`20≤x<30` 可询价但建议补资源，`x≥30` 无需手扒。机构变化须重算；用户只看名称和汇总。
+## 失败与恢复
 
-企微 Tool 只传 `requirement_id`、`supplierIds`、`columns`、纯文本 `description` 和 `wechat_notification_message`；`wechat_notification_message` 必须与 `description` 完全一致，不得 JSON 化、杜撰或发送 `requirement_ID/colums`。
-
-`create_with_distributions` 第一次仅预检；`before_tool_call` 以最近 `rank_mcns` 的 ID—名称核对 `supplierIds`，任一名称无法核对即阻断。`EXTERNAL_SEND_CONFIRMATION_REQUIRED` 中的 AskUserQuestion 必须原样调用，并以真实换行逐项展示 MCN、字段和完整企微消息。只有返回“确认发送”才同参数第二次调用；其他结果不外发，修改对象或消息后重新走预检。
-
-确认后的 Provider 调用先校验群聊：未绑定的供应商不发送，已绑定的供应商在同一次调用中继续发送。若 Provider 在任何 project/distribution 写入前整批拒绝并明确返回未绑定机构，只删对应 `supplierIds`，其他参数不变，继承原确认同轮重调剩余机构，不再确认。未明确机构、已有写入、超时、连接错误或写结果未知都不重试。
-
-回执中只有 `notification_status=sent` 证明已发送；`pending` 不算，`failed/skipped` 须由 `notification_error` 证明未绑定。结束只提示一次未绑定与已发送名单；通用 `success=true` 或请求名单不是发送证据。`sync_mcn_inquiry_status` 只传实际回执为已发送的供应商 ID；全未发送或结果不明时不调用。
-
-## 工具边界与恢复
-
-- Hook 不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序；除外发绕过与 AskUserQuestion 外发确认外不做严格阻断。
-- `manual_source_creators` 只传 `requirement_id` 和赛后一键确认的公式缺口 `target_count`；赛前或倍率 `≥20` 禁止调用。`inquiry_id` 由此前 `rank_mcns` 落库，不作参数。成功记录须含任务 ID、回显需求/询价/数量、允许状态/操作、启动时间和非负入池数；缺失、冲突或写结果未知时禁止盲重试和外发。
-- 外发成功后按实际身份执行 `sync → ingest_mcn_submissions → sync`；无实际 `inquiry_ids` 不 ingest，不轮询。
-- 写结果未知先对账且禁止盲重试；明确参数错误只修该字段。用户要求失败即停时绝不重试。
-- 详情 Tool 只读且不推进；批次成功后才导出，客户有具体反馈后才记录。
+- Hook 不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序；只记录实际结果，本地成功投影不等于 Provider 成功。
+- 字段页面取消、超时或返回无效字段时停止，不启动手扒。
+- 手扒、排序或导出写结果未知时先对账，禁止盲重试；无法取得权威结果就停止。
+- 明确参数错误只修该字段；用户要求失败即停时绝不重试。
+- 生产 Provider 尚未发布三参数导出契约时，最后一步返回 `integration_required`，不得改用旧 `run_id`。

@@ -1,9 +1,9 @@
 {
-  "schema_version": 13,
+  "schema_version": 17,
   "confirmations": {},
   "workflow": {
     "phase": "requirement_draft",
-    "next_action": "validate_requirement",
+    "next_action": "select_inquiry_form_fields",
     "waiting_for": null,
     "transition_seq": 0,
     "updated_at_ms": null

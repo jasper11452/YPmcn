@@ -32,7 +32,7 @@
       "oneTimeConfirmations": "10m",
       "unknownExternalSend": "10m; every retry requires a fresh explicit confirmation"
     },
-    "format": "confirmation_guard_schema_v13",
+    "format": "confirmation_guard_schema_v17",
     "storesBusinessPayload": false,
     "storesWorkflowIdentifiers": true,
     "authoritativeForOrchestration": true,

@@ -65,15 +65,19 @@ describe("current Endpoint contract loader", () => {
     assert.equal(workflow.stateAuthority.providerOutputSchemaAdvertised, false);
     assert.equal(workflow.stateAuthority.missingEvidenceBehavior, "no-phase-advance");
     assert.equal(workflow.stateAuthority.ledger.status, "schema-present-not-used-by-current-tools");
-    assert.match(workflow.stateAuthority.currentProviderGaps.sync_mcn_inquiry_status, /does not query provider state or upsert mcn_inquiries/);
-    assert.match(workflow.policies.rankCreatorsPrerequisite, /distribution.*recovery/i);
+    assert.match(workflow.stateAuthority.currentProviderGaps.create_submission_batch, /not yet deployed/);
+    assert.deepEqual(workflow.primaryFlow.sequence, [
+      "select_inquiry_form_fields", "manual_source_creators",
+      "rank_creators", "create_submission_batch",
+    ]);
+    assert.match(workflow.policies.rankCreatorsPrerequisite, /manual_source_creators.*inquiry_ids/i);
     const distributionTransitions = workflow.transitions.filter((item) =>
       ["create_with_distributions", "sync_mcn_inquiry_status"].includes(item.trigger?.name)
     );
     assert.ok(distributionTransitions.some((item) => item.implementationStatus === "target-blocked"));
     const rankTransition = workflow.transitions.find((item) => item.trigger?.name === "rank_creators");
-    assert.ok(rankTransition.guards.some((guard) => /distribution/.test(guard)));
-    assert.ok(rankTransition.guards.some((guard) => /recovery/.test(guard)));
+    assert.ok(rankTransition.guards.some((guard) => /inquiry_ids/.test(guard)));
+    assert.ok(rankTransition.guards.some((guard) => /selected columns/.test(guard)));
     assert.equal(workflow.transitions.some((item) =>
       item.from === "waiting_mcn_return" && item.trigger?.name === "manual_source_creators"
     ), false);
@@ -81,9 +85,9 @@ describe("current Endpoint contract loader", () => {
       item.trigger?.name === "manual_source_creators"
     );
     assert.equal(manualTransitions.length, 1);
-    assert.equal(manualTransitions[0].from, "mcn_planning");
-    assert.match(workflow.policies.rankInquiryEvidence, /rank_mcns.*inquiry_id/);
-    assert.match(workflow.policies.manualSourcingEvidence, /task_id.*inquiry_id.*target_count.*started_at/);
+    assert.equal(manualTransitions[0].from, "inquiry_fields_ready");
+    assert.match(workflow.policies.directFlowEntry, /select_inquiry_form_fields.*first business Tool/);
+    assert.match(workflow.policies.manualSourcingEvidence, /inquiry_ids/);
     assert.equal(Object.isFrozen(workflow), true);
     assert.equal(loadDatabaseContract().profile, "mvp-v2");
     assert.equal(loadErrorCatalog().profile, "mvp-v2");
@@ -137,19 +141,19 @@ describe("current Endpoint input validation", () => {
       ["validate_requirement", { payload: { raw: "brief" } }],
       ["search_creators", { id: "req-1" }],
       ["rank_mcns", { id: "req-1", platform: "xiaohongshu", medium_risk_confirmation: null }],
-      ["select_inquiry_form_fields", { url: "https://agenta.eshypdata.com/demand-field-selector", timeout_seconds: 30 }],
+      ["select_inquiry_form_fields", { platform: "xiaohongshu", timeout_seconds: 30 }],
       ["create_with_distributions", validDistribution()],
       ["sync_mcn_inquiry_status", {
         requirement_id: "req-1", project_id: "project-1", supplierIds: ["supplier-1"],
       }],
       ["ingest_mcn_submissions", { inquiry_ids: ["1"] }],
-      ["manual_source_creators", { requirement_id: "req-1", target_count: 4 }],
+      ["manual_source_creators", { requirement_id: "req-1", size: "4" }],
       ["rank_creators", {
         requirement_id: "req-1",
         inquiry_ids: ["10", "11"],
         columns: validDistribution().columns,
       }],
-      ["create_submission_batch", { run_id: "1", risk_confirmation: null }],
+      ["create_submission_batch", { requirement_id: "req-1", size: "4", number: "1" }],
       ["record_client_feedback", { run_id: "1", feedback_items: [{ status: "accepted" }] }],
       ["get_recommendation_run_detail", { run_id: "1" }],
       ["get_creator_detail", { platform: "xiaohongshu", kwUid: "creator-1" }],
@@ -165,10 +169,10 @@ describe("current Endpoint input validation", () => {
   it("rejects old provider arguments and malformed nested live inputs", () => {
     assert.equal(
       validateToolParams("select_inquiry_form_fields", {})[0].path,
-      "$.url",
+      "$.platform",
     );
     assert.equal(
-      validateToolParams("select_inquiry_form_fields", { platform: "xiaohongshu" })[0].path,
+      validateToolParams("select_inquiry_form_fields", { platform: "weibo" })[0].path,
       "$.platform",
     );
     const oldSend = validateToolParams("create_with_distributions", {
@@ -194,7 +198,10 @@ describe("current Endpoint input validation", () => {
     })[0].path, "$.inquiry_ids[0]");
     assert.deepEqual(validateToolParams("rank_creators", {
       requirement_id: "req-1", inquiry_ids: ["10"], columns: [{ field_key: "kwUid", field_name: "达人 ID" }],
-    }).map(({ path }) => path), ["$.columns[0].field_key", "$.columns[0].field_name"]);
+    }).map(({ path }) => path), ["$.columns[0]"]);
+    assert.equal(validateToolParams("rank_creators", {
+      requirement_id: "req-1", inquiry_ids: ["10", "10"], columns: validDistribution().columns,
+    })[0].path, "$.inquiry_ids[1]");
     assert.equal(validateToolParams("rank_creators", {
       requirement_id: "req-1", inquiry_ids: ["10"], columns: validDistribution().columns, limit: 20,
     })[0].path, "$.limit");
@@ -252,23 +259,32 @@ describe("current Endpoint input validation", () => {
     );
   });
 
-  it("requires the minimal positive manual-sourcing target", () => {
+  it("requires positive string sizes and batch numbers for the direct flow", () => {
     assert.deepEqual(
       validateToolParams("manual_source_creators", { requirement_id: "req-1" }).map(({ path }) => path),
-      ["$.target_count"],
+      ["$.size"],
     );
-    for (const target_count of [0, -1, 1.5, "4"]) {
+    for (const size of [0, -1, 1.5, "0", "01", "4.5"]) {
       assert.equal(
-        validateToolParams("manual_source_creators", { requirement_id: "req-1", target_count })[0].path,
-        "$.target_count",
+        validateToolParams("manual_source_creators", { requirement_id: "req-1", size })[0].path,
+        "$.size",
       );
     }
     assert.deepEqual(
       validateToolParams("manual_source_creators", {
-        requirement_id: "req-1", target_count: 4, platform: "xiaohongshu",
+        requirement_id: "req-1", size: "4", target_count: 4,
       }).map(({ path }) => path),
-      ["$.platform"],
+      ["$.target_count"],
     );
+    assert.deepEqual(validateToolParams("create_submission_batch", {
+      requirement_id: "req-1", size: "4", number: "2",
+    }), []);
+    assert.equal(validateToolParams("create_submission_batch", {
+      requirement_id: "req-1", size: "4", number: "0",
+    })[0].path, "$.number");
+    assert.equal(validateToolParams("create_submission_batch", {
+      requirement_id: "req-1", size: "4", number: "2", run_id: "1",
+    })[0].path, "$.run_id");
   });
 
   it("enforces semantic lookup constraints without changing live schemas", () => {

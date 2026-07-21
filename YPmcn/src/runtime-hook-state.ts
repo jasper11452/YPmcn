@@ -15,7 +15,7 @@ export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 function initialWorkflowState(): Json {
   return {
     phase: "requirement_draft",
-    next_action: "validate_requirement",
+    next_action: "select_inquiry_form_fields",
     waiting_for: null,
     transition_seq: 0,
     updated_at_ms: null,
@@ -91,8 +91,8 @@ export function denyStructured(code: string, context: string): Json {
 function storeAtPath(path: string): GuardStore {
   const data = load(path);
   const previousSchemaVersion = data.schema_version;
-  let changed = previousSchemaVersion !== 16;
-  data.schema_version = 16;
+  let changed = previousSchemaVersion !== 17;
+  data.schema_version = 17;
   if (!data.confirmations || typeof data.confirmations !== "object" || Array.isArray(data.confirmations)) {
     data.confirmations = {};
     changed = true;
@@ -101,7 +101,7 @@ function storeAtPath(path: string): GuardStore {
     data.workflow = initialWorkflowState();
     changed = true;
   }
-  if (previousSchemaVersion !== undefined && previousSchemaVersion !== 16) {
+  if (previousSchemaVersion !== undefined && previousSchemaVersion !== 17) {
     for (const key of [
       "supply_plan_status", "supply_plan_error", "matched_creator_count", "supply_ratio",
       "hard_shortfall_count", "buffer_shortfall_count", "supply_risk_level",
@@ -113,6 +113,13 @@ function storeAtPath(path: string): GuardStore {
     ].includes(data.workflow.next_action)) {
       data.workflow.next_action = "recover_supply_decision_contract_upgrade";
       data.workflow.waiting_for = "user";
+    }
+    if (
+      data.workflow.phase === "requirement_draft" &&
+      data.workflow.next_action === "validate_requirement"
+    ) {
+      data.workflow.next_action = "select_inquiry_form_fields";
+      data.workflow.waiting_for = null;
     }
     changed = true;
   }

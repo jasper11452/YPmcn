@@ -468,8 +468,23 @@ function validateMvpProfile(value: unknown): MvpContractProfile {
   validateExternalSchemaReferences(profile.outputContracts, "mvp-v2.outputContracts");
   requireExactStrings(
     tools.select_inquiry_form_fields?.required,
-    ["url"],
+    ["platform"],
     "mvp-v2.tools.select_inquiry_form_fields.required",
+  );
+  requireExactStrings(
+    tools.manual_source_creators?.required,
+    ["requirement_id", "size"],
+    "mvp-v2.tools.manual_source_creators.required",
+  );
+  requireExactStrings(
+    tools.rank_creators?.required,
+    ["inquiry_ids"],
+    "mvp-v2.tools.rank_creators.required",
+  );
+  requireExactStrings(
+    tools.create_submission_batch?.required,
+    ["requirement_id", "size", "number"],
+    "mvp-v2.tools.create_submission_batch.required",
   );
   return profile as unknown as MvpContractProfile;
 }

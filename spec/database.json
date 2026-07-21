@@ -409,7 +409,7 @@
       "targetWrites": [
         "mcn_inquiries"
       ],
-      "targetInquiryBehavior": "In the same successful transaction as the current requirement's MCN recommendation plan, create or resolve its inquiry association; bind the actual selected supplier set to its (platform, kwUid)-deduplicated creator coverage union, multiplier, risk, conditional formula gap, and calculation version; then return the real inquiry_id and decision evidence. Incomplete evidence cannot precede manual_source_creators or distribution.",
+      "targetInquiryBehavior": "In the same successful transaction as the current requirement's MCN recommendation plan, create or resolve its inquiry association; bind the actual selected supplier set to its (platform, kwUid)-deduplicated creator coverage union, multiplier, risk, conditional formula gap, and calculation version; then return the real inquiry_id and decision evidence. Incomplete evidence cannot precede distribution.",
       "currentLimitation": "The remote Provider has not been write-verified to persist and return the inquiry association or selected-supplier coverage decision from rank_mcns."
     },
     "select_inquiry_form_fields": {
@@ -467,7 +467,6 @@
     "manual_source_creators": {
       "reads": [
         "customer_demands",
-        "mcn_inquiries",
         "creator_supply_offers"
       ],
       "writes": [
@@ -476,8 +475,8 @@
         "xhs_creator_accounts",
         "dy_creator_accounts"
       ],
-      "targetWriteBoundary": "Require the current requirement's inquiry_id created by rank_mcns; before returning started or running, persist or idempotently reuse a durable manual-sourcing task linked to that inquiry. Executor results later write only hard-filtered, deduplicated creators and offers to the observed tables listed here.",
-      "currentLimitation": "No observed manual-sourcing task table or production Provider task implementation is present in this repository; local Hook evidence checks cannot substitute for that durable server fact."
+      "targetWriteBoundary": "Resolve the current requirement_id, execute the requested positive size, persist only matching sourced creators and offers, and return the actual inquiry_ids that own those results. The same request must be safe against blind duplication.",
+      "currentLimitation": "The live input accepts requirement_id and size, but outputSchema and server-side idempotency evidence are not advertised; local Hook evidence cannot substitute for returned inquiry_ids."
     },
     "rank_creators": {
       "reads": [
@@ -491,7 +490,8 @@
       "writes": [
         "recommendation_runs",
         "creator_recommendation_items"
-      ]
+      ],
+      "targetReadBoundary": "Read only the inquiry_ids returned by the immediately preceding manual_source_creators call, enforce one requirement, hard-filter and deduplicate before persisting ranked rows."
     },
     "create_submission_batch": {
       "reads": [
@@ -502,7 +502,9 @@
       "writes": [
         "submission_batches",
         "creator_submissions"
-      ]
+      ],
+      "targetWriteBoundary": "Resolve ranked rows by requirement_id, export exactly size rows for batch number, and persist one auditable submission batch without requiring a client-supplied run_id.",
+      "currentLimitation": "The requirement_id, size, number input is not yet deployed on the production Provider."
     },
     "record_client_feedback": {
       "reads": [
@@ -591,17 +593,22 @@
     {
       "id": "rank-inquiry-link-unverified",
       "severity": "high",
-      "effect": "The production rank_mcns path has not been verified to atomically create and return inquiry_id, so the inquiry-linked manual-sourcing branch must remain disabled until Provider and database tests pass."
+      "effect": "The production rank_mcns path has not been verified to atomically create and return inquiry_id for the separate MCN distribution branch."
     },
     {
-      "id": "manual-sourcing-task-store-unverified",
+      "id": "manual-sourcing-output-idempotency-unverified",
       "severity": "high",
-      "effect": "The observed database contract has no verified durable manual-sourcing task entity; production start, idempotency, recovery, and executor ownership must be implemented and verified in the Provider repository before enabling the 3.4.0 manual branch."
+      "effect": "manual_source_creators has live requirement_id and size inputs but no advertised output schema or verified idempotency record; the direct flow requires actual inquiry_ids before ranking."
     },
     {
       "id": "selected-mcn-coverage-union-unverified",
       "severity": "high",
-      "effect": "No observed persisted snapshot proves that rank_mcns binds the media-selected supplier set to a (platform, kwUid)-deduplicated creator coverage union; post-race multiplier and exact manual sourcing stay blocked until Provider implementation and migration evidence exist."
+      "effect": "No observed persisted snapshot proves that rank_mcns binds the media-selected supplier set to a (platform, kwUid)-deduplicated creator coverage union for MCN distribution."
+    },
+    {
+      "id": "submission-target-input-not-deployed",
+      "severity": "high",
+      "effect": "The production Provider still requires run_id and has not deployed the approved requirement_id, size, number export input."
     }
   ],
   "invariants": [
@@ -627,12 +634,12 @@
     },
     {
       "id": "authoritative-inquiry-sync",
-      "requirement": "rank_mcns creates the inquiry association before manual sourcing; sync later reads provider state and maintains that inquiry before ingest.",
+      "requirement": "rank_mcns creates the inquiry association for MCN distribution; sync later reads provider state and maintains that inquiry before ingest.",
       "status": "not-implemented"
     },
     {
       "id": "selected-mcn-coverage-binding",
-      "requirement": "The actual inquiry supplier set, its (platform, kwUid)-deduplicated coverage union, multiplier, risk band, formula gap, and calculation version are persisted as one immutable decision snapshot before manual sourcing or distribution.",
+      "requirement": "The actual inquiry supplier set, its (platform, kwUid)-deduplicated coverage union, multiplier, risk band, formula gap, and calculation version are persisted as one immutable decision snapshot before distribution.",
       "status": "not-implemented"
     }
   ]

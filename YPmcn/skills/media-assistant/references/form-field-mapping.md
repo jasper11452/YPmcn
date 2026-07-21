@@ -1,5 +1,12 @@
-# 询价字段绑定
+# 字段选择绑定
 
-`select_inquiry_form_fields` 参数为 `url: "https://agenta.eshypdata.com/demand-field-selector"`，不传 `platform`。宿主只打开工具返回的 `...?callback` 前缀链接；不提前打开、重试或探测状态。仅当成功且 `description` 各非空行能按全角或半角冒号拆成非空、唯一的“数据库字段名：备注”时，才按原序展示并确认。
+`select_inquiry_form_fields` 是本轮第一个业务 Tool，必传已确认的 `platform`：`xiaohongshu` 或 `douyin`。不要自行固定 `url`；仅在用户或 Endpoint 明确提供时传可选 `url/timeout_seconds`。
 
-生成 `columns`：字段名→必填 `key`，备注→必填 `name`；每项只保留这两个字段。旧 `field_key`/`field_name` 改名，并丢弃 `type`、`required`、`group` 等其他元数据。不得猜 `fields/items/count` 或根据标签映射字段。选择不发送、不推进 phase。
+等待网页提交结果。只有成功响应中的 `description` 能逐行按全角或半角冒号拆成非空、唯一的“数据库字段名：字段备注”时才继续：
+
+- 字段名映射为 `key`；备注映射为 `name`。
+- 保持页面原顺序，每项仅保留非空 `key/name`。
+- 旧 `field_key/field_name` 先改名；丢弃 `type`、`required`、`group` 等元数据。
+- 不根据标签猜测数据库字段，不补固定列，不复用上轮字段。
+
+把该数组作为本轮 `rank_creators.columns`。页面取消、超时、重复字段或解析失败时停止，不调用 `manual_source_creators`。

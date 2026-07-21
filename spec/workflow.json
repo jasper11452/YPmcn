@@ -11,6 +11,18 @@
     "staleHitPolicy": "exclude-and-revalidate-from-mysql",
     "prohibitedSubstitutes": ["fake-qdrant", "local-json-as-production-result"]
   },
+  "primaryFlow": {
+    "id": "direct-manual-sourcing-export",
+    "initialAction": "select_inquiry_form_fields",
+    "sequence": [
+      "select_inquiry_form_fields",
+      "manual_source_creators",
+      "rank_creators",
+      "create_submission_batch"
+    ],
+    "requiredUserInputs": ["platform", "requirement_id", "size", "number"],
+    "failurePolicy": "stop-before-next-business-tool"
+  },
   "phases": [
     "requirement_draft",
     "requirement_ready",
@@ -89,25 +101,27 @@
     "currentProviderGaps": {
       "create_with_distributions": "writes the external API but does not persist project or distribution identifiers in the local ledger",
       "sync_mcn_inquiry_status": "records sync metadata only; it does not query provider state or upsert mcn_inquiries",
-      "rank_mcns": "the production Provider has not been verified to bind inquiry_id to the actual selected supplier set and return its (platform, kwUid)-deduplicated coverage union before manual sourcing",
-      "manual_source_creators": "the production Provider task store, inquiry-linked idempotent start implementation, and durable task evidence are not present in this repository and require external deployment verification",
-      "maximumRecoverablePhase": "mcn_planning until provider inquiry sync is implemented"
+      "rank_mcns": "the production Provider has not been verified to bind inquiry_id to the actual selected supplier set and return its (platform, kwUid)-deduplicated coverage union",
+      "manual_source_creators": "the live input accepts requirement_id and size, but its unadvertised output still requires runtime inquiry_ids evidence before ranking",
+      "create_submission_batch": "the requirement_id, size, number target input is approved locally but not yet deployed on the production Provider",
+      "maximumRecoverablePhase": "recommendation_ready until the target create_submission_batch input is deployed"
     }
   },
   "policies": {
     "outwardSendConfirmation": "first create_with_distributions invocation is blocked locally with exact AskUserQuestion arguments; only a confirmed answer authorizes one subsequent invocation with the same parameter fingerprint",
-    "fieldSelectionBinding": "selected columns remain preparation evidence until a real distribution is committed",
+    "fieldSelectionBinding": "the submitted selector description becomes the ordered columns passed to rank_creators in the same direct flow",
     "unsupportedProviderArguments": ["candidate_pool_id", "mcn_recommendation_id", "preview_only", "remindAt", "trigger"],
     "stateRefresh": "read local JSON on every prompt; use get_workflow_state only for context loss or unknown write reconciliation",
     "unknownWriteRecovery": "current provider: get_workflow_state by demand identity from existing business facts; ledger trace_id reconciliation is target-only and an unknown external create remains blocked; never blind retry",
     "postValidationContinuation": "a successful validate_requirement result immediately continues to search_creators in the same turn",
     "postSearchContinuation": "before MCN racing, render only the deduplicated eligible rate-card creator count, its multiplier against demand, and the approved <20 / 20-<30 / >=30 risk advice; never compute, display, or retain an exact manual target",
     "mcnRace": "after the media operator selects actual inquiry suppliers, rank_mcns persists the inquiry association and returns that exact supplier set plus its (platform, kwUid)-deduplicated coverage union; never hardcode five recommendations or display IDs",
-    "rankInquiryEvidence": "manual_source_creators is not callable until one successful rank_mcns response for the same requirement returns inquiry_id and complete selected-supplier coverage evidence",
-    "manualSourcingPlacement": "only after selected-supplier coverage is below 20x, offer demand_count*20-selected_mcn_covered_creator_count as the exact one-click target; no pre-race exact target and no exact target at or above 20x",
+    "directFlowEntry": "for manual sourcing and export, select_inquiry_form_fields is the first business Tool and must complete before manual_source_creators",
+    "manualSourcingPlacement": "after field selection, call manual_source_creators with exactly the current requirement_id and positive integer decimal string size",
     "selectedSupplierBinding": "create_with_distributions supplierIds must equal the supplier set bound to the latest selected-supplier coverage calculation; any set change requires recalculation",
-    "manualSourcingEvidence": "advance to MCN selection confirmation only when one successful Provider response record contains a non-empty task_id, echoed requirement_id, the same inquiry_id returned by rank_mcns, echoed target_count, status started/running/completed, operation created/reused, started_at, and non-negative accepted_count",
-    "rankCreatorsPrerequisite": "committed WeCom distribution plus completed recovery"
+    "manualSourcingEvidence": "advance only when the successful manual_source_creators response supplies actual non-empty inquiry_ids for the current requirement and size",
+    "rankCreatorsPrerequisite": "manual_source_creators succeeded and rank_creators receives those exact inquiry_ids plus the current requirement and selected columns",
+    "submissionExport": "after rank_creators succeeds, immediately call create_submission_batch with the same requirement_id and size plus the confirmed positive batch number"
   },
   "transitions": [
     {
@@ -136,10 +150,10 @@
     },
     {
       "id": "inquiry-fields-ready",
-      "from": "mcn_planning",
+      "from": "requirement_draft",
       "trigger": {"type": "tool", "name": "select_inquiry_form_fields"},
-      "guards": ["the MCN ranking result and institution choices are confirmed", "the returned field description is actual Provider evidence"],
-      "evidence": ["successful field-list response recorded in local JSON"],
+      "guards": ["platform is confirmed", "the web selector returns an actual submitted field description"],
+      "evidence": ["successful field-selection response recorded in local JSON"],
       "nextPhase": "inquiry_fields_ready"
     },
     {
@@ -161,12 +175,12 @@
       "nextPhase": "waiting_mcn_return"
     },
     {
-      "id": "manual-supply-after-inquiry-from-mcn-plan",
-      "from": "mcn_planning",
+      "id": "direct-manual-sourcing-ready",
+      "from": "inquiry_fields_ready",
       "trigger": {"type": "tool", "name": "manual_source_creators"},
-      "guards": ["rank_mcns bound the actual selected supplier set and returned inquiry_id", "selected supplier deduplicated coverage is below demand_count*20", "the user submitted the post-race one-click supplementation command", "target_count equals demand_count*20-selected_mcn_covered_creator_count", "no distribution has been sent"],
-      "evidence": ["durable Provider task record with task_id, echoed requirement_id, matching inquiry_id, target_count, allowed status and operation, started_at, and accepted_count"],
-      "nextPhase": "mcn_planning"
+      "guards": ["field selection completed", "requirement_id resolves the current demand", "size is a positive integer decimal string"],
+      "evidence": ["successful manual response with actual non-empty inquiry_ids"],
+      "nextPhase": "candidate_pool_enriched"
     },
     {
       "id": "submission-ingested",
@@ -190,17 +204,17 @@
       "id": "recommendation-ready",
       "from": "candidate_pool_enriched",
       "trigger": {"type": "tool", "name": "rank_creators"},
-      "guards": ["committed WeCom distribution exists", "all active platform recovery facts are complete"],
-      "implementationStatus": "target-blocked-by-provider-inquiry-sync",
-      "evidence": ["successful recommendation_run and recommendation items"],
+      "guards": ["inquiry_ids exactly match the successful manual response", "requirement_id and selected columns match the current direct flow"],
+      "evidence": ["successful filtered and deduplicated persisted ranking result"],
       "nextPhase": "recommendation_ready"
     },
     {
       "id": "submission-ready",
       "from": "recommendation_ready",
       "trigger": {"type": "tool", "name": "create_submission_batch"},
-      "guards": ["run identity matches authoritative state"],
-      "evidence": ["committed submission batch and creator submissions"],
+      "guards": ["requirement_id and size match the direct manual call", "number is the confirmed positive integer decimal batch number"],
+      "implementationStatus": "target-blocked-by-provider-input-deployment",
+      "evidence": ["committed submission batch and exported spreadsheet"],
       "nextPhase": "submission_batch_ready"
     },
     {

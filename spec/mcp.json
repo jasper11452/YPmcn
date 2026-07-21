@@ -5,8 +5,8 @@
     "endpoint": "https://mcp.eshypdata.com/sse",
     "productionEndpoint": "https://mcp.eshypdata.com/sse",
     "activeProfile": "development",
-    "inputAuthority": "live-tools/list",
-    "schemaSelection": "current-endpoint-over-old-mvp-v2",
+    "inputAuthority": "approved-target-with-live-tools-list-comparison",
+    "schemaSelection": "2026-07-21-live-selector-manual-rank-plus-approved-submission-target",
     "ignoredToolPrefix": "pgy",
     "advertisedOutputSchema": false
   },
@@ -249,7 +249,7 @@
     },
     "select_inquiry_form_fields": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "tools/list description explicitly advertises a description string formatted as 数据库字段名：字段备注; its JSON location is not schema-proven.",
+      "evidenceBasis": "tools/list requires platform and describes a web selector that waits for a submitted description formatted as 数据库字段名：字段备注; retain the actual result before manual sourcing.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -293,87 +293,11 @@
     },
     "manual_source_creators": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "Provider tools/list does not advertise outputSchema. Continuing requires the approved target task evidence below from one response record; a success envelope alone never proves that manual sourcing started.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. Continue only when the successful response contains the actual non-empty inquiry_ids produced for the requested requirement_id and size.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
         "type": "object",
-        "required": [
-          "success",
-          "data",
-          "error"
-        ],
-        "properties": {
-          "success": {
-            "const": true
-          },
-          "data": {
-            "type": "object",
-            "required": [
-              "task_id",
-              "requirement_id",
-              "inquiry_id",
-              "target_count",
-              "status",
-              "operation",
-              "started_at",
-              "accepted_count"
-            ],
-            "properties": {
-              "task_id": {
-                "type": "string",
-                "minLength": 1
-              },
-              "requirement_id": {
-                "type": "string",
-                "minLength": 1
-              },
-              "inquiry_id": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                ]
-              },
-              "target_count": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "started",
-                  "running",
-                  "completed"
-                ]
-              },
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "created",
-                  "reused"
-                ]
-              },
-              "started_at": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "accepted_count": {
-                "type": "integer",
-                "minimum": 0
-              }
-            },
-            "additionalProperties": true
-          },
-          "error": {
-            "type": "null"
-          }
-        },
         "additionalProperties": true
       },
       "errorCodes": [
@@ -384,7 +308,7 @@
     },
     "rank_creators": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "tools/list description explicitly advertises run_id; its JSON location is not schema-proven.",
+      "evidenceBasis": "tools/list describes persisted filtering, deduplication, ranking, and batch_items. Retain the actual successful result before export.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -395,7 +319,7 @@
     },
     "create_submission_batch": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "No provider outputSchema is advertised; retain the actual response as evidence before deriving downstream identifiers.",
+      "evidenceBasis": "Approved target input exports the ranked spreadsheet for one requirement_id, size, and batch number; no provider outputSchema is advertised.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -584,11 +508,18 @@
     "select_inquiry_form_fields": {
       "name": "select_inquiry_form_fields",
       "required": [
-        "url"
+        "platform"
       ],
       "properties": {
+        "platform": {
+          "type": "string",
+          "enum": ["xiaohongshu", "douyin"]
+        },
         "url": {
-          "type": "string"
+          "anyOf": [
+            {"type": "string"},
+            {"type": "null"}
+          ]
         },
         "timeout_seconds": {
           "type": "integer"
@@ -601,14 +532,14 @@
         "conditional": []
       },
       "retry": {
-        "policy": "query-safe",
-        "blindRetry": true,
-        "unknownOutcome": "not-applicable",
+        "policy": "no-blind-retry",
+        "blindRetry": false,
+        "unknownOutcome": "stop-and-request-returned-evidence",
         "reconcileWith": null
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
-        "provider description advertises description string in 数据库字段名：字段备注 format",
+        "the web selector was opened for the confirmed platform and returned a submitted description in 数据库字段名：字段备注 format",
         "retain actual returned payload as downstream evidence"
       ]
     },
@@ -761,17 +692,15 @@
       "name": "manual_source_creators",
       "required": [
         "requirement_id",
-        "target_count"
+        "size"
       ],
       "properties": {
         "requirement_id": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
-        "target_count": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "本次需要达人拓展新增的达人数量"
+        "size": {
+          "type": "string",
+          "description": "本次手扒数量，使用正整数十进制字符串"
         }
       },
       "forbidden": [],
@@ -788,20 +717,21 @@
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
-        "one returned data record contains task_id, echoed requirement_id, the same inquiry_id returned by rank_mcns, target_count, allowed status and operation, started_at, and accepted_count",
+        "the successful response contains the actual non-empty inquiry_ids produced for the requested requirement_id and size",
         "retain actual returned payload as downstream evidence"
       ]
     },
     "rank_creators": {
       "name": "rank_creators",
       "required": [
-        "requirement_id",
-        "inquiry_ids",
-        "columns"
+        "inquiry_ids"
       ],
       "properties": {
         "requirement_id": {
-          "type": "string"
+          "anyOf": [
+            {"type": "string"},
+            {"type": "null"}
+          ]
         },
         "inquiry_ids": {
           "type": "array",
@@ -810,28 +740,24 @@
           }
         },
         "columns": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["key", "name"],
-            "properties": {
-              "key": {
-                "type": "string",
-                "minLength": 1
-              },
-              "name": {
-                "type": "string",
-                "minLength": 1
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
               }
             },
-            "additionalProperties": false
-          }
+            {"type": "null"}
+          ]
         }
       },
       "forbidden": [],
+      "agentRequired": ["requirement_id", "columns"],
       "agentSemanticRequirements": {
-        "inquiry_ids": "actual string inquiry IDs returned by sync for the current recovered distribution",
-        "columns": "must be exactly the same ordered key/name object array passed to create_with_distributions for the current distribution"
+        "inquiry_ids": "actual unique non-empty string inquiry IDs returned by manual_source_creators for this request",
+        "requirement_id": "the same non-empty requirement_id passed to manual_source_creators; new clients pass it for strict validation",
+        "columns": "the non-empty ordered key/name object array returned by the current field-selection submission"
       },
       "sideEffects": "business-write",
       "writers": {
@@ -846,61 +772,28 @@
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
-        "provider description advertises run_id",
+        "the successful result persists the filtered and deduplicated ranked rows for the same inquiries and requirement",
         "retain actual returned payload as downstream evidence"
       ]
     },
     "create_submission_batch": {
       "name": "create_submission_batch",
       "required": [
-        "run_id"
+        "requirement_id",
+        "size",
+        "number"
       ],
       "properties": {
-        "run_id": {
+        "requirement_id": {
           "type": "string"
         },
-        "target_submission_count": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "size": {
+          "type": "string",
+          "description": "导出数量，必须与本轮手扒 size 一致"
         },
-        "recommendation_item_ids": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "exclude_submitted": {
-          "type": "boolean"
-        },
-        "allow_need_confirm_with_risk": {
-          "type": "boolean"
-        },
-        "risk_confirmation": {
-          "anyOf": [
-            {
-              "type": "object",
-              "additionalProperties": true
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "created_by": {
-          "type": "string"
+        "number": {
+          "type": "string",
+          "description": "批次号，使用正整数十进制字符串"
         }
       },
       "forbidden": [],
@@ -917,6 +810,7 @@
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
+        "the response confirms spreadsheet export for the same requirement_id, size, and number",
         "retain actual returned payload as downstream evidence"
       ]
     },

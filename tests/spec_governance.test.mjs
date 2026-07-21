@@ -82,11 +82,16 @@ describe("Spec governance", () => {
       ...mcp.optionalTools,
     ]);
     assert.equal(mediaAssistant.toolPolicy.contract, "mcp.json");
+    assert.deepEqual(mediaAssistant.toolPolicy.primarySequence, [
+      "select_inquiry_form_fields",
+      "manual_source_creators",
+      "rank_creators",
+      "create_submission_batch",
+    ]);
     assert.deepEqual(mediaAssistant.toolPolicy.preconditions.manual_source_creators, [
-      "rank_mcns_bound_the_actual_selected_supplier_set_and_returned_inquiry_id",
-      "selected_supplier_coverage_union_multiplier_is_below_twenty",
-      "submitted_post_race_one_click_command_binds_the_formula_gap_as_one_positive_target_count",
-      "no_distribution_has_been_sent",
+      "field_selector_completed_for_the_confirmed_platform",
+      "requirement_id_is_the_current_confirmed_requirement",
+      "size_is_a_positive_integer_decimal_string",
     ]);
     assert.equal(
       existsSync(join(repoRoot, mediaAssistant.implementation)),
@@ -153,10 +158,10 @@ describe("Spec governance", () => {
     assert.deepEqual(database.mvpEntityBaseline.businessMcpWriterOwnership.mcn_inquiry_status_syncs, ["sync_mcn_inquiry_status"]);
     assert.match(database.toolDatabaseEffects.sync_mcn_inquiry_status.currentLimitation, /not yet deployed/);
     assert.deepEqual(database.toolDatabaseEffects.rank_mcns.targetWrites, ["mcn_inquiries"]);
-    assert.match(database.toolDatabaseEffects.rank_mcns.targetInquiryBehavior, /inquiry_id.*manual_source_creators/);
-    assert.match(database.toolDatabaseEffects.manual_source_creators.targetWriteBoundary, /persist.*durable manual-sourcing task/);
+    assert.match(database.toolDatabaseEffects.rank_mcns.targetInquiryBehavior, /inquiry_id.*distribution/);
+    assert.match(database.toolDatabaseEffects.manual_source_creators.targetWriteBoundary, /requirement_id.*size.*inquiry_ids/);
     assert.ok(database.knownGaps.some(({ id, severity }) =>
-      id === "manual-sourcing-task-store-unverified" && severity === "high"
+      id === "submission-target-input-not-deployed" && severity === "high"
     ));
     assert.equal(database.toolDatabaseEffects.audit_manual_adjustment.writes.includes("audit_events"), false);
   });
@@ -410,7 +415,7 @@ describe("Spec governance", () => {
         assert.equal(knownCodes.has(code), true, `${name}:${code}`);
       }
     }
-    assert.match(mcp.outputContracts.rank_creators.evidenceBasis, /run_id/);
+    assert.match(mcp.outputContracts.rank_creators.evidenceBasis, /filtering, deduplication/);
     assert.match(
       mcp.outputContracts.select_inquiry_form_fields.evidenceBasis,
       /数据库字段名：字段备注/,
@@ -424,11 +429,12 @@ describe("Spec governance", () => {
       "selected_mcn_coverage_multiplier", "selected_mcn_risk_level",
       "manual_sourcing_gap_count",
     ]);
-    assert.deepEqual(mcp.outputContracts.manual_source_creators.successSchema.properties.data.required, [
-      "task_id", "requirement_id", "inquiry_id", "target_count", "status", "operation", "started_at", "accepted_count",
-    ]);
-    assert.deepEqual(mcp.tools.manual_source_creators.required, ["requirement_id", "target_count"]);
-    assert.equal(mcp.tools.manual_source_creators.properties.target_count.minimum, 1);
+    assert.deepEqual(mcp.outputContracts.manual_source_creators.successSchema, {
+      type: "object", additionalProperties: true,
+    });
+    assert.deepEqual(mcp.tools.manual_source_creators.required, ["requirement_id", "size"]);
+    assert.equal(mcp.tools.manual_source_creators.properties.size.type, "string");
+    assert.deepEqual(mcp.tools.create_submission_batch.required, ["requirement_id", "size", "number"]);
   });
 
   it("keeps the approved finding registry one-to-one with authoritative Spec paths", () => {

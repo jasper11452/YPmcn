@@ -1,50 +1,38 @@
 ---
 name: media-assistant
-description: "Use for YPmcn requirement validation, sourcing, distribution, ranking, submission, feedback, and recovery."
+description: "Use for YPmcn web field selection, manual creator sourcing, creator filtering/deduplication, and spreadsheet batch export."
 ---
 
 # YPmcn 媒介助手
 
-业务读写只用已安装的 YPmcn MCP；`rank_creators` 成功后可用宿主 `export_csv` 立即输出首批名单。禁止 shell、curl、数据库直连、虚构结果或替代写接口。
+只用已安装的 YPmcn MCP 完成手扒导出；禁止 shell、curl、数据库直连、虚构结果或替代写接口。
 
 ## 执行规则
 
-- Endpoint schema 优先，并与根 `spec/manifest.json` 指向的正式契约核对；只传 live schema 字段。必需 Tool 缺失、契约冲突或证据不足即 `integration_required`。
-- 本地 `state/confirmation_guard.json` 的 `workflow.phase/next_action` 是编排权威；Provider 状态只作业务事实与未知写对账，不得覆盖本地 phase。连续步骤复用实际成功响应。
-- 逐项核对 ID 血缘，只复制当前工作流中实际成功响应或已验证状态返回的 ID；不得猜测、串用或用虚构 ID 探测详情。
-- 只有实际 MCP 返回算成功证据。`validate_requirement` 参数校验失败且已确认信息可唯一修复时，保持原始需求语义，只修报错字段、序列化、映射或审计计数，并在同一轮持续重新调用直到成功；需业务选择才询问，其他失败按执行门禁恢复。
-- 每次调用前必须先读 `references/tools/<tool>.json`。Hook 只硬拦 shell/curl 外发绕过，并用 AskUserQuestion 多行警告绑定企微参数指纹；其他 Tool 不做严格门禁。本地状态只按实际成功结果推进；没有远程证据时来源写“未知”。
+- 开始前取得并确认 `platform`、`requirement_id`、手扒数量 `size` 和批次号 `number`；`size`、`number` 都使用正整数十进制字符串。缺值时一次性询问，不猜测。
+- Endpoint schema 优先，并与根 `spec/manifest.json` 指向的正式契约核对；必需 Tool 缺失、契约冲突或证据不足即 `integration_required`，不得回退旧参数。
+- 每次调用前先读 `references/tools/<tool>.json`，只传其中字段；只有实际 MCP 成功响应才是后续证据。
+- 逐项核对 ID 血缘，只复制本轮实际成功响应返回的 ID；不得猜测、串用或用虚构 ID 探测。
+- 任一步失败都停止后续业务 Tool。写结果未知时先对账，禁止盲重试；用户要求失败即停时绝不重试。
+- Hook 不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序；本地状态只按实际成功结果推进，preview 不限制 Skill 读取或其他 Tool。
 
 ## 主链
 
-`validate_requirement → 自动 search_creators → 赛前刊例倍率确认 → rank_mcns（已选机构去重倍率）→ <20 倍赛后补量确认 → 可选 manual_source_creators → MCN 确认 → select_inquiry_form_fields → create_with_distributions 预检/确认/外发 → sync → ingest → sync → rank_creators → get_creator_detail → export_csv → create_submission_batch → record_client_feedback`
+`select_inquiry_form_fields → manual_source_creators → rank_creators → create_submission_batch`
 
-弹窗提交即同轮执行。赛前无精确手扒数；仅在已选机构去重倍率 `<20` 后，按 `需求数×20−覆盖数` 一键补量。拓展前须有同需求 `inquiry_id`，但不作参数；机构变化须重算。补量不授权外发；`EXTERNAL_SEND_CONFIRMATION_REQUIRED` 见执行门禁。
-宿主若注入标准 Brief preview，将其作为解析参考：未决值主动询问，完整后优先调用 `validate_requirement`，但 preview 不限制 Skill 读取或其他 Tool。
-## 用户引导
+1. 首个业务调用使用已确认平台执行 `select_inquiry_form_fields({platform})`，弹出网页并等待字段选择完成。按原序保留返回的非空 `key/name` 字段。
+2. 字段选择成功后立即调用 `manual_source_creators({requirement_id,size})`；禁止发送旧参数 `target_count`。
+3. 只取该手扒成功响应实际返回的非空 `inquiry_ids`，连同相同 `requirement_id` 和本轮 `columns` 调用 `rank_creators` 筛选去重。
+4. `rank_creators` 成功后同轮调用 `create_submission_batch({requirement_id,size,number})` 导出表格；禁止发送 `run_id` 或旧批次选项。
 
-Brief 太模糊或有大量 `missing_required` 时，**先输出模板再弹窗**：
-
-```
-请按以下模板补充需求信息（可复制粘贴修改）：
-
-【平台】小红书 / 抖音
-【达人数量】XX 位
-【单达人预算】XX 元（小红书选图文/视频；抖音选1–20秒/21–60秒/60秒以上）
-【返点要求】XX%（可选）
-【账号类型】母婴 / 美妆 / 美食 / 穿搭 / 科技 / 其他
-【提报截止】X月X日 XX:XX
-【发布档期】X月X日 - X月X日（可选）
-【内容要求】图文为主 / 视频为主 / 其他
-```
-
-用一次 AskUserQuestion 收集缺失字段，每题一个字段并允许“其他”。
+`requirement_id`、`size` 在第 2、4 步必须完全一致；`inquiry_ids` 和 `columns` 必须来自本轮前序成功结果。不要在步骤间插入搜索、赛马、企微分发、详情查询、宿主 CSV 导出或额外确认。
 
 ## 按需读取
 
-- Brief 解析：[`requirement-intake.md`](references/requirement-intake.md)
 - 状态、确认、恢复：[`execution-gates.md`](references/execution-gates.md)
-- 询价字段：[`form-field-mapping.md`](references/form-field-mapping.md)
+- 字段转换：[`form-field-mapping.md`](references/form-field-mapping.md)
 - 回复格式：[`frontend-response.md`](references/frontend-response.md)
+- 非本主链的 Brief 解析：[`requirement-intake.md`](references/requirement-intake.md)
 - 每个 Tool 的调用格式：[`references/tools/`](references/tools/)
+
 每次只读当前场景所需文件。

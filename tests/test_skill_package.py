@@ -83,21 +83,19 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertEqual(1 + len(EXPECTED_REFERENCE_FILES), len(markdown))
         self.assertLessEqual(sum(count_han(read(path)) for path in markdown), 3000)
 
-    def test_skill_repairs_requirement_arguments_without_a_global_hook_gate(self):
+    def test_skill_declares_the_direct_flow_without_a_global_hook_gate(self):
         text = "\n".join((
             read(SKILL),
             read(REFERENCES / "requirement-intake.md"),
             read(REFERENCES / "execution-gates.md"),
         ))
         for required in (
-            "参数校验失败",
-            "同一轮持续重新调用直到成功",
-            "保持原始需求语义",
-            "只修报错字段、序列化、映射或审计计数",
+            "select_inquiry_form_fields → manual_source_creators → rank_creators → create_submission_batch",
+            "manual_source_creators({requirement_id,size})",
+            "create_submission_batch({requirement_id,size,number})",
+            "任一步失败都停止后续业务 Tool",
             "不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序",
             "preview 不限制 Skill 读取或其他 Tool",
-            "AskUserQuestion",
-            "EXTERNAL_SEND_CONFIRMATION_REQUIRED",
             "本地状态只按实际成功结果推进",
             "用户要求失败即停时绝不重试",
         ):
@@ -108,8 +106,8 @@ class SkillPackageContractTest(unittest.TestCase):
         text = read(SKILL)
         for required in (
             "核对 ID 血缘",
-            "实际成功响应或已验证状态返回的 ID",
-            "不得猜测、串用或用虚构 ID 探测详情",
+            "本轮实际成功响应返回的 ID",
+            "不得猜测、串用或用虚构 ID 探测",
             "integration_required",
         ):
             self.assertIn(required, text)
@@ -117,13 +115,11 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_documented_id_routing_matches_current_endpoint(self):
         routing = read(REFERENCES / "execution-gates.md")
         for mapping in (
-            "需求身份来自 `validate_requirement.data.id`",
-            "`demand_id+demand_version` 只用于对账",
-            "`project_id+supplierIds+requirement_id` 绑定 distribution",
-            "`rank_mcns` 返回的单个 `inquiry_id` 绑定达人拓展前置询价",
-            "`inquiry_ids` 绑定回收",
-            "`run_id` 来自精排",
-            "无实际 `inquiry_ids` 不 ingest",
+            "select_inquiry_form_fields({platform})",
+            "manual_source_creators({requirement_id,size})",
+            "无实际 `inquiry_ids` 不 rank",
+            "create_submission_batch({requirement_id,size,number})",
+            "禁止在本链发送 `target_count`、`run_id`",
         ):
             self.assertIn(mapping, routing)
         for obsolete in (
@@ -133,7 +129,7 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertNotIn(obsolete, routing)
 
-    def test_workflow_reference_routes_to_machine_contract_and_recovery_order(self):
+    def test_workflow_reference_routes_to_machine_contract_and_direct_order(self):
         text = read(REFERENCES / "execution-gates.md")
         for required in (
             "spec/manifest.json",
@@ -142,26 +138,22 @@ class SkillPackageContractTest(unittest.TestCase):
             "workflow_state",
             "allowed_actions",
             "state/confirmation_guard.json",
-            "sync → ingest_mcn_submissions → sync",
+            "首个业务 Tool 固定为 `select_inquiry_form_fields({platform})`",
+            "成功后同轮调用 `create_submission_batch({requirement_id,size,number})`",
             "禁止盲重试",
         ):
             self.assertIn(required, text)
         self.assertEqual(len(self.workflow["phases"]), len(set(self.workflow["phases"])))
 
-    def test_send_and_recovery_docs_are_fail_closed(self):
+    def test_direct_flow_docs_are_fail_closed(self):
         joined = "\n".join(read(path) for path in [SKILL, *REFERENCES.glob("*.md")])
         for required in (
-            "AskUserQuestion",
-            "EXTERNAL_SEND_CONFIRMATION_REQUIRED",
             "写结果未知",
-            "只有实际 MCP 返回算成功证据",
-            "只有返回“确认发送”",
-            "真实换行逐项展示 MCN、字段和完整企微消息",
-            "任一名称无法核对即阻断",
-            "修改对象或消息后重新走预检",
-            "未绑定的供应商不发送",
-            "已绑定的供应商在同一次调用中继续发送",
-            "只传实际回执为已发送的供应商 ID",
+            "只有实际 MCP 成功响应才是后续证据",
+            "字段页面取消、超时或返回无效字段时停止",
+            "只接受本轮成功响应中的非空、唯一字符串 `inquiry_ids`",
+            "不得改用旧 `run_id`",
+            "禁止盲重试",
         ):
             self.assertIn(required, joined)
         for pattern in (
@@ -177,7 +169,7 @@ class SkillPackageContractTest(unittest.TestCase):
         for required in (
             "Endpoint schema 优先",
             "select_inquiry_form_fields",
-            "create_with_distributions",
+            "create_submission_batch",
             "integration_required",
         ):
             self.assertIn(required, joined)
@@ -426,19 +418,15 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertNotIn("submissionDeadlineRaw", by_field)
         self.assertIn("ypmcn-brief-v1", by_field["rawMessagesJson"]["Comment"])
 
-    def test_output_assets_fix_wecom_and_submission_shapes(self):
+    def test_submission_export_is_owned_by_create_submission_batch(self):
         assets = PACKAGE / "skills" / "media-assistant" / "assets"
         self.assertFalse((assets / "ypmcn_submission_template.csv").exists())
         workflow_text = "\n".join((read(SKILL), read(REFERENCES / "frontend-response.md")))
-        self.assertIn("After successful `rank_creators`, call `get_creator_detail` once for every creator", workflow_text)
-        self.assertIn("Only after every required detail call succeeds, call host `export_csv`", workflow_text)
-        self.assertIn("set each header to `name` verbatim", workflow_text)
-        self.assertIn("extract that creator's cell from its successful detail response with the paired `key`", workflow_text)
-        self.assertIn("Never reuse a previous or fixed header", workflow_text)
-        self.assertIn("Export the CSV as UTF-8 with a leading UTF-8 BOM (bytes `EF BB BF`)", workflow_text)
-        self.assertIn("never emit GBK/ANSI or UTF-8 without the BOM", workflow_text)
+        self.assertIn("create_submission_batch({requirement_id,size,number})", workflow_text)
+        self.assertIn("不调用宿主 `export_csv`", workflow_text)
+        self.assertIn("不得伪造文件名、路径或下载链接", workflow_text)
         runtime_source = read(PACKAGE / "src" / "index.ts")
-        self.assertIn("Export UTF-8 with a leading UTF-8 BOM (bytes EF BB BF)", runtime_source)
+        self.assertIn("This Tool is the spreadsheet exporter", runtime_source)
         wecom = (assets / "wecom_inquiry_template.txt").read_text(encoding="utf-8")
         for required in (
             "【{project_name}｜达人提报】",
@@ -462,18 +450,16 @@ class SkillPackageContractTest(unittest.TestCase):
             "小红书图文价格/视频价格",
             "抖音1–20秒/21–60秒/60秒以上视频价格",
             "小红书禁止 `kolOfficialPriceL3`",
-            "不猜测或展示给用户",
+            "绝不显示 L1/L2/L3",
         ):
             self.assertIn(required, joined)
 
-    def test_hook_reference_matches_registered_safe_event_surface(self):
+    def test_hook_reference_keeps_state_projection_advisory(self):
         text = read(REFERENCES / "execution-gates.md")
         for required in (
-            "`before_tool_call`",
-            "AskUserQuestion",
-            "EXTERNAL_SEND_CONFIRMATION_REQUIRED",
-            "第二次调用",
-            "不做严格阻断",
+            "Hook 不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序",
+            "只记录实际结果",
+            "本地成功投影不等于 Provider 成功",
         ):
             self.assertIn(required, text)
 

@@ -207,14 +207,12 @@ describe("YP Action native hooks", () => {
   it("injects the local JSON orchestration state without turning ordinary tools into gates", async () => {
     const prompt = await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
     assert.equal(prompt.prependSystemContext, YPMCN_FAST_PATH);
-    assert.match(YPMCN_FAST_PATH, /rate-card resource library/);
-    assert.match(YPMCN_FAST_PATH, /coverage < demand\*20/);
-    assert.match(YPMCN_FAST_PATH, /Before rank_mcns, never compute[^]*exact manual target/);
-    assert.match(YPMCN_FAST_PATH, /一键发起手扒补量/);
-    assert.match(YPMCN_FAST_PATH, /rank_mcns[^]*selected_mcn_covered_creator_count[^]*manual_source_creators/);
-    assert.match(YPMCN_FAST_PATH, /does not prove that every supplier is unsendable/);
-    assert.match(YPMCN_FAST_PATH, /Never retry the remaining suppliers as another multi-supplier batch/);
-    assert.match(YPMCN_FAST_PATH, /only supplier IDs explicitly reported as sent/);
+    assert.match(YPMCN_FAST_PATH, /select_inquiry_form_fields -> manual_source_creators -> rank_creators -> create_submission_batch/);
+    assert.match(YPMCN_FAST_PATH, /First call select_inquiry_form_fields\(\{platform\}\)/);
+    assert.match(YPMCN_FAST_PATH, /manual_source_creators\(\{requirement_id,size\}\)/);
+    assert.match(YPMCN_FAST_PATH, /actual successful response provides[^]*inquiry_ids/);
+    assert.match(YPMCN_FAST_PATH, /create_submission_batch\(\{requirement_id,size,number\}\)/);
+    assert.match(YPMCN_FAST_PATH, /This Tool is the spreadsheet exporter/);
     assert.match(YPMCN_FAST_PATH, /age1Rate\.\.age6Rate are direct JSON numbers/);
     assert.match(YPMCN_FAST_PATH, /Xiaohongshu bands are <18, 18–23, 24–29, 30–39, 40–49, and 50\+/);
     assert.match(YPMCN_FAST_PATH, /Douyin bands are <18, 18–23, 24–30, 31–40, 41–50, and 50\+/);
@@ -223,8 +221,8 @@ describe("YP Action native hooks", () => {
     assert.doesNotMatch(YPMCN_FAST_PATH, /schema\/CSV|customer_demands (?:reference )?CSV/);
     assert.doesNotMatch(YPMCN_FAST_PATH, /max\(quantityTotal-actual count,0\)/);
     assert.match(prompt.prependContext, /authoritative local orchestration state/);
-    assert.match(prompt.prependContext, /"next_action":"validate_requirement"/);
-    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 16);
+    assert.match(prompt.prependContext, /"next_action":"select_inquiry_form_fields"/);
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 17);
 
     for (const [toolName, params] of [
       ["read", { file_path: "/tmp/SKILL.md" }],
@@ -1077,6 +1075,50 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.next_action, "recover_validate_requirement");
   });
 
+  it("projects the direct field-selection, manual, rank, and export sequence", async () => {
+    await recordTool(
+      "mcp__ypmcn__select_inquiry_form_fields",
+      { platform: "xiaohongshu" },
+      { success: true, data: { description: "kwUid：达人 ID\nnickname：达人昵称" }, error: null },
+    );
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "manual_source_creators");
+    assert.equal(state.workflow.platform, "xiaohongshu");
+
+    await recordTool(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: "requirement-direct", size: "8" },
+      { success: true, data: { inquiry_ids: ["31", "32"] }, error: null },
+    );
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "candidate_pool_enriched");
+    assert.equal(state.workflow.next_action, "rank_creators");
+    assert.deepEqual(state.workflow.manual_sourcing_inquiry_ids, ["31", "32"]);
+    assert.equal(state.workflow.manual_sourcing_size, "8");
+
+    await recordTool(
+      "mcp__ypmcn__rank_creators",
+      {
+        inquiry_ids: ["31", "32"],
+        requirement_id: "requirement-direct",
+        columns: [{ key: "kwUid", name: "达人 ID" }],
+      },
+      { success: true, data: { batch_items: [{ kwUid: "creator-1" }] }, error: null },
+    );
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "create_submission_batch");
+
+    await recordTool(
+      "mcp__ypmcn__create_submission_batch",
+      { requirement_id: "requirement-direct", size: "8", number: "2" },
+      { success: true, data: { exported: true }, error: null },
+    );
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "submission_batch_ready");
+    assert.equal(state.workflow.next_action, null);
+    assert.equal(state.workflow.submission_batch_number, "2");
+  });
+
   it("opens only a callback URL returned by select_inquiry_form_fields", async () => {
     const localHooks = new Map();
     const openedUrls = [];
@@ -1091,7 +1133,7 @@ describe("YP Action native hooks", () => {
     for (const event of [
       {
         toolName: "mcp__ypmcn__select_inquiry_form_fields",
-        params: { url: "https://agenta.eshypdata.com/demand-field-selector" },
+        params: { platform: "xiaohongshu" },
         result: {
           success: true,
           data: {
@@ -1102,7 +1144,7 @@ describe("YP Action native hooks", () => {
       },
       {
         toolName: "mcp__ypmcn__select_inquiry_form_fields",
-        params: { url: "https://agenta.eshypdata.com/demand-field-selector" },
+        params: { platform: "xiaohongshu" },
         error: "connection lost",
       },
     ]) {
@@ -1115,7 +1157,7 @@ describe("YP Action native hooks", () => {
 
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.phase, "inquiry_fields_ready");
-    assert.equal(state.workflow.next_action, "confirm_inquiry_fields");
+    assert.equal(state.workflow.next_action, "recover_select_inquiry_form_fields");
     assert.equal(state.workflow.waiting_for, "user");
   });
 
@@ -1132,7 +1174,7 @@ describe("YP Action native hooks", () => {
 
     assert.equal(await localHooks.get("after_tool_call")({
       toolName: "mcp__ypmcn__select_inquiry_form_fields",
-      params: { url: "https://agenta.eshypdata.com/demand-field-selector" },
+      params: { platform: "xiaohongshu" },
       result: {
         success: true,
         content: [{

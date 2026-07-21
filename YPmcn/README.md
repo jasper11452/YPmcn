@@ -5,26 +5,13 @@ YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。
 ## 完整链路
 
 ```text
-validate_requirement
-→ search_creators(id)
-→ 展示赛前刊例资源倍率与 20/30 倍风险 → AskUserQuestion 确认（无精确手扒数）
-→ rank_mcns(id, platform, 动态排序数量) 绑定实际已选机构，返回 inquiry_id 与覆盖去重并集
-→ 赛后倍率 <20 时按 需求数×20−覆盖数 一键确认精确手扒补量
-→ 已确认时 manual_source_creators(requirement_id, target_count) 启动/复用关联任务
-→ 按名称展示 MCN排序结果 → 确认
-→ select_inquiry_form_fields(url)
-→ create_with_distributions(requirement_id, supplierIds, columns, description, wechat_notification_message=description)
-→ Native Approval 警告；确认后宿主续传原调用（明确未绑定导致整批无写入拒绝时，自动剔除后续发剩余机构）
-→ sync_mcn_inquiry_status(requirement_id, project_id, supplierIds)
-→ waiting_mcn_return
-→ sync / ingest_mcn_submissions(inquiry_ids) / sync（完成回收）
-→ rank_creators(requirement_id)
-→ export_csv（按 create_with_distributions.columns 原顺序输出首批名单）
-→ create_submission_batch(run_id)
-→ record_client_feedback(run_id, feedback_items)
+select_inquiry_form_fields(platform) → 网页选择字段
+→ manual_source_creators(requirement_id, size)
+→ rank_creators(inquiry_ids, requirement_id, columns) 筛选去重
+→ create_submission_batch(requirement_id, size, number) 导出表格
 ```
 
-精确手扒数量只在 MCN 赛马后决定：实际已选机构覆盖去重并集 `<20` 倍为高危，`20≤倍率<30` 为中风险，`≥30` 为安全。`rank_mcns` 缺少真实 `inquiry_id`、机构集合或覆盖证据时不得调用达人拓展；后续外发机构集合变化也必须重算。该 `inquiry_id` 不作为达人拓展额外入参。发送成功并能从真实 project/distribution 镜像询价后进入 `waiting_mcn_return`；只有企微发送成功且回收完成才能进入 `candidate_pool_enriched`。
+`size` 与 `number` 使用正整数十进制字符串。只有字段选择成功后才启动手扒；`rank_creators` 只消费本轮手扒实际返回的 `inquiry_ids`，并沿用相同需求和所选字段。排序成功后由 `create_submission_batch` 直接导出，不再调用宿主 `export_csv`，也不使用旧 `target_count` 或 `run_id` 参数。
 
 ## Hook 边界
 
@@ -40,7 +27,7 @@ validate_requirement
 
 ## Provider 状态
 
-开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。
+开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。2026-07-21 只读检查已确认字段选择、手扒和排序的新输入；三参数 `create_submission_batch` 尚待 Provider 发布，生产导出当前保持 `integration_required`。
 
 ```bash
 npm run mcp:dev

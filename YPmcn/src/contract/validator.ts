@@ -260,6 +260,52 @@ function validateSemanticRequirements(
   tool: string,
   params: Record<string, unknown>,
 ): ValidationIssue[] {
+  if (tool === "manual_source_creators" || tool === "create_submission_batch") {
+    if (
+      hasOwn(params, "requirement_id") &&
+      (typeof params.requirement_id !== "string" || params.requirement_id.trim().length === 0)
+    ) {
+      return [issue("INVALID_INPUT", "$.requirement_id", "requirement_id must be a non-empty string.")];
+    }
+    if (hasOwn(params, "size") && (typeof params.size !== "string" || !/^[1-9]\d*$/.test(params.size))) {
+      return [issue("INVALID_INPUT", "$.size", "size must be a positive-integer decimal string.")];
+    }
+    if (
+      tool === "create_submission_batch" && hasOwn(params, "number") &&
+      (typeof params.number !== "string" || !/^[1-9]\d*$/.test(params.number))
+    ) {
+      return [issue("INVALID_INPUT", "$.number", "number must be a positive-integer decimal string.")];
+    }
+  }
+  if (tool === "rank_creators") {
+    if (!Array.isArray(params.inquiry_ids) || params.inquiry_ids.length === 0) {
+      return [issue("INVALID_INPUT", "$.inquiry_ids", "inquiry_ids must contain at least one ID.")];
+    }
+    const inquiryIds = params.inquiry_ids;
+    for (let index = 0; index < inquiryIds.length; index += 1) {
+      if (typeof inquiryIds[index] !== "string" || inquiryIds[index].trim().length === 0) {
+        return [issue("INVALID_INPUT", `$.inquiry_ids[${index}]`, "inquiry_ids must contain non-empty strings.")];
+      }
+      if (inquiryIds.slice(0, index).includes(inquiryIds[index])) {
+        return [issue("INVALID_INPUT", `$.inquiry_ids[${index}]`, "inquiry_ids must be unique.")];
+      }
+    }
+    if (typeof params.requirement_id !== "string" || params.requirement_id.trim().length === 0) {
+      return [issue("INVALID_INPUT", "$.requirement_id", "requirement_id must be a non-empty string.")];
+    }
+    if (!Array.isArray(params.columns) || params.columns.length === 0) {
+      return [issue("INVALID_INPUT", "$.columns", "columns must contain the selected fields.")];
+    }
+    for (let index = 0; index < params.columns.length; index += 1) {
+      const column = params.columns[index];
+      if (
+        !isRecord(column) || typeof column.key !== "string" || column.key.trim().length === 0 ||
+        typeof column.name !== "string" || column.name.trim().length === 0
+      ) {
+        return [issue("INVALID_INPUT", `$.columns[${index}]`, "Each selected column requires non-empty key and name.")];
+      }
+    }
+  }
   if (tool === "get_workflow_state") {
     const traceMode = typeof params.trace_id === "string" && params.trace_id.trim().length > 0;
     const demandMode = typeof params.demand_id === "string" && params.demand_id.trim().length > 0 &&

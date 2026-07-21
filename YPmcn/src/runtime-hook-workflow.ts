@@ -325,6 +325,12 @@ type ManualSourcingEvidence = {
   acceptedCount: number;
 };
 
+type DirectManualSourcingEvidence = {
+  requirementId: string;
+  size: string;
+  inquiryIds: string[];
+};
+
 type DistributionOutcomeEvidence = {
   projectId?: string;
   requestedCount: number;
@@ -445,6 +451,38 @@ function manualSourcingEvidence(
     };
   }
   return undefined;
+}
+
+function directManualSourcingEvidence(
+  root: unknown,
+  input: Json,
+): DirectManualSourcingEvidence | undefined {
+  if (
+    !text(input.requirement_id) || !text(input.size) ||
+    !/^[1-9]\d*$/.test(input.size.trim())
+  ) return undefined;
+  const envelope = unwrap(root);
+  if (
+    !envelope || typeof envelope !== "object" || Array.isArray(envelope) ||
+    envelope.success !== true || envelope.error !== null
+  ) return undefined;
+
+  const candidates = objectRecords(envelope.data)
+    .map((record) => record.inquiry_ids)
+    .filter((value): value is string[] =>
+      Array.isArray(value) && value.length > 0 &&
+      value.every((item) => text(item))
+    )
+    .map((value) => value.map((item) => item.trim()))
+    .filter((value) => new Set(value).size === value.length);
+  const unique = new Map(candidates.map((value) => [JSON.stringify(value), value]));
+  if (unique.size !== 1) return undefined;
+
+  return {
+    requirementId: input.requirement_id.trim(),
+    size: input.size.trim(),
+    inquiryIds: [...unique.values()][0],
+  };
 }
 
 function distributionSupplierId(value: unknown): string | undefined {
@@ -883,7 +921,9 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
     ? rankMcnCoverageEvidence(event.result, input, workflow)
     : undefined;
   const manualEvidence = tool === "manual_source_creators" && envelopeOk
-    ? manualSourcingEvidence(event.result, input, workflow)
+    ? text(input.size)
+      ? directManualSourcingEvidence(event.result, input)
+      : manualSourcingEvidence(event.result, input, workflow)
     : undefined;
   const distributionEvidence = tool === "create_with_distributions" && envelopeOk
     ? distributionOutcomeEvidence(event.result, input)
@@ -915,12 +955,13 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
     ]) delete workflow[key];
   }
 
-  if (tool === "select_inquiry_form_fields") {
-    // The provider call only launches an out-of-band browser selector. Its result
-    // cannot tell us whether that browser opened, so always pause for pasted fields.
+  if (tool === "select_inquiry_form_fields" && ok) {
+    // The Tool waits for the out-of-band web selector. Keep the submitted fields
+    // in the Agent context and project only the safe next action locally.
     workflow.phase = "inquiry_fields_ready";
-    workflow.next_action = "confirm_inquiry_fields";
-    workflow.waiting_for = "user";
+    workflow.next_action = "manual_source_creators";
+    workflow.waiting_for = null;
+    if (text(input.platform)) workflow.platform = input.platform.trim();
   } else if (tool === "create_with_distributions" && distributionUnboundRejection) {
     const unboundHashes = new Set(
       distributionUnboundRejection.unboundSupplierIds.map((supplierId) => sha256Text(supplierId)),
@@ -1015,7 +1056,9 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
     if (tool === "manual_source_creators") {
       workflow.manual_sourcing_evidence_status = envelopeOk ? "invalid" : "unavailable";
       workflow.manual_sourcing_evidence_error = envelopeOk
-        ? "missing_or_conflicting_task_evidence"
+        ? text(input.size)
+          ? "missing_or_conflicting_inquiry_ids"
+          : "missing_or_conflicting_task_evidence"
         : "provider_call_failed_or_unknown";
     }
     if (tool === "create_with_distributions") {
@@ -1156,16 +1199,17 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
         break;
       case "rank_creators": {
         workflow.phase = "recommendation_ready";
-        workflow.next_action = "confirm_creator_recommendation";
-        workflow.waiting_for = "user";
+        workflow.next_action = "create_submission_batch";
+        workflow.waiting_for = null;
         const runId = resultText(root, ["run_id"]);
         if (runId) workflow.run_id = runId;
         break;
       }
       case "create_submission_batch":
         workflow.phase = "submission_batch_ready";
-        workflow.next_action = "record_client_feedback";
-        workflow.waiting_for = "user";
+        workflow.next_action = null;
+        workflow.waiting_for = null;
+        if (text(input.number)) workflow.submission_batch_number = input.number.trim();
         break;
       case "record_client_feedback":
         workflow.phase = "feedback_routing";
@@ -1178,18 +1222,29 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
         break;
       case "manual_source_creators":
         if (!manualEvidence) break;
-        workflow.manual_sourcing_task_id = manualEvidence.taskId;
-        workflow.manual_sourcing_inquiry_id = manualEvidence.inquiryId;
-        workflow.manual_sourcing_status = manualEvidence.status;
-        workflow.manual_sourcing_operation = manualEvidence.operation;
-        workflow.manual_sourcing_target_count = manualEvidence.targetCount;
-        workflow.manual_sourcing_started_at = manualEvidence.startedAt;
-        workflow.manual_sourcing_accepted_count = manualEvidence.acceptedCount;
-        workflow.manual_sourcing_evidence_status = "valid";
-        delete workflow.manual_sourcing_evidence_error;
-        delete workflow.pending_manual_target_count;
-        workflow.next_action = "confirm_mcn_selection";
-        workflow.waiting_for = "user";
+        if ("inquiryIds" in manualEvidence) {
+          workflow.phase = "candidate_pool_enriched";
+          workflow.requirement_id = manualEvidence.requirementId;
+          workflow.manual_sourcing_size = manualEvidence.size;
+          workflow.manual_sourcing_inquiry_ids = manualEvidence.inquiryIds;
+          workflow.manual_sourcing_evidence_status = "valid";
+          delete workflow.manual_sourcing_evidence_error;
+          workflow.next_action = "rank_creators";
+          workflow.waiting_for = null;
+        } else {
+          workflow.manual_sourcing_task_id = manualEvidence.taskId;
+          workflow.manual_sourcing_inquiry_id = manualEvidence.inquiryId;
+          workflow.manual_sourcing_status = manualEvidence.status;
+          workflow.manual_sourcing_operation = manualEvidence.operation;
+          workflow.manual_sourcing_target_count = manualEvidence.targetCount;
+          workflow.manual_sourcing_started_at = manualEvidence.startedAt;
+          workflow.manual_sourcing_accepted_count = manualEvidence.acceptedCount;
+          workflow.manual_sourcing_evidence_status = "valid";
+          delete workflow.manual_sourcing_evidence_error;
+          delete workflow.pending_manual_target_count;
+          workflow.next_action = "confirm_mcn_selection";
+          workflow.waiting_for = "user";
+        }
         break;
       case "audit_manual_adjustment":
         workflow.next_action = "confirm_creator_recommendation";

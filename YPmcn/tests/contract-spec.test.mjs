@@ -29,7 +29,9 @@ const EXPECTED_INPUTS = {
     },
   },
   select_inquiry_form_fields: {
-    required: ["url"], properties: { url: "string", timeout_seconds: "integer" },
+    required: ["platform"], properties: {
+      platform: "string", url: "string|null", timeout_seconds: "integer",
+    },
   },
   create_with_distributions: {
     required: ["requirement_id", "columns", "supplierIds"],
@@ -50,21 +52,16 @@ const EXPECTED_INPUTS = {
     properties: { inquiry_ids: "array" },
   },
   manual_source_creators: {
-    required: ["requirement_id", "target_count"],
-    properties: { requirement_id: "string", target_count: "integer" },
+    required: ["requirement_id", "size"],
+    properties: { requirement_id: "string", size: "string" },
   },
   rank_creators: {
-    required: ["requirement_id", "inquiry_ids", "columns"],
-    properties: { requirement_id: "string", inquiry_ids: "array", columns: "array" },
+    required: ["inquiry_ids"],
+    properties: { requirement_id: "string|null", inquiry_ids: "array", columns: "array|null" },
   },
   create_submission_batch: {
-    required: ["run_id"],
-    properties: {
-      run_id: "string", target_submission_count: "integer|null",
-      recommendation_item_ids: "array|null", exclude_submitted: "boolean",
-      allow_need_confirm_with_risk: "boolean", risk_confirmation: "object|null",
-      created_by: "string",
-    },
+    required: ["requirement_id", "size", "number"],
+    properties: { requirement_id: "string", size: "string", number: "string" },
   },
   record_client_feedback: {
     required: ["run_id", "feedback_items"],
@@ -117,8 +114,8 @@ describe("current Endpoint MCP contract", () => {
       endpoint: "https://mcp.eshypdata.com/sse",
       productionEndpoint: "https://mcp.eshypdata.com/sse",
       activeProfile: "development",
-      inputAuthority: "live-tools/list",
-      schemaSelection: "current-endpoint-over-old-mvp-v2",
+      inputAuthority: "approved-target-with-live-tools-list-comparison",
+      schemaSelection: "2026-07-21-live-selector-manual-rank-plus-approved-submission-target",
       ignoredToolPrefix: "pgy",
       advertisedOutputSchema: false,
     });
@@ -138,10 +135,11 @@ describe("current Endpoint MCP contract", () => {
   it("keeps the two provider semantic constraints explicit", () => {
     assert.match(profile.tools.get_workflow_state.semanticRequirement, /demand_id.*demand_version.*trace_id/);
     assert.match(profile.tools.get_recommendation_run_detail.semanticRequirement, /positive integer/);
-    assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /returned by sync/);
+    assert.deepEqual(profile.tools.rank_creators.agentRequired, ["requirement_id", "columns"]);
+    assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /manual_source_creators/);
     assert.match(
       profile.tools.rank_creators.agentSemanticRequirements.columns,
-      /exactly the same ordered key\/name object array passed to create_with_distributions/,
+      /field-selection submission/,
     );
   });
 
@@ -181,11 +179,11 @@ describe("current Endpoint MCP contract", () => {
     );
   });
 
-  it("requires a URL when opening the inquiry field selector", () => {
+  it("requires a platform when opening the inquiry field selector", () => {
     const tool = profile.tools.select_inquiry_form_fields;
-    assert.deepEqual(tool.required, ["url"]);
-    assert.equal(tool.properties.url.type, "string");
-    assert.equal(tool.properties.platform, undefined);
+    assert.deepEqual(tool.required, ["platform"]);
+    assert.deepEqual(tool.properties.platform.enum, ["xiaohongshu", "douyin"]);
+    assert.deepEqual(tool.properties.url.anyOf.map(({ type }) => type), ["string", "null"]);
   });
 
   it("does not promote runtime observations into advertised output schemas", () => {
@@ -198,7 +196,7 @@ describe("current Endpoint MCP contract", () => {
       assert.equal(output.failureEnvelope, "observed-runtime", name);
       assert.equal(output.successSchema.type, "object", name);
       assert.equal(output.successSchema.additionalProperties, true, name);
-      if (!["search_creators", "rank_mcns", "manual_source_creators"].includes(name)) {
+      if (!["search_creators", "rank_mcns"].includes(name)) {
         assert.deepEqual(output.successSchema, { type: "object", additionalProperties: true }, name);
       }
     }
@@ -215,14 +213,11 @@ describe("current Endpoint MCP contract", () => {
       profile.outputContracts.rank_mcns.successSchema.properties.data.properties.selected_mcn_risk_level.enum,
       ["high_risk", "medium_risk", "safe"],
     );
-    assert.deepEqual(profile.outputContracts.manual_source_creators.successSchema.properties.data.required, [
-      "task_id", "requirement_id", "inquiry_id", "target_count", "status", "operation", "started_at", "accepted_count",
-    ]);
-    assert.deepEqual(
-      profile.outputContracts.manual_source_creators.successSchema.properties.data.properties.status.enum,
-      ["started", "running", "completed"],
-    );
-    assert.match(profile.outputContracts.rank_creators.evidenceBasis, /run_id/);
+    assert.deepEqual(profile.outputContracts.manual_source_creators.successSchema, {
+      type: "object", additionalProperties: true,
+    });
+    assert.match(profile.outputContracts.manual_source_creators.evidenceBasis, /inquiry_ids/);
+    assert.match(profile.outputContracts.rank_creators.evidenceBasis, /filtering, deduplication/);
     assert.match(profile.outputContracts.select_inquiry_form_fields.evidenceBasis, /数据库字段名：字段备注/);
   });
 

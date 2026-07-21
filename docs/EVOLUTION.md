@@ -19,11 +19,12 @@
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:42adbbad8de773b37bbbbada00931a9943e193ed431096f2fc8b857241258862`
-变更记录摘要：`sha256:69e9ddec69f5398f42676485aa330a32b497226c11710565daa3bfb8998b0908`
+当前 Spec：`mvp-v2` · `sha256:ceaeb70063a4e3da6b35b2de91a6bb6ca0724b06092c2e3ca2b5dfd79265fa58`
+变更记录摘要：`sha256:6af6a0ffa16eb3a211547ca9a2ca4572a6dc5a60625f9d1390225dc33c442b50`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-017 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [字段选择后直接手扒并导出](../changes/CHG-2026-017-direct-manual-export.md) |
 | CHG-2026-016 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [赛后决定精确手扒补量](../changes/CHG-2026-016-post-race-manual-sourcing.md) |
 | CHG-2026-015 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [高风险供给启动达人拓展](../changes/CHG-2026-015-manual-sourcing-workflow.md) |
 | CHG-2026-014 | `IMPLEMENTED_LOCAL_TEST_ONLY` | [本地独立向量管线](../changes/CHG-2026-014-local-vector-integration.md) |
