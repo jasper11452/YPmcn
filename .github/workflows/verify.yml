@@ -20,10 +20,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             YPmcn/package-lock.json
-            vector-mcp/package-lock.json
       - uses: astral-sh/setup-uv@v6
       - run: npm ci
       - run: npm ci --prefix YPmcn
-      - run: npm ci --prefix vector-mcp
       - run: npm run verify
-
