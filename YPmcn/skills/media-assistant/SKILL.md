@@ -15,16 +15,16 @@ description: "Use for YPmcn requirement parsing, phase-independent manual creato
 - 手扒不受当前流程阶段限制。每次调用前都按 `requirement-intake.md` 重新解析需求并成功调用 `validate_requirement`；只把该响应新生成的 `requirement_id` 用于紧邻的一次手扒，禁止复用旧 ID。
 - 除上述当次新 ID 外，不检查该需求是否历史检索过或其他流程是否完成。其余 ID 仍逐项核对 ID 血缘，只复制本轮实际成功响应返回的 ID；不得猜测、串用或用虚构 ID 探测。
 - 任一步失败都停止后续业务 Tool。写结果未知时先对账，禁止盲重试；用户要求失败即停时绝不重试。
-- Hook 只硬校验手扒的一次性新需求 ID 和企微外发确认，不把 phase、历史检索或其他流程完成度当作手扒门槛；本地状态只按实际成功结果推进，preview 不限制 Skill 读取或其他 Tool。
+- Hook 只硬校验手扒的一次性新需求 ID 和企微外发确认，不把 phase、历史检索或其他流程完成度当作手扒门槛；它会对相同需求 ID 的连续 `rank_creators` 调用给出非阻断提示。本地状态只按实际成功结果推进，preview 不限制 Skill 读取或其他 Tool。
 
 ## 主链
 
 `select_inquiry_form_fields → validate_requirement → manual_source_creators → rank_creators → create_submission_batch`
 
-1. 仅需要导出时先执行 `select_inquiry_form_fields({platform})`，等待网页选择并按原序保留非空 `key/name` 字段；只手扒时跳过。
+1. 仅需要导出时执行一次 `select_inquiry_form_fields({platform})`；直接使用 Tool 等待网页 callback 后返回的本次选择，按原序保留非空 `key/name` 字段，禁止在 Tool 返回后重新打开网页。只手扒时跳过。
 2. 紧接手扒前重新解析完整需求并调用 `validate_requirement`；新建参数不得携带旧 `id/demandVersion`，也不要自动插入 `search_creators`。
 3. 仅用第 2 步实际成功响应新生成的 ID 调用 `manual_source_creators({requirement_id,size})`；该 ID 用后即失效，禁止发送 `target_count`。
-4. 需要导出时，只取手扒成功响应的非空 `inquiry_ids`，连同相同 `requirement_id` 和本轮 `columns` 调用 `rank_creators` 筛选去重。
+4. 需要导出时，只取手扒成功响应的非空 `inquiry_ids`，连同相同 `requirement_id` 和本轮 `columns` 调用 `rank_creators` 筛选去重。每次调用前将入参 `requirement_id` 与上一次 `rank_creators` 调用比较；相同时先提示“已根据需求进行排序，请注意”，但仍继续调用，不得阻止或要求额外确认。
 5. `rank_creators` 成功后同轮调用 `create_submission_batch({requirement_id,size,number})` 导出表格；禁止发送 `run_id` 或旧批次选项。
 
 `requirement_id`、`size` 在手扒与导出步骤必须完全一致；`inquiry_ids` 和 `columns` 必须来自本轮前序成功结果。`validate_requirement` 与手扒之间不得插入其他业务 Tool；导出链中不要插入搜索、赛马、企微分发、详情查询、宿主 CSV 导出或额外确认。

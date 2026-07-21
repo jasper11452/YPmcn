@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "profile": "mvp-v2",
   "skills": {
     "media-assistant": {
@@ -36,6 +36,17 @@
         ],
         "phasePolicy": {
           "manual_source_creators": "phase-independent-after-fresh-requirement-validation"
+        },
+        "interactionPolicy": {
+          "fieldSelection": {
+            "resultSource": "actual fields returned by the select_inquiry_form_fields webpage callback",
+            "reopenSelectorAfterToolResult": false
+          },
+          "rankCreatorsRepeatNotice": {
+            "when": "the current requirement_id equals the immediately previous rank_creators call requirement_id",
+            "message": "已根据需求进行排序，请注意",
+            "blocksToolCall": false
+          }
         },
         "preconditions": {
           "manual_source_creators": [

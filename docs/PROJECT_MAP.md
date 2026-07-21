@@ -24,7 +24,7 @@
 <!-- human-docs:contract-map:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-Spec 摘要：`sha256:4fd0f8752388ec28c41f96612d64fcb8714e5c193752d67da6cd51856ac36b09`
+Spec 摘要：`sha256:7eb0dcb71ac715854b0ce33495e84d3d72b916373c558ad969ca8f4d815db1d6`
 
 | 领域 | 唯一权威 | 人类理解 |
 | --- | --- | --- |

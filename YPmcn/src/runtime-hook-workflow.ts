@@ -1030,8 +1030,8 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
   }
 
   if (tool === "select_inquiry_form_fields" && ok) {
-    // The Tool waits for the out-of-band web selector. Keep the submitted fields
-    // in the Agent context and project only the safe next action locally.
+    // The Tool waits for the selector callback and returns the submitted fields.
+    // Keep those fields in Agent context and project only the safe next action.
     workflow.phase = "inquiry_fields_ready";
     workflow.next_action = "validate_requirement";
     workflow.waiting_for = null;

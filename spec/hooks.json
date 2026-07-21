@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "profile": "mvp-v2",
   "implementation": "YPmcn/src/index.ts",
   "handlerImplementation": "YPmcn/src/runtime-hooks.ts",
@@ -11,12 +11,12 @@
       "script": "YPmcn/src/index.ts"
     },
     "before_tool_call": {
-      "responsibility": "one_time_fresh_manual_requirement_binding_plus_native_exact_call_external_send_approval_and_shell_bypass_guard",
+      "responsibility": "one_time_fresh_manual_requirement_binding_plus_non_blocking_repeated_rank_requirement_notice_plus_native_exact_call_external_send_approval_and_shell_bypass_guard",
       "mayBlock": true,
       "script": "YPmcn/src/runtime-hooks.ts"
     },
     "after_tool_call": {
-      "responsibility": "record_actual_tool_results_and_local_workflow_transitions",
+      "responsibility": "record_actual_tool_results_and_local_workflow_transitions_without_reopening_the_field_selector",
       "mayBlock": false,
       "script": "YPmcn/src/runtime-hooks.ts"
     },
@@ -46,6 +46,8 @@
       "one_time_confirmation_fingerprints",
       "manual_sourcing_fresh_requirement_receipt_binding",
       "one_time_manual_requirement_consumption",
+      "non_blocking_repeated_rank_requirement_notice",
+      "callback_returned_field_selection_reuse_without_browser_reopen",
       "local_workflow_phase_and_next_action_recording"
     ],
     "doesNotOwn": [
@@ -53,6 +55,8 @@
       "requirement_input_validation",
       "tool_parameter_validation",
       "workflow_order_enforcement",
+      "rank_creators_duplicate_call_blocking",
+      "field_selector_browser_opening_or_reopening",
       "identifier_provenance_enforcement_beyond_current_manual_requirement_receipt",
       "historical_requirement_or_search_lookup",
       "provider_requirement_id_uniqueness",
@@ -80,6 +84,17 @@
       "checksHistoricalSearch": false,
       "checksOtherWorkflowCompletion": false,
       "storesRawRequirementId": false
+    },
+    "rankCreatorsRepeatNotice": {
+      "comparison": "current rank_creators.requirement_id equals the immediately previous rank_creators call in the same state scope",
+      "message": "已根据需求进行排序，请注意",
+      "mayBlock": false,
+      "storesRawRequirementId": false
+    },
+    "fieldSelectionCallback": {
+      "resultSource": "actual fields returned by select_inquiry_form_fields after its webpage callback",
+      "reopenSelectorAfterToolResult": false,
+      "storesRawFields": false
     }
   },
   "legacyArtifacts": {

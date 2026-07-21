@@ -133,6 +133,20 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertNotIn(obsolete, routing)
 
+    def test_field_callback_and_repeat_rank_guidance_are_non_blocking(self):
+        text = "\n".join((
+            read(SKILL),
+            read(REFERENCES / "form-field-mapping.md"),
+            read(REFERENCES / "frontend-response.md"),
+        ))
+        for required in (
+            "Tool 等待网页 callback 后返回的本次选择",
+            "禁止在 Tool 返回后重新打开网页",
+            "已根据需求进行排序，请注意",
+            "仍继续调用，不得阻止",
+        ):
+            self.assertIn(required, text)
+
     def test_workflow_reference_routes_to_machine_contract_and_direct_order(self):
         text = read(REFERENCES / "execution-gates.md")
         for required in (
@@ -156,7 +170,7 @@ class SkillPackageContractTest(unittest.TestCase):
         for required in (
             "写结果未知",
             "只有实际 MCP 成功响应才是后续证据",
-            "字段页面取消、超时或返回无效字段时停止",
+            "字段页面取消、callback 超时或 Tool 返回无效字段时停止",
             "只接受该手扒成功响应中的非空、唯一字符串 `inquiry_ids`",
             "不得改用旧 `run_id`",
             "禁止盲重试",

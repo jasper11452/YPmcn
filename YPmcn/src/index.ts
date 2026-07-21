@@ -1,5 +1,4 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { callGatewayTool } from "openclaw/plugin-sdk/browser-setup-tools";
 import {
   afterTool,
   beforeTool,
@@ -8,7 +7,7 @@ import {
   isManualSourcingAttempt,
   withStateScope,
 } from "./runtime-hooks.js";
-import { normalize, renderLocalWorkflowContext } from "./runtime-hook-workflow.js";
+import { renderLocalWorkflowContext } from "./runtime-hook-workflow.js";
 import {
   buildStandardBriefReadyPayload,
   isStandardBrief,
@@ -46,42 +45,6 @@ function hookStateScope(event: any, ctx?: any): string | undefined {
     ctx?.chatId, event?.chatId,
   ]
     .find((value) => typeof value === "string" && value.trim())?.trim();
-}
-
-const DEMAND_FIELD_SELECTOR_CALLBACK_PREFIX = "https://agenta.eshypdata.com/demand-field-selector?callback";
-
-function findReturnedFieldSelectorUrl(value: unknown, seen = new Set<object>()): string | undefined {
-  if (typeof value === "string") {
-    const start = value.indexOf(DEMAND_FIELD_SELECTOR_CALLBACK_PREFIX);
-    if (start < 0) return undefined;
-    return value.slice(start).split(/[\s"'<>]/, 1)[0];
-  }
-  if (!value || typeof value !== "object" || seen.has(value)) return undefined;
-  seen.add(value);
-  for (const nested of Array.isArray(value) ? value : Object.values(value)) {
-    const url = findReturnedFieldSelectorUrl(nested, seen);
-    if (url) return url;
-  }
-  return undefined;
-}
-
-async function openHostUrl(url: string): Promise<void> {
-  await callGatewayTool(
-    "browser.request",
-    { timeoutMs: 15_000 },
-    {
-      method: "POST",
-      path: "/tabs/open",
-      body: { url },
-      timeoutMs: 15_000,
-    },
-    { scopes: ["operator.write"] },
-  );
-}
-
-function isInquiryFieldSelectionCall(event: any): boolean {
-  const raw = String(event?.toolName ?? event?.name ?? "").trim();
-  return normalize(raw) === "select_inquiry_form_fields";
 }
 
 export function buildRequirementRuntimeClock(now = new Date(), timeZone = localTimeZone()): string {
@@ -134,8 +97,8 @@ YPmcn phase-independent manual-sourcing fast path:
 - The Hook checks only this one-time fresh-ID binding for manual sourcing. Do not check whether that requirement was searched before, and do not require field selection, search, MCN racing, distribution, or any other workflow step to be complete. If another YPmcn business Tool is called after validation, or the ID is missing, mismatched, or already consumed, parse and validate the requirement again.
 - For manual sourcing without export, the exact business sequence is validate_requirement -> manual_source_creators. Read each packaged references/tools/<tool>.json immediately before its call. After validation succeeds, skip the normal search_creators continuation and call manual_source_creators({requirement_id,size}) with exactly the newly returned ID and the confirmed positive-integer decimal string size. Never send target_count.
 - For manual sourcing plus export, the exact business sequence is select_inquiry_form_fields -> validate_requirement -> manual_source_creators -> rank_creators -> create_submission_batch. Confirm platform, the complete requirement, size, and number; never ask for or reuse a pre-existing requirement_id. size and number are positive-integer decimal strings.
-- In the export flow, first call select_inquiry_form_fields({platform}). The Tool opens the web selector and waits for submission. Preserve the submitted non-empty unique fields as ordered {key,name} columns. A cancelled, timed-out, failed, or invalid selection stops the export flow. Then perform the fresh validation and immediately call manual_source_creators.
-- Continue only when the actual successful manual response provides a non-empty array of unique string inquiry_ids; never invent, convert, or reuse IDs. Call rank_creators with those exact inquiry_ids, the same fresh requirement_id, and the selected columns. Do not send limit. If it fails or its write result is unknown, do not export.
+- In the export flow, first call select_inquiry_form_fields({platform}) exactly once. The Tool waits for the selector callback and returns the submitted fields; use that actual result directly as ordered non-empty unique {key,name} columns. Never open or reopen a selector URL after the Tool returns. A cancelled, timed-out, failed, or invalid selection stops the export flow. Then perform the fresh validation and immediately call manual_source_creators.
+- Continue only when the actual successful manual response provides a non-empty array of unique string inquiry_ids; never invent, convert, or reuse IDs. Before every rank_creators call, compare its requirement_id with the immediately previous rank_creators call. If they match, tell the user exactly “已根据需求进行排序，请注意”, then continue the Tool call without blocking it. Call rank_creators with those exact inquiry_ids, the same fresh requirement_id, and the selected columns. Do not send limit. If it fails or its write result is unknown, do not export.
 - Immediately after rank_creators succeeds, call create_submission_batch({requirement_id,size,number}). requirement_id and size must exactly match the manual call; number is the confirmed batch number. This Tool is the spreadsheet exporter. Never send run_id, legacy submission options, or call host export_csv.
 - The injected state/confirmation_guard.json phase and next_action are the local orchestration projection. Actual MCP results remain the only business evidence. Any failed step stops before the next business Tool; an unknown write result must be reconciled and never blindly retried.
 - If a required Tool is absent or its live schema conflicts with the packaged target contract, return integration_required. Do not fall back to legacy arguments, another Skill, shell, curl, direct HTTP, or database access.`;
@@ -144,13 +107,12 @@ type RuntimeHookHandlers = {
   beforeTool: typeof beforeTool;
   afterTool: typeof afterTool;
   endSession: typeof endSession;
-  openUrl: (url: string) => Promise<unknown> | unknown;
 };
 
 export function createYpmcnPlugin(
   overrides: Partial<RuntimeHookHandlers> = {},
 ): ReturnType<typeof definePluginEntry> {
-  const runtime = { beforeTool, afterTool, endSession, openUrl: openHostUrl, ...overrides };
+  const runtime = { beforeTool, afterTool, endSession, ...overrides };
   return definePluginEntry({
     id: "ypmcn-media-assistant",
     name: "YPmcn 媒介助手",
@@ -181,7 +143,7 @@ export function createYpmcnPlugin(
 
     api.on("before_tool_call", async (event, ctx) => withStateScope(hookStateScope(event, ctx), () => {
       try {
-        return runtime.beforeTool(event, ctx, rootDir);
+        return runtime.beforeTool(event, ctx, rootDir, (message) => api.logger.warn(message));
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         api.logger.error(`before_tool_call guard failed: ${reason}`);
@@ -190,19 +152,11 @@ export function createYpmcnPlugin(
       }
     }));
 
-    api.on("after_tool_call", async (event, ctx) => withStateScope(hookStateScope(event, ctx), async () => {
+    api.on("after_tool_call", async (event, ctx) => withStateScope(hookStateScope(event, ctx), () => {
       try {
         runtime.afterTool(event, ctx, rootDir);
       } catch (error) {
         api.logger.error(`after_tool_call receipt update failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      if (!isInquiryFieldSelectionCall(event)) return;
-      const selectorUrl = findReturnedFieldSelectorUrl(event?.result);
-      if (!selectorUrl) return;
-      try {
-        await runtime.openUrl(selectorUrl);
-      } catch (error) {
-        api.logger.error(`failed to open inquiry field selector: ${error instanceof Error ? error.message : String(error)}`);
       }
     }));
 

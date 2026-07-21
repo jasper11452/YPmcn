@@ -93,6 +93,15 @@ describe("Spec governance", () => {
       mediaAssistant.toolPolicy.phasePolicy.manual_source_creators,
       "phase-independent-after-fresh-requirement-validation",
     );
+    assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.fieldSelection, {
+      resultSource: "actual fields returned by the select_inquiry_form_fields webpage callback",
+      reopenSelectorAfterToolResult: false,
+    });
+    assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.rankCreatorsRepeatNotice, {
+      when: "the current requirement_id equals the immediately previous rank_creators call requirement_id",
+      message: "已根据需求进行排序，请注意",
+      blocksToolCall: false,
+    });
     assert.deepEqual(mediaAssistant.toolPolicy.preconditions.manual_source_creators, [
       "validate_requirement_succeeded_immediately_before_this_call",
       "requirement_id_equals_the_fresh_id_returned_by_that_validation",
@@ -138,6 +147,13 @@ describe("Spec governance", () => {
       ...source.matchAll(/api\.on\(\s*"([^"]+)"/g),
     ].map((match) => match[1]);
     assert.deepEqual(registeredEvents.sort(), Object.keys(hooks.events).sort());
+    assert.deepEqual(hooks.boundaries.rankCreatorsRepeatNotice, {
+      comparison: "current rank_creators.requirement_id equals the immediately previous rank_creators call in the same state scope",
+      message: "已根据需求进行排序，请注意",
+      mayBlock: false,
+      storesRawRequirementId: false,
+    });
+    assert.equal(hooks.boundaries.fieldSelectionCallback.reopenSelectorAfterToolResult, false);
   });
 
   it("pins the observed database authority, identities, ownership, and recommendation path", () => {

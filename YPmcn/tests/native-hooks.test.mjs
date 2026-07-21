@@ -222,6 +222,9 @@ describe("YP Action native hooks", () => {
     assert.match(YPMCN_FAST_PATH, /Do not check whether that requirement was searched before/);
     assert.match(YPMCN_FAST_PATH, /manual_source_creators\(\{requirement_id,size\}\)/);
     assert.match(YPMCN_FAST_PATH, /actual successful manual response provides[^]*inquiry_ids/);
+    assert.match(YPMCN_FAST_PATH, /Never open or reopen a selector URL after the Tool returns/);
+    assert.match(YPMCN_FAST_PATH, /已根据需求进行排序，请注意/);
+    assert.match(YPMCN_FAST_PATH, /continue the Tool call without blocking it/);
     assert.match(YPMCN_FAST_PATH, /create_submission_batch\(\{requirement_id,size,number\}\)/);
     assert.match(YPMCN_FAST_PATH, /This Tool is the spreadsheet exporter/);
     assert.match(YPMCN_FAST_PATH, /age1Rate\.\.age6Rate are direct JSON numbers/);
@@ -257,6 +260,39 @@ describe("YP Action native hooks", () => {
       if (name === "create_with_distributions") askInputFrom(result);
       else assert.equal(result, undefined, name);
     }
+  });
+
+  it("warns without blocking when consecutive rank calls use the same requirement ID", async () => {
+    const localHooks = new Map();
+    const warnings = [];
+    createYpmcnPlugin().register({
+      rootDir: tempDir,
+      logger: {
+        error() {},
+        warn(message) { warnings.push(message); },
+      },
+      on(name, handler) { localHooks.set(name, handler); },
+    });
+    const rankParams = (requirement_id) => ({
+      requirement_id,
+      inquiry_ids: ["31"],
+      columns: [{ key: "kwUid", name: "达人 ID" }],
+    });
+
+    for (const requirementId of ["requirement-repeat-1", "requirement-repeat-1", "requirement-repeat-2", "requirement-repeat-2"]) {
+      assert.equal(await localHooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__rank_creators",
+        params: rankParams(requirementId),
+      }, {}), undefined);
+    }
+
+    assert.deepEqual(warnings, [
+      "已根据需求进行排序，请注意",
+      "已根据需求进行排序，请注意",
+    ]);
+    const persisted = readFileSync(stateFile, "utf8");
+    assert.match(persisted, /"last_rank_creators_requirement_id_sha256": "[0-9a-f]{64}"/);
+    assert.doesNotMatch(persisted, /requirement-repeat/);
   });
 
   it("requires and consumes the immediately preceding fresh requirement ID for every manual call", async () => {
@@ -1207,71 +1243,37 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.submission_batch_number, "2");
   });
 
-  it("opens only a callback URL returned by select_inquiry_form_fields", async () => {
+  it("uses callback-returned fields without reopening the selector", async () => {
     const localHooks = new Map();
     const openedUrls = [];
     createYpmcnPlugin({
       openUrl(url) { openedUrls.push(url); },
     }).register({
       rootDir: tempDir,
-      logger: { error() {} },
+      logger: { error() {}, warn() {} },
       on(name, handler) { localHooks.set(name, handler); },
     });
 
-    for (const event of [
-      {
-        toolName: "mcp__ypmcn__select_inquiry_form_fields",
-        params: { platform: "xiaohongshu" },
-        result: {
-          success: true,
-          data: {
-            url: "https://agenta.eshypdata.com/demand-field-selector?callback=selection-1&platform=xiaohongshu",
-          },
-          error: null,
-        },
-      },
-      {
-        toolName: "mcp__ypmcn__select_inquiry_form_fields",
-        params: { platform: "xiaohongshu" },
-        error: "connection lost",
-      },
-    ]) {
-      await localHooks.get("after_tool_call")(event, {});
-    }
-
-    assert.deepEqual(openedUrls, [
-      "https://agenta.eshypdata.com/demand-field-selector?callback=selection-1&platform=xiaohongshu",
-    ]);
-
-    const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.workflow.phase, "inquiry_fields_ready");
-    assert.equal(state.workflow.next_action, "recover_select_inquiry_form_fields");
-    assert.equal(state.workflow.waiting_for, "user");
-  });
-
-  it("does not alter Tool handling when the host cannot open the field selector", async () => {
-    const localHooks = new Map();
-    const errors = [];
-    createYpmcnPlugin({
-      openUrl() { throw new Error("browser unavailable"); },
-    }).register({
-      rootDir: tempDir,
-      logger: { error(message) { errors.push(message); } },
-      on(name, handler) { localHooks.set(name, handler); },
-    });
-
-    assert.equal(await localHooks.get("after_tool_call")({
+    await localHooks.get("after_tool_call")({
       toolName: "mcp__ypmcn__select_inquiry_form_fields",
       params: { platform: "xiaohongshu" },
       result: {
         success: true,
-        content: [{
-          type: "text",
-          text: "请打开 https://agenta.eshypdata.com/demand-field-selector?callback=selection-2",
-        }],
+        data: {
+          fields: [
+            { key: "kwUid", name: "达人 ID" },
+            { field_key: "nickname", field_name: "达人昵称", type: "string" },
+          ],
+          callback_url: "https://agenta.eshypdata.com/demand-field-selector?callback=selection-1&platform=xiaohongshu",
+        },
+        error: null,
       },
-    }, {}), undefined);
-    assert.deepEqual(errors, ["failed to open inquiry field selector: browser unavailable"]);
+    }, {});
+
+    assert.deepEqual(openedUrls, []);
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "inquiry_fields_ready");
+    assert.equal(state.workflow.next_action, "validate_requirement");
   });
 
   it("isolates workflow and AskUserQuestion confirmation state by host session", async () => {
