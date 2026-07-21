@@ -222,6 +222,10 @@ describe("YP Action native hooks", () => {
     assert.match(YPMCN_FAST_PATH, /Do not check whether that requirement was searched before/);
     assert.match(YPMCN_FAST_PATH, /manual_source_creators\(\{requirement_id,size\}\)/);
     assert.match(YPMCN_FAST_PATH, /actual successful manual response provides[^]*inquiry_ids/);
+    assert.match(YPMCN_FAST_PATH, /show every actually returned creator record in a Markdown table/);
+    assert.match(YPMCN_FAST_PATH, /平台=platform; 达人ID=douyinId when platform is douyin or xiaohongshuId when platform is xiaohongshu/);
+    assert.match(YPMCN_FAST_PATH, /达人昵称=nickname; 内容标签=contentTag; 主页链接=kwUserUrl/);
+    assert.match(YPMCN_FAST_PATH, /missing or null value as -[^]*never invent values or expose inquiry_ids/);
     assert.match(YPMCN_FAST_PATH, /Never open or reopen a selector URL after the Tool returns/);
     assert.match(YPMCN_FAST_PATH, /已根据需求进行排序，请注意/);
     assert.match(YPMCN_FAST_PATH, /continue the Tool call without blocking it/);

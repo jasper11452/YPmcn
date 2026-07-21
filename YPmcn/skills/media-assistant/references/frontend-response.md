@@ -6,7 +6,7 @@
 
 每次手扒前重新解析需求并取得新 ID；不要向用户展示该 ID。无当前新 ID、ID 错配或重复使用被本地拒绝时，说明需重新解析本次需求，不得改用旧 ID。
 
-`manual_source_creators` 成功后只展示已按用户数量启动或完成手扒；不要展示 `inquiry_ids`。立即用实际返回的询价集合调用 `rank_creators`，不得把通用 `success=true` 当作可排序证据。
+`manual_source_creators` 成功后，必须将实际返回的每条达人记录展示为 Markdown 表格，表头固定为 `| 平台 | 达人ID | 达人昵称 | 内容标签 | 主页链接 |`。字段依次读取 `platform`；抖音记录的 `douyinId` 或小红书记录的 `xiaohongshuId`；`nickname`；`contentTag`；`kwUserUrl`。缺失或 `null` 值写 `-`，不要猜测或补造，也不要展示 `inquiry_ids`。导出场景展示后立即用实际返回的询价集合调用 `rank_creators`，不增加确认；不得把通用 `success=true` 当作可排序证据。
 
 每次调用 `rank_creators` 前比较入参需求 ID 与上一次调用；相同时先原样提示“已根据需求进行排序，请注意”，随后照常调用，不弹确认、不停止。`rank_creators` 成功后不等待额外确认、不查询详情、不调用宿主 `export_csv`，直接调用 `create_submission_batch({requirement_id,size,number})`。最终只依据该 Tool 的实际响应报告表格是否导出，并提供响应中真实存在的文件入口；不得伪造文件名、路径或下载链接。
 

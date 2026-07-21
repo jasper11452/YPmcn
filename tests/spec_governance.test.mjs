@@ -97,6 +97,24 @@ describe("Spec governance", () => {
       resultSource: "actual fields returned by the select_inquiry_form_fields webpage callback",
       reopenSelectorAfterToolResult: false,
     });
+    assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.manualSourcingResultTable, {
+      format: "markdown-table",
+      columns: [
+        { label: "平台", source: "platform" },
+        {
+          label: "达人ID",
+          sourceByPlatform: {
+            douyin: "douyinId",
+            xiaohongshu: "xiaohongshuId",
+          },
+        },
+        { label: "达人昵称", source: "nickname" },
+        { label: "内容标签", source: "contentTag" },
+        { label: "主页链接", source: "kwUserUrl" },
+      ],
+      missingValue: "-",
+      exposeInquiryIds: false,
+    });
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.rankCreatorsRepeatNotice, {
       when: "the current requirement_id equals the immediately previous rank_creators call requirement_id",
       message: "已根据需求进行排序，请注意",

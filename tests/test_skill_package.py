@@ -147,6 +147,21 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertIn(required, text)
 
+    def test_manual_sourcing_results_are_rendered_as_a_creator_table(self):
+        text = read(REFERENCES / "frontend-response.md")
+        for required in (
+            "| 平台 | 达人ID | 达人昵称 | 内容标签 | 主页链接 |",
+            "`platform`",
+            "`douyinId`",
+            "`xiaohongshuId`",
+            "`nickname`",
+            "`contentTag`",
+            "`kwUserUrl`",
+            "缺失或 `null` 值写 `-`",
+            "不要展示 `inquiry_ids`",
+        ):
+            self.assertIn(required, text)
+
     def test_workflow_reference_routes_to_machine_contract_and_direct_order(self):
         text = read(REFERENCES / "execution-gates.md")
         for required in (
