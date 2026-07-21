@@ -30,10 +30,10 @@
 | 正式契约域 | 8 个 |
 | MCP Tool | 15 个（必需 15，可选 0） |
 | Workflow / Hook | 12 个阶段 / 4 个事件 |
-| 数据库证明 | 5 项不变量，`development-observed` |
+| 数据库证明 | 6 项不变量，`development-observed` |
 | 算法定义 | `external-unverified` |
 | 兼容检测 | `legacy-1.9.4` |
-| Spec 摘要 | `sha256:f28f1677ab00a4d403a00844c767aae7d61a5775a550a9dea93bddd1eaddac36` |
+| Spec 摘要 | `sha256:d834bfcad02922203ca2e29645129a569729fb97622974a13f746b476df7edd5` |
 <!-- human-docs:spec-summary:end -->
 
 ## 五条原则

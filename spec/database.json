@@ -409,8 +409,8 @@
       "targetWrites": [
         "mcn_inquiries"
       ],
-      "targetInquiryBehavior": "In the same successful transaction as the current requirement's MCN recommendation plan, create or resolve its inquiry association and return the real inquiry_id. A success response without inquiry_id cannot precede manual_source_creators.",
-      "currentLimitation": "The remote Provider has not been write-verified to persist and return this inquiry association from rank_mcns."
+      "targetInquiryBehavior": "In the same successful transaction as the current requirement's MCN recommendation plan, create or resolve its inquiry association; bind the actual selected supplier set to its (platform, kwUid)-deduplicated creator coverage union, multiplier, risk, conditional formula gap, and calculation version; then return the real inquiry_id and decision evidence. Incomplete evidence cannot precede manual_source_creators or distribution.",
+      "currentLimitation": "The remote Provider has not been write-verified to persist and return the inquiry association or selected-supplier coverage decision from rank_mcns."
     },
     "select_inquiry_form_fields": {
       "reads": [],
@@ -597,6 +597,11 @@
       "id": "manual-sourcing-task-store-unverified",
       "severity": "high",
       "effect": "The observed database contract has no verified durable manual-sourcing task entity; production start, idempotency, recovery, and executor ownership must be implemented and verified in the Provider repository before enabling the 3.4.0 manual branch."
+    },
+    {
+      "id": "selected-mcn-coverage-union-unverified",
+      "severity": "high",
+      "effect": "No observed persisted snapshot proves that rank_mcns binds the media-selected supplier set to a (platform, kwUid)-deduplicated creator coverage union; post-race multiplier and exact manual sourcing stay blocked until Provider implementation and migration evidence exist."
     }
   ],
   "invariants": [
@@ -623,6 +628,11 @@
     {
       "id": "authoritative-inquiry-sync",
       "requirement": "rank_mcns creates the inquiry association before manual sourcing; sync later reads provider state and maintains that inquiry before ingest.",
+      "status": "not-implemented"
+    },
+    {
+      "id": "selected-mcn-coverage-binding",
+      "requirement": "The actual inquiry supplier set, its (platform, kwUid)-deduplicated coverage union, multiplier, risk band, formula gap, and calculation version are persisted as one immutable decision snapshot before manual sourcing or distribution.",
       "status": "not-implemented"
     }
   ]

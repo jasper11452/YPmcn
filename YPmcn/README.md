@@ -7,9 +7,10 @@ YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。
 ```text
 validate_requirement
 → search_creators(id)
-→ 展示 Provider 风险、硬缺口与缓冲补量 → AskUserQuestion 确认
-→ rank_mcns(id, platform, 动态排序数量) 创建并返回 inquiry_id
-→ 高风险且确认拓展时 manual_source_creators(requirement_id, target_count) 启动/复用关联任务
+→ 展示赛前刊例资源倍率与 20/30 倍风险 → AskUserQuestion 确认（无精确手扒数）
+→ rank_mcns(id, platform, 动态排序数量) 绑定实际已选机构，返回 inquiry_id 与覆盖去重并集
+→ 赛后倍率 <20 时按 需求数×20−覆盖数 一键确认精确手扒补量
+→ 已确认时 manual_source_creators(requirement_id, target_count) 启动/复用关联任务
 → 按名称展示 MCN排序结果 → 确认
 → select_inquiry_form_fields(url)
 → create_with_distributions(requirement_id, supplierIds, columns, description, wechat_notification_message=description)
@@ -23,7 +24,7 @@ validate_requirement
 → record_client_feedback(run_id, feedback_items)
 ```
 
-高风险供给的达人拓展确认先授权 MCN排序建立询价关联，再授权两字段任务启动；`rank_mcns` 缺少真实 `inquiry_id` 时不得调用达人拓展，任务回执未回显同一询价关联时也不得声称已启动。该 `inquiry_id` 不作为达人拓展额外入参。发送成功并能从真实 project/distribution 镜像询价后进入 `waiting_mcn_return`。只有企微发送成功且回收完成才能进入 `candidate_pool_enriched` 并调用 `rank_creators`；达人拓展任务不能替代这两个状态事实。
+精确手扒数量只在 MCN 赛马后决定：实际已选机构覆盖去重并集 `<20` 倍为高危，`20≤倍率<30` 为中风险，`≥30` 为安全。`rank_mcns` 缺少真实 `inquiry_id`、机构集合或覆盖证据时不得调用达人拓展；后续外发机构集合变化也必须重算。该 `inquiry_id` 不作为达人拓展额外入参。发送成功并能从真实 project/distribution 镜像询价后进入 `waiting_mcn_return`；只有企微发送成功且回收完成才能进入 `candidate_pool_enriched`。
 
 ## Hook 边界
 

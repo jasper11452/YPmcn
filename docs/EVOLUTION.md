@@ -19,11 +19,12 @@
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:f28f1677ab00a4d403a00844c767aae7d61a5775a550a9dea93bddd1eaddac36`
-变更记录摘要：`sha256:159696ed4b986f824d44a1dff1223c22a92903dcdabc059b1415a2c8aee00db0`
+当前 Spec：`mvp-v2` · `sha256:d834bfcad02922203ca2e29645129a569729fb97622974a13f746b476df7edd5`
+变更记录摘要：`sha256:69e9ddec69f5398f42676485aa330a32b497226c11710565daa3bfb8998b0908`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-016 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [赛后决定精确手扒补量](../changes/CHG-2026-016-post-race-manual-sourcing.md) |
 | CHG-2026-015 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [高风险供给启动达人拓展](../changes/CHG-2026-015-manual-sourcing-workflow.md) |
 | CHG-2026-014 | `IMPLEMENTED_LOCAL_TEST_ONLY` | [本地独立向量管线](../changes/CHG-2026-014-local-vector-integration.md) |
 | CHG-2026-013 | `SPEC_APPROVED` | [建立向量检索 MVP 正式契约基线](../changes/CHG-2026-013-vector-contract-baseline.md) |

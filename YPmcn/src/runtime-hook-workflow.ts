@@ -20,12 +20,15 @@ const EXTERNAL_SEND_CONFIRM_LABEL = "确认发送";
 const EXTERNAL_SEND_CANCEL_LABEL = "取消发送";
 const EXTERNAL_SEND_CONFIRMATION_MARKER = "EXTERNAL_SEND_CONFIRMATION_REQUIRED";
 const SEARCH_CONFIRMATION_HEADER = "供给确认";
-const MANUAL_TARGET_CONFIRMATION_HEADER = "达人拓展数量";
+const POST_RACE_MANUAL_CONFIRMATION_HEADER = "赛后补量";
 const MCN_CONFIRMATION_HEADER = "MCN确认";
 const FIELD_CONFIRMATION_HEADER = "字段确认";
-const START_MANUAL_AND_MCN_LABEL = "启动达人拓展并开始MCN排序";
-const MCN_ONLY_LABEL = "仅开始MCN排序";
-const ADJUST_MANUAL_TARGET_LABEL = "调整达人拓展数量";
+const START_MCN_RACE_LABEL = "开始MCN赛马";
+const CONTINUE_MCN_RACE_LABEL = "仍继续MCN赛马";
+const PAUSE_FOR_SUPPLY_LABEL = "先扩充机构或预手扒";
+const START_POST_RACE_MANUAL_LABEL = "一键发起手扒补量";
+const REVISE_MCN_SELECTION_LABEL = "追加机构后重新计算";
+const SKIP_POST_RACE_MANUAL_LABEL = "暂不补量，继续询价";
 const MANUAL_TASK_STATUSES = new Set(["started", "running", "completed"]);
 const MANUAL_TASK_OPERATIONS = new Set(["created", "reused"]);
 const DISTRIBUTION_SENT_STATUSES = new Set(["sent", "delivered"]);
@@ -180,27 +183,6 @@ function answerForQuestion(event: Json, input: Json): string | undefined {
   return undefined;
 }
 
-function freeformAnswerForQuestion(event: Json, input: Json): string | undefined {
-  if (event.error) return undefined;
-  const question = firstQuestion(input);
-  if (!question || !text(question.question)) return undefined;
-  const questionText = question.question.trim();
-  for (const candidate of answerValues(event.result ?? event.message)) {
-    const prefix = `${questionText}: `;
-    if (candidate.startsWith(prefix)) return candidate.slice(prefix.length).trim();
-    if (candidate !== questionText) return candidate;
-  }
-  return undefined;
-}
-
-function positiveManualTarget(value: string | undefined): number | undefined {
-  if (!value) return undefined;
-  const matched = /^(?:达人拓展新增|新增|目标)?\s*(\d+)\s*(?:位|个)?$/u.exec(value.normalize("NFKC").trim());
-  if (!matched) return undefined;
-  const target = Number(matched[1]);
-  return Number.isSafeInteger(target) && target > 0 ? target : undefined;
-}
-
 function echoedExternalSendSelection(event: Json): { question: string; answer: string } | undefined {
   if (event.error) return undefined;
   for (const candidate of answerValues(event.result ?? event.message)) {
@@ -279,72 +261,59 @@ function approvedTargetData(root: unknown): Json | undefined {
   return envelope.data as Json;
 }
 
+type SupplyRiskLevel = "high_risk" | "medium_risk" | "safe";
+
+function supplyRiskLevel(coverageCount: number, demandCount: number): SupplyRiskLevel {
+  if (coverageCount < demandCount * 20) return "high_risk";
+  if (coverageCount < demandCount * 30) return "medium_risk";
+  return "safe";
+}
+
+function multiplierMatches(value: unknown, coverageCount: number, demandCount: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 &&
+    Math.abs(value - coverageCount / demandCount) <= 0.01;
+}
+
 type SearchSupplyEvidence = {
   demandCount: number;
-  eligibleCreatorCount: number;
-  supplyRatio: number;
-  hardShortfallCount: number;
-  bufferShortfallCount: number;
-  supplyRiskLevel: "low_risk" | "medium_risk" | "high_risk";
-  suggestedExpansionCount: number;
-  mcnCoveredCreatorCount: number;
-  mcnManualCreatorRatio: string;
-  recommendedAction: string;
+  rateCardCreatorCount: number;
+  rateCardMultiplier: number;
+  riskLevel: SupplyRiskLevel;
 };
 
 function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEvidence | undefined {
   const data = approvedTargetData(root);
   if (!data) return undefined;
-  const riskLevels = new Set(["low_risk", "medium_risk", "high_risk"]);
   for (const record of objectRecords(data)) {
     const demandCount = record.demand_count;
-    const eligibleCreatorCount = record.eligible_creator_count;
-    const supplyRatio = record.supply_ratio;
-    const hardShortfallCount = record.hard_shortfall_count;
-    const bufferShortfallCount = record.buffer_shortfall_count;
-    const supplyRiskLevel = record.supply_risk_level;
-    const suggestedExpansionCount = record.suggested_expansion_count;
-    const mcnCoveredCreatorCount = record.mcn_covered_creator_count;
-    const mcnManualCreatorRatio = record.mcn_manual_creator_ratio;
-    const recommendedAction = record.recommended_action;
-    const ratio = text(mcnManualCreatorRatio)
-      ? /^(\d+)\s*:\s*(\d+)$/.exec(mcnManualCreatorRatio.trim())
-      : undefined;
+    const rateCardCreatorCount = record.eligible_creator_count;
+    const rateCardMultiplier = record.supply_ratio;
     if (
       !Number.isInteger(demandCount) || demandCount < 1 ||
-      !Number.isInteger(eligibleCreatorCount) || eligibleCreatorCount < 0 ||
-      typeof supplyRatio !== "number" || !Number.isFinite(supplyRatio) || supplyRatio < 0 ||
-      !Number.isInteger(hardShortfallCount) || hardShortfallCount < 0 ||
-      !Number.isInteger(bufferShortfallCount) || bufferShortfallCount < 0 ||
-      !text(supplyRiskLevel) || !riskLevels.has(supplyRiskLevel) ||
-      !Number.isInteger(suggestedExpansionCount) || suggestedExpansionCount < 0 ||
-      !Number.isInteger(mcnCoveredCreatorCount) || mcnCoveredCreatorCount < 0 ||
-      !ratio || Number(ratio[1]) !== mcnCoveredCreatorCount ||
-      Number(ratio[2]) !== suggestedExpansionCount ||
-      !text(recommendedAction)
+      !Number.isInteger(rateCardCreatorCount) || rateCardCreatorCount < 0 ||
+      !multiplierMatches(rateCardMultiplier, rateCardCreatorCount, demandCount)
     ) continue;
     if (Number.isInteger(workflow.quantity_total) && workflow.quantity_total !== demandCount) continue;
-    if (hardShortfallCount !== Math.max(demandCount - eligibleCreatorCount, 0)) continue;
-    if (Math.abs(supplyRatio - eligibleCreatorCount / demandCount) > 0.01) continue;
-    if (
-      supplyRiskLevel === "high_risk" &&
-      (suggestedExpansionCount < 1 || bufferShortfallCount < 1 || recommendedAction !== "mcn_and_manual")
-    ) continue;
     return {
       demandCount,
-      eligibleCreatorCount,
-      supplyRatio,
-      hardShortfallCount,
-      bufferShortfallCount,
-      supplyRiskLevel: supplyRiskLevel as SearchSupplyEvidence["supplyRiskLevel"],
-      suggestedExpansionCount,
-      mcnCoveredCreatorCount,
-      mcnManualCreatorRatio: `${mcnCoveredCreatorCount}:${suggestedExpansionCount}`,
-      recommendedAction: recommendedAction.trim(),
+      rateCardCreatorCount,
+      rateCardMultiplier,
+      riskLevel: supplyRiskLevel(rateCardCreatorCount, demandCount),
     };
   }
   return undefined;
 }
+
+type RankMcnCoverageEvidence = {
+  inquiryId: string;
+  demandCount: number;
+  selectedSupplierIds: string[];
+  selectedMcnCount: number;
+  coveredCreatorCount: number;
+  coverageMultiplier: number;
+  riskLevel: SupplyRiskLevel;
+  manualSourcingGapCount: number | null;
+};
 
 type ManualSourcingEvidence = {
   taskId: string;
@@ -374,19 +343,59 @@ type DistributionBatchFallbackEvidence = {
   supplierIds: string[];
 };
 
-function rankMcnInquiryEvidence(root: unknown, input: Json, workflow: Json): string | undefined {
+function rankMcnCoverageEvidence(
+  root: unknown,
+  input: Json,
+  workflow: Json,
+): RankMcnCoverageEvidence | undefined {
   const data = approvedTargetData(root);
   if (!data || input.write_mcn_recommendation_items === false) return undefined;
   if (
-    Number.isInteger(workflow.pending_manual_target_count) &&
-    (!text(workflow.requirement_id) || !text(input.id) || input.id.trim() !== workflow.requirement_id.trim())
+    !text(workflow.requirement_id) || !text(input.id) ||
+    input.id.trim() !== workflow.requirement_id.trim()
   ) return undefined;
-  const inquiryIds = new Set<string>();
+
+  const matches: RankMcnCoverageEvidence[] = [];
   for (const record of objectRecords(data)) {
     const inquiryId = identifierText(record.inquiry_id);
-    if (inquiryId) inquiryIds.add(inquiryId);
+    const demandCount = record.demand_count;
+    const selectedMcnCount = record.selected_mcn_count;
+    const coveredCreatorCount = record.selected_mcn_covered_creator_count;
+    const coverageMultiplier = record.selected_mcn_coverage_multiplier;
+    const riskLevel = record.selected_mcn_risk_level;
+    const manualSourcingGapCount = record.manual_sourcing_gap_count;
+    const rawSupplierIds = record.selected_supplier_ids;
+    if (
+      !inquiryId || !Number.isInteger(demandCount) || demandCount < 1 ||
+      !Array.isArray(rawSupplierIds) || rawSupplierIds.length < 1 ||
+      !rawSupplierIds.every(text) || !Number.isInteger(selectedMcnCount) || selectedMcnCount < 1 ||
+      record.coverage_scope !== "selected_institutions_deduplicated_union" ||
+      !Number.isInteger(coveredCreatorCount) || coveredCreatorCount < 0 ||
+      !multiplierMatches(coverageMultiplier, coveredCreatorCount, demandCount) ||
+      !["high_risk", "medium_risk", "safe"].includes(riskLevel)
+    ) continue;
+    const selectedSupplierIds = rawSupplierIds.map((supplierId: string) => supplierId.trim());
+    if (new Set(selectedSupplierIds).size !== selectedSupplierIds.length) continue;
+    if (selectedMcnCount !== selectedSupplierIds.length) continue;
+    if (Number.isInteger(workflow.quantity_total) && workflow.quantity_total !== demandCount) continue;
+    const expectedRisk = supplyRiskLevel(coveredCreatorCount, demandCount);
+    if (riskLevel !== expectedRisk) continue;
+    const expectedGap = expectedRisk === "high_risk"
+      ? demandCount * 20 - coveredCreatorCount
+      : null;
+    if (manualSourcingGapCount !== expectedGap) continue;
+    matches.push({
+      inquiryId,
+      demandCount,
+      selectedSupplierIds,
+      selectedMcnCount,
+      coveredCreatorCount,
+      coverageMultiplier,
+      riskLevel: expectedRisk,
+      manualSourcingGapCount: expectedGap,
+    });
   }
-  return inquiryIds.size === 1 ? [...inquiryIds][0] : undefined;
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function manualSourcingEvidence(
@@ -401,6 +410,8 @@ function manualSourcingEvidence(
   const expectedTarget = workflow.pending_manual_target_count;
   if (
     !expectedRequirementId || !expectedInquiryId || !Number.isInteger(expectedTarget) || expectedTarget < 1 ||
+    workflow.post_race_risk_level !== "high_risk" ||
+    workflow.post_race_manual_sourcing_gap_count !== expectedTarget ||
     !text(input.requirement_id) || input.requirement_id.trim() !== expectedRequirementId ||
     input.target_count !== expectedTarget
   ) return undefined;
@@ -773,6 +784,7 @@ function collectMcnRecipientDirectory(root: unknown): Json[] {
 function clearMcnRecipientDirectory(workflow: Json): void {
   delete workflow.mcn_recipient_directory;
   delete workflow.mcn_directory_requirement_id_sha256;
+  delete workflow.selected_supplier_id_hashes;
 }
 
 function appendWorkflowEvent(data: Json, event: Json): void {
@@ -786,13 +798,11 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
   const header = firstQuestionHeader(input);
   if (![
     SEARCH_CONFIRMATION_HEADER,
-    MANUAL_TARGET_CONFIRMATION_HEADER,
+    POST_RACE_MANUAL_CONFIRMATION_HEADER,
     MCN_CONFIRMATION_HEADER,
     FIELD_CONFIRMATION_HEADER,
   ].includes(header ?? "")) return;
-  const answer = header === MANUAL_TARGET_CONFIRMATION_HEADER
-    ? freeformAnswerForQuestion(event, input)
-    : answerForQuestion(event, input);
+  const answer = answerForQuestion(event, input);
   if (!answer) return;
 
   const current = store(rootDir);
@@ -801,40 +811,39 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
   workflow.updated_at_ms = Date.now();
 
   if (header === SEARCH_CONFIRMATION_HEADER) {
-    const validPlan = workflow.supply_plan_status === "valid";
-    const highRisk = workflow.supply_risk_level === "high_risk";
-    const suggested = workflow.suggested_expansion_count;
-    if (
-      answer === START_MANUAL_AND_MCN_LABEL && validPlan && highRisk &&
-      Number.isInteger(suggested) && suggested > 0
-    ) {
-      workflow.pending_manual_target_count = suggested;
-      workflow.next_action = "rank_mcns";
-      workflow.waiting_for = null;
-    } else if (
-      [MCN_ONLY_LABEL, "确认并开始MCN排序", "按建议开始MCN排序", "确认继续"].includes(answer) &&
-      validPlan
-    ) {
+    const validPlan = workflow.pre_race_supply_status === "valid";
+    if ([START_MCN_RACE_LABEL, CONTINUE_MCN_RACE_LABEL].includes(answer) && validPlan) {
       delete workflow.pending_manual_target_count;
       workflow.next_action = "rank_mcns";
       workflow.waiting_for = null;
-    } else if (answer === ADJUST_MANUAL_TARGET_LABEL && validPlan && highRisk) {
+    } else if (answer === PAUSE_FOR_SUPPLY_LABEL && validPlan) {
       delete workflow.pending_manual_target_count;
-      workflow.next_action = "confirm_manual_target_count";
+      workflow.next_action = "await_pre_race_supply_expansion";
       workflow.waiting_for = "user";
     } else {
-      workflow.next_action = validPlan ? "confirm_search_results" : "recover_search_supply_plan";
+      workflow.next_action = validPlan ? "confirm_pre_race_supply" : "recover_search_supply_plan";
       workflow.waiting_for = "user";
     }
-  } else if (header === MANUAL_TARGET_CONFIRMATION_HEADER) {
-    const target = positiveManualTarget(answer);
-    if (target && workflow.supply_plan_status === "valid" && workflow.supply_risk_level === "high_risk") {
-      workflow.pending_manual_target_count = target;
-      workflow.next_action = "rank_mcns";
+  } else if (header === POST_RACE_MANUAL_CONFIRMATION_HEADER) {
+    const gap = workflow.post_race_manual_sourcing_gap_count;
+    if (
+      answer === START_POST_RACE_MANUAL_LABEL && workflow.post_race_evidence_status === "valid" &&
+      workflow.post_race_risk_level === "high_risk" && Number.isInteger(gap) && gap > 0
+    ) {
+      workflow.pending_manual_target_count = gap;
+      workflow.next_action = "manual_source_creators";
       workflow.waiting_for = null;
+    } else if (answer === REVISE_MCN_SELECTION_LABEL) {
+      delete workflow.pending_manual_target_count;
+      workflow.next_action = "revise_mcn_selection";
+      workflow.waiting_for = "user";
+    } else if (answer === SKIP_POST_RACE_MANUAL_LABEL && workflow.post_race_evidence_status === "valid") {
+      delete workflow.pending_manual_target_count;
+      workflow.next_action = "confirm_mcn_selection";
+      workflow.waiting_for = "user";
     } else {
       delete workflow.pending_manual_target_count;
-      workflow.next_action = "confirm_manual_target_count";
+      workflow.next_action = "confirm_post_race_manual_sourcing";
       workflow.waiting_for = "user";
     }
   } else if (header === MCN_CONFIRMATION_HEADER) {
@@ -870,8 +879,8 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
   const current = store(rootDir);
   const workflow = current.data.workflow as Json;
   const envelopeOk = successful(event.error ? { isError: true } : event.result);
-  const rankInquiryId = tool === "rank_mcns" && envelopeOk
-    ? rankMcnInquiryEvidence(event.result, input, workflow)
+  const rankEvidence = tool === "rank_mcns" && envelopeOk
+    ? rankMcnCoverageEvidence(event.result, input, workflow)
     : undefined;
   const manualEvidence = tool === "manual_source_creators" && envelopeOk
     ? manualSourcingEvidence(event.result, input, workflow)
@@ -889,7 +898,7 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
   const isIndividualFallback = tool === "create_with_distributions" &&
     individualFallbackPending(workflow, input);
   const ok = envelopeOk &&
-    (tool !== "rank_mcns" || rankInquiryId !== undefined) &&
+    (tool !== "rank_mcns" || rankEvidence !== undefined) &&
     (tool !== "manual_source_creators" || manualEvidence !== undefined) &&
     (tool !== "create_with_distributions" || distributionEvidence !== undefined);
   const now = Date.now();
@@ -900,6 +909,9 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
   if (tool === "search_creators" || tool === "rank_mcns") {
     for (const key of [
       "rank_mcn_inquiry_id", "rank_mcn_inquiry_evidence_status", "rank_mcn_inquiry_evidence_error",
+      "post_race_evidence_status", "post_race_risk_level", "post_race_selected_mcn_count",
+      "post_race_selected_mcn_covered_creator_count", "post_race_selected_mcn_coverage_multiplier",
+      "post_race_manual_sourcing_gap_count", "pending_manual_target_count",
     ]) delete workflow[key];
   }
 
@@ -996,8 +1008,9 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
     if (tool === "rank_mcns") {
       workflow.rank_mcn_inquiry_evidence_status = envelopeOk ? "invalid" : "unavailable";
       workflow.rank_mcn_inquiry_evidence_error = envelopeOk
-        ? "missing_inquiry_id"
+        ? "missing_or_conflicting_selected_coverage_evidence"
         : "provider_call_failed_or_unknown";
+      workflow.post_race_evidence_status = envelopeOk ? "invalid" : "unavailable";
     }
     if (tool === "manual_source_creators") {
       workflow.manual_sourcing_evidence_status = envelopeOk ? "invalid" : "unavailable";
@@ -1036,52 +1049,61 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
       case "search_creators": {
         workflow.phase = "candidate_pool_ready";
         workflow.waiting_for = "user";
+        for (const key of [
+          "supply_plan_status", "supply_plan_error", "matched_creator_count", "supply_ratio",
+          "hard_shortfall_count", "buffer_shortfall_count", "supply_risk_level",
+          "suggested_expansion_count", "mcn_covered_creator_count", "mcn_manual_creator_ratio",
+          "recommended_action",
+        ]) delete workflow[key];
         const supply = searchSupplyEvidence(root, workflow);
         if (!supply) {
           for (const key of [
-            "demand_count",
-            "matched_creator_count",
-            "supply_ratio",
-            "hard_shortfall_count",
-            "buffer_shortfall_count",
-            "supply_risk_level",
-            "suggested_expansion_count",
-            "mcn_covered_creator_count",
-            "mcn_manual_creator_ratio",
-            "recommended_action",
-            "pending_manual_target_count",
+            "demand_count", "pre_race_rate_card_creator_count",
+            "pre_race_rate_card_multiplier", "pre_race_risk_level",
           ]) delete workflow[key];
-          workflow.supply_plan_status = "invalid";
-          workflow.supply_plan_error = "missing_or_contradictory_provider_evidence";
+          workflow.pre_race_supply_status = "invalid";
+          workflow.pre_race_supply_error = "missing_or_contradictory_rate_card_evidence";
           workflow.next_action = "recover_search_supply_plan";
           break;
         }
-        workflow.supply_plan_status = "valid";
-        delete workflow.supply_plan_error;
+        workflow.pre_race_supply_status = "valid";
+        delete workflow.pre_race_supply_error;
         workflow.demand_count = supply.demandCount;
-        workflow.matched_creator_count = supply.eligibleCreatorCount;
-        workflow.supply_ratio = supply.supplyRatio;
-        workflow.hard_shortfall_count = supply.hardShortfallCount;
-        workflow.buffer_shortfall_count = supply.bufferShortfallCount;
-        workflow.supply_risk_level = supply.supplyRiskLevel;
-        workflow.suggested_expansion_count = supply.suggestedExpansionCount;
-        workflow.mcn_covered_creator_count = supply.mcnCoveredCreatorCount;
-        workflow.mcn_manual_creator_ratio = supply.mcnManualCreatorRatio;
-        workflow.recommended_action = supply.recommendedAction;
-        workflow.next_action = "confirm_search_results";
+        workflow.pre_race_rate_card_creator_count = supply.rateCardCreatorCount;
+        workflow.pre_race_rate_card_multiplier = supply.rateCardMultiplier;
+        workflow.pre_race_risk_level = supply.riskLevel;
+        workflow.next_action = "confirm_pre_race_supply";
         break;
       }
       case "rank_mcns": {
+        if (!rankEvidence) break;
         workflow.phase = "mcn_planning";
-        workflow.rank_mcn_inquiry_id = rankInquiryId;
+        workflow.rank_mcn_inquiry_id = rankEvidence.inquiryId;
         workflow.rank_mcn_inquiry_evidence_status = "valid";
         delete workflow.rank_mcn_inquiry_evidence_error;
-        const manualRequested = Number.isInteger(workflow.pending_manual_target_count) &&
-          workflow.pending_manual_target_count > 0;
-        workflow.next_action = manualRequested ? "manual_source_creators" : "confirm_mcn_selection";
-        workflow.waiting_for = manualRequested ? null : "user";
+        workflow.post_race_evidence_status = "valid";
+        workflow.post_race_selected_mcn_count = rankEvidence.selectedMcnCount;
+        workflow.post_race_selected_mcn_covered_creator_count = rankEvidence.coveredCreatorCount;
+        workflow.post_race_selected_mcn_coverage_multiplier = rankEvidence.coverageMultiplier;
+        workflow.post_race_risk_level = rankEvidence.riskLevel;
+        if (rankEvidence.manualSourcingGapCount === null) {
+          delete workflow.post_race_manual_sourcing_gap_count;
+        } else {
+          workflow.post_race_manual_sourcing_gap_count = rankEvidence.manualSourcingGapCount;
+        }
+        delete workflow.pending_manual_target_count;
+        workflow.selected_supplier_id_hashes = rankEvidence.selectedSupplierIds
+          .map((supplierId) => sha256Text(supplierId))
+          .sort();
+        workflow.next_action = rankEvidence.riskLevel === "high_risk"
+          ? "confirm_post_race_manual_sourcing"
+          : "confirm_mcn_selection";
+        workflow.waiting_for = "user";
         if (Number.isInteger(input.minimum_mcn_count)) workflow.mcn_race_size = input.minimum_mcn_count;
-        const recipients = collectMcnRecipientDirectory(root);
+        const selectedHashes = new Set(workflow.selected_supplier_id_hashes);
+        const recipients = collectMcnRecipientDirectory(root).filter((recipient) =>
+          selectedHashes.has(recipient.supplier_id_sha256)
+        );
         if (recipients.length > 0 && text(input.id)) {
           workflow.mcn_recipient_directory = recipients;
           workflow.mcn_directory_requirement_id_sha256 = sha256Text(input.id.trim());
@@ -1222,6 +1244,19 @@ function recipientRequirementMismatch(input: Json, workflow: Json): boolean {
     text(workflow.mcn_directory_requirement_id_sha256) &&
     sha256Text(input.requirement_id.trim()) !== workflow.mcn_directory_requirement_id_sha256,
   );
+}
+
+function recipientSelectionMismatch(input: Json, workflow: Json): boolean {
+  if (workflow.post_race_evidence_status !== "valid") return false;
+  if (!Array.isArray(workflow.selected_supplier_id_hashes)) return true;
+  if (!Array.isArray(input.supplierIds) || !input.supplierIds.every(text)) return true;
+  const actual = input.supplierIds.map((supplierId: string) => sha256Text(supplierId.trim())).sort();
+  const expected = workflow.selected_supplier_id_hashes
+    .filter(text)
+    .map((supplierHash: string) => supplierHash.trim())
+    .sort();
+  return actual.length !== new Set(actual).size ||
+    actual.length !== expected.length || actual.some((supplierHash, index) => supplierHash !== expected[index]);
 }
 
 function createSummary(input: Json, workflow: Json): Json {
@@ -1375,6 +1410,13 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
     return denyStructured(
       "INTEGRATION_REQUIRED",
       "发送对象所属需求与最近一次 MCN排序结果不一致，请返回 MCN 方案修改或重新选择后再发送。",
+    );
+  }
+  if (recipientSelectionMismatch(input, current.data.workflow as Json)) {
+    save(current.path, current.data);
+    return denyStructured(
+      "INTEGRATION_REQUIRED",
+      "发送机构集合与最近一次赛后覆盖去重并集计算绑定的机构集合不一致，请重新计算倍率与补量建议后再发送。",
     );
   }
   for (const key of [

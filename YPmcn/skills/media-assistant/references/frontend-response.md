@@ -7,22 +7,17 @@
 `search_creators` 成功后固定输出：
 
 ```markdown
-### 达人供给结果
+### 赛马前资源评估
 - 需求达人数量：<quantityTotal>
-- 符合条件达人数量：<实际命中数>
-- 供需比：<实际命中数>/<quantityTotal>（<比值>:1）
-- 硬缺口：<Provider hard_shortfall_count>
-- 风险缓冲缺口：<Provider buffer_shortfall_count>
-- 供给风险：<Provider supply_risk_level>
-- 建议手动拓展达人数量：<Provider suggested_expansion_count>
-- MCN 覆盖达人数量：<Provider mcn_covered_creator_count>
-- 建议提报比例（MCN达人:拓展达人）：<Provider mcn_manual_creator_ratio>
-- 下一步：<高风险时先执行 MCN排序生成询价关联，再启动达人拓展；其他情况按实际建议>
+- 刊例资源达人数量：<eligible_creator_count>
+- 刊例资源倍率：<eligible_creator_count>/<quantityTotal>（<supply_ratio> 倍）
+- 赛前风险：<高危 / 中风险 / 安全>
+- 建议：<高危时强烈建议先扩机构或预手扒；中风险可赛马但建议补资源；安全档无需手扒>
 ```
 
-只用同一 Provider 记录。比例须等于 `mcn_covered_creator_count:suggested_expansion_count`，两端为达人账号数。缺失、矛盾或补量非正数时显示“供给计划不完整”，禁用 `max(需求量-命中数,0)` 回退。“供给确认”须换行复述全部字段，选项固定为“启动达人拓展并开始MCN排序”“仅开始MCN排序”“调整达人拓展数量”；调整仅收正整数，其余结果不调用业务 Tool。
+赛前只用同一记录的需求数、刊例人数和倍率；用整数判档，不用舍入值。禁止精确手扒数。高危可选“先扩充机构或预手扒”或“仍继续MCN赛马”，其余档可“开始MCN赛马”；停止类结果不调用业务 Tool。
 
-拓展分支先执行 `rank_mcns`；取得 `inquiry_id` 后才调用 `manual_source_creators({requirement_id,target_count})`。回执匹配且证据完整才进入 MCN 确认。隐藏内部 ID；证据不足即恢复。排序只显示规模、机构名、覆盖和缺口。
+`rank_mcns` 后显示实际已选机构名、按 `(platform, kwUid)` 去重的覆盖并集、倍率和风险。仅 `<20` 倍显示精确缺口 `需求数×20−覆盖数`，并用“赛后补量”提供“一键发起手扒补量 / 追加机构后重新计算 / 暂不补量，继续询价”。一键提交后才调用 `manual_source_creators`；`20≤倍率<30` 只建议补资源，`≥30` 明确无需手扒。隐藏内部 ID；机构集合变化或证据不足必须重算/恢复。
 
 企微 `description` 只据确认需求生成微信纯文本，`wechat_notification_message` 传入完全相同的内容。首次 `create_with_distributions` 预检后仅“确认发送”可外发。若 Provider 明确未写入且返回未绑定机构，只删这些机构、继承原确认续发其余机构，不再询问。结束仅提示一次“未绑定群聊，未发送：<机构名>；已发送：<机构名>”；无逐项回执不得声称已发送，写结果未知不得续发。
 

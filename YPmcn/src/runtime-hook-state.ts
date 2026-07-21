@@ -90,14 +90,30 @@ export function denyStructured(code: string, context: string): Json {
 
 function storeAtPath(path: string): GuardStore {
   const data = load(path);
-  let changed = data.schema_version !== 15;
-  data.schema_version = 15;
+  const previousSchemaVersion = data.schema_version;
+  let changed = previousSchemaVersion !== 16;
+  data.schema_version = 16;
   if (!data.confirmations || typeof data.confirmations !== "object" || Array.isArray(data.confirmations)) {
     data.confirmations = {};
     changed = true;
   }
   if (!data.workflow || typeof data.workflow !== "object" || Array.isArray(data.workflow)) {
     data.workflow = initialWorkflowState();
+    changed = true;
+  }
+  if (previousSchemaVersion !== undefined && previousSchemaVersion !== 16) {
+    for (const key of [
+      "supply_plan_status", "supply_plan_error", "matched_creator_count", "supply_ratio",
+      "hard_shortfall_count", "buffer_shortfall_count", "supply_risk_level",
+      "suggested_expansion_count", "mcn_covered_creator_count", "mcn_manual_creator_ratio",
+      "recommended_action", "pending_manual_target_count",
+    ]) delete data.workflow[key];
+    if ([
+      "confirm_manual_target_count", "manual_source_creators", "confirm_search_results",
+    ].includes(data.workflow.next_action)) {
+      data.workflow.next_action = "recover_supply_decision_contract_upgrade";
+      data.workflow.waiting_for = "user";
+    }
     changed = true;
   }
   if (!Array.isArray(data.workflow_events)) {

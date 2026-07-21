@@ -17,9 +17,9 @@ description: "Use for YPmcn requirement validation, sourcing, distribution, rank
 
 ## 主链
 
-`validate_requirement → 自动 search_creators → 供给确认 → rank_mcns（生成 inquiry_id）→ 已确认拓展时 manual_source_creators(requirement_id,target_count) → MCN 确认 → select_inquiry_form_fields(url) → create_with_distributions 预检/确认/同参数外发 → sync → ingest → sync → rank_creators → get_creator_detail → export_csv → create_submission_batch → record_client_feedback`
+`validate_requirement → 自动 search_creators → 赛前刊例倍率确认 → rank_mcns（已选机构去重倍率）→ <20 倍赛后补量确认 → 可选 manual_source_creators → MCN 确认 → select_inquiry_form_fields → create_with_distributions 预检/确认/外发 → sync → ingest → sync → rank_creators → get_creator_detail → export_csv → create_submission_batch → record_client_feedback`
 
-弹窗提交即同轮执行。拓展前须有同需求 `rank_mcns.inquiry_id`；该 ID 只作服务端关联，不作达人拓展参数。仅传 Hook 保存的确认数量，询价或任务证据不足时不调用、不宣称启动。`EXTERNAL_SEND_CONFIRMATION_REQUIRED` 见执行门禁；供给确认不授权外发。
+弹窗提交即同轮执行。赛前无精确手扒数；仅在已选机构去重倍率 `<20` 后，按 `需求数×20−覆盖数` 一键补量。拓展前须有同需求 `inquiry_id`，但不作参数；机构变化须重算。补量不授权外发；`EXTERNAL_SEND_CONFIRMATION_REQUIRED` 见执行门禁。
 宿主若注入标准 Brief preview，将其作为解析参考：未决值主动询问，完整后优先调用 `validate_requirement`，但 preview 不限制 Skill 读取或其他 Tool。
 ## 用户引导
 

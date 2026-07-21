@@ -83,9 +83,9 @@ describe("Spec governance", () => {
     ]);
     assert.equal(mediaAssistant.toolPolicy.contract, "mcp.json");
     assert.deepEqual(mediaAssistant.toolPolicy.preconditions.manual_source_creators, [
-      "provider_supply_evidence_is_complete_and_high_risk_with_positive_suggested_expansion",
-      "submitted_supply_command_binds_requirement_id_and_one_positive_target_count",
-      "rank_mcns_succeeded_for_the_same_requirement_and_returned_inquiry_id",
+      "rank_mcns_bound_the_actual_selected_supplier_set_and_returned_inquiry_id",
+      "selected_supplier_coverage_union_multiplier_is_below_twenty",
+      "submitted_post_race_one_click_command_binds_the_formula_gap_as_one_positive_target_count",
       "no_distribution_has_been_sent",
     ]);
     assert.equal(
@@ -196,7 +196,19 @@ describe("Spec governance", () => {
     ];
 
     assert.equal(algorithms.readinessStatus, "external-unverified");
-    assert.deepEqual(algorithms.definitions, {});
+    const supplyDecision = algorithms.definitions.mcnSupplyMultiplierDecision;
+    assert.equal(supplyDecision.status, "approved-provider-unverified");
+    assert.deepEqual(supplyDecision.creatorIdentity, ["platform", "kwUid"]);
+    assert.equal(supplyDecision.preRace.exactManualTargetAllowed, false);
+    assert.equal(
+      supplyDecision.postRace.exactManualTarget,
+      "selected multiplier < 20 ? demand_count * 20 - selected_mcn_covered_creator_count : null",
+    );
+    assert.deepEqual(supplyDecision.riskBands, [
+      { risk: "high_risk", condition: "coverage_count < demand_count * 20" },
+      { risk: "medium_risk", condition: "demand_count * 20 <= coverage_count < demand_count * 30" },
+      { risk: "safe", condition: "coverage_count >= demand_count * 30" },
+    ]);
     assert.equal(retrieval.status, "shadow");
     assert.deepEqual(retrieval.internalConsumers, ["search_creators", "rank_creators"]);
     assert.equal(retrieval.authoritativeSource, "mysql");
@@ -404,9 +416,13 @@ describe("Spec governance", () => {
       /数据库字段名：字段备注/,
     );
     assert.deepEqual(mcp.outputContracts.search_creators.successSchema.properties.data.required, [
-      "demand_count", "eligible_creator_count", "supply_ratio", "hard_shortfall_count",
-      "buffer_shortfall_count", "supply_risk_level", "suggested_expansion_count",
-      "mcn_covered_creator_count", "mcn_manual_creator_ratio", "recommended_action",
+      "demand_count", "eligible_creator_count", "supply_ratio",
+    ]);
+    assert.deepEqual(mcp.outputContracts.rank_mcns.successSchema.properties.data.required, [
+      "inquiry_id", "demand_count", "selected_supplier_ids", "selected_mcn_count",
+      "coverage_scope", "selected_mcn_covered_creator_count",
+      "selected_mcn_coverage_multiplier", "selected_mcn_risk_level",
+      "manual_sourcing_gap_count",
     ]);
     assert.deepEqual(mcp.outputContracts.manual_source_creators.successSchema.properties.data.required, [
       "task_id", "requirement_id", "inquiry_id", "target_count", "status", "operation", "started_at", "accepted_count",

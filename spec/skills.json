@@ -29,9 +29,9 @@
         "automaticLegacyFallback": false,
         "preconditions": {
           "manual_source_creators": [
-            "provider_supply_evidence_is_complete_and_high_risk_with_positive_suggested_expansion",
-            "submitted_supply_command_binds_requirement_id_and_one_positive_target_count",
-            "rank_mcns_succeeded_for_the_same_requirement_and_returned_inquiry_id",
+            "rank_mcns_bound_the_actual_selected_supplier_set_and_returned_inquiry_id",
+            "selected_supplier_coverage_union_multiplier_is_below_twenty",
+            "submitted_post_race_one_click_command_binds_the_formula_gap_as_one_positive_target_count",
             "no_distribution_has_been_sent"
           ],
           "create_with_distributions": [

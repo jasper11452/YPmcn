@@ -10,9 +10,9 @@
 
 ## 连续执行与人工确认
 
-`validate_requirement` 成功后同轮调用 `search_creators`。搜索必须返回相互一致的需求量、命中数、比例、硬/缓冲缺口、风险、建议和动作；缺失/矛盾或高风险建议非正数即恢复，禁止用硬缺口回退成 0。按 `frontend-response.md` 展示后，高风险“供给确认”三选：启动达人拓展并开始 MCN、仅 MCN、调整一个正整数；提交后同轮调用相应 Tool，不得只回复已确认。
+`validate_requirement` 成功后同轮调用 `search_creators`。赛前仅用需求数、刊例人数和倍率，按 `需求数×20/30` 判档，不算精确手扒数。开始/继续赛马后同轮调用 `rank_mcns`；选择先补资源则不调用业务 Tool。
 
-`rank_mcns` 动态排序，不固定 5 家。拓展分支先调用它；同一成功响应须有当前需求 `inquiry_id`，才同轮调用 `manual_source_creators({requirement_id,target_count})`。任务回执须匹配该 ID，再进入 MCN 确认；缺失/冲突即恢复。非拓展分支直接确认。用户只看机构名、覆盖与缺口，ID 内部使用。
+`rank_mcns` 不固定 5 家，并把 `inquiry_id`、已选机构及其 `(platform, kwUid)` 去重覆盖并集绑定。`<20` 时缺口为 `需求数×20−覆盖数`，仅一键确认后调用 `manual_source_creators`；`20≤x<30` 可询价但建议补资源，`x≥30` 无需手扒。机构变化须重算；用户只看名称和汇总。
 
 企微 Tool 只传 `requirement_id`、`supplierIds`、`columns`、纯文本 `description` 和 `wechat_notification_message`；`wechat_notification_message` 必须与 `description` 完全一致，不得 JSON 化、杜撰或发送 `requirement_ID/colums`。
 
@@ -25,7 +25,7 @@
 ## 工具边界与恢复
 
 - Hook 不校验普通 Tool 参数、需求完整性、ID 血缘或工作流顺序；除外发绕过与 AskUserQuestion 外发确认外不做严格阻断。
-- `manual_source_creators` 只传 `requirement_id` 和确认的正整数 `target_count`；`inquiry_id` 由此前 `rank_mcns` 落库，不作参数。成功记录须含任务 ID、回显需求/询价/数量、允许状态/操作、启动时间和非负入池数；缺失、冲突或写结果未知时禁止盲重试和外发。
+- `manual_source_creators` 只传 `requirement_id` 和赛后一键确认的公式缺口 `target_count`；赛前或倍率 `≥20` 禁止调用。`inquiry_id` 由此前 `rank_mcns` 落库，不作参数。成功记录须含任务 ID、回显需求/询价/数量、允许状态/操作、启动时间和非负入池数；缺失、冲突或写结果未知时禁止盲重试和外发。
 - 外发成功后按实际身份执行 `sync → ingest_mcn_submissions → sync`；无实际 `inquiry_ids` 不 ingest，不轮询。
 - 写结果未知先对账且禁止盲重试；明确参数错误只修该字段。用户要求失败即停时绝不重试。
 - 详情 Tool 只读且不推进；批次成功后才导出，客户有具体反馈后才记录。
