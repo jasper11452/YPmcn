@@ -15,6 +15,9 @@ const READY_BRIEF = [
   "平台：小红书",
   "数量：5位达人",
   "单达人L1官方报价：5000元以内",
+  "内容：美妆护肤",
+  "粉丝年龄：24-29岁占比20%",
+  "是否有机构：0",
   "提报截止：2099-07-20 11:00",
 ].join("\n");
 
@@ -31,13 +34,24 @@ before(() => {
 after(() => rmSync(rootDir, { recursive: true, force: true }));
 
 describe("requirement behavior through public plugin hooks", () => {
-  it("continues publishing requirement previews as guidance", async () => {
+  it("keeps internal previews in clarification guidance and publishes one ready argument example", async () => {
     const unresolved = await hooks.get("before_prompt_build")({ prompt: INCOMPLETE_BRIEF, messages: [] }, {});
-    assert.match(unresolved.prependContext, /YPmcn authoritative machine-readable requirement preview/);
+    assert.match(unresolved.prependContext, /YPmcn internal requirement-analysis guide for clarification only/);
+    assert.doesNotMatch(unresolved.prependContext, /YPmcn ready-to-use validate_requirement argument example/);
     assert.match(unresolved.prependContext, /YPmcn mandatory unresolved-Brief interaction/);
 
     const ready = await hooks.get("before_prompt_build")({ prompt: READY_BRIEF, messages: [] }, {});
-    assert.match(ready.prependContext, /YPmcn authoritative initial validate_requirement arguments/);
+    assert.match(ready.prependContext, /YPmcn ready-to-use validate_requirement argument example/);
+    assert.doesNotMatch(ready.prependContext, /YPmcnInternalRequirementPreview/);
+
+    const args = JSON.parse(ready.prependContext.trim().split("\n").at(-1));
+    assert.equal(args.payload.description, "美妆护肤");
+    assert.equal(args.payload.contentTag, undefined);
+    assert.equal(args.payload.age3Rate, 0.2);
+    assert.equal(args.payload.hasOrganization, false);
+    assert.ok(args.payload.rawMessagesJson.atoms.every((atom) =>
+      !Object.hasOwn(atom, "field") && !Object.hasOwn(atom, "resolution") && !Object.hasOwn(atom, "value")
+    ));
   });
 
   it("does not turn unresolved requirement guidance into a Tool permission gate", async () => {

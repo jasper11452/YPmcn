@@ -595,7 +595,7 @@ export function parseStandardBrief(
 }
 
 export function renderStandardBriefPreview(preview: StandardBriefPreview): string {
-  return `YPmcn authoritative machine-readable requirement preview (do not recount, remap, or replace):\n${JSON.stringify(preview)}`;
+  return `YPmcn internal requirement-analysis guide for clarification only. This Preview is not a validate_requirement argument or a rawMessagesJson atom example. Keys such as field, resolution, value, candidates, and reason describe parser reasoning; use them to understand confirmed and unresolved facts, but use the final transport examples when assembling payload atoms.\n<YPmcnInternalRequirementPreview>\n${JSON.stringify(preview)}\n</YPmcnInternalRequirementPreview>`;
 }
 
 export function buildStandardBriefReadyPayload(
@@ -631,7 +631,7 @@ export function buildStandardBriefReadyPayload(
 }
 
 export function renderStandardBriefReadyArguments(payload: Record<string, unknown>): string {
-  return `YPmcn authoritative initial validate_requirement arguments (use this object exactly for the first call; after a deterministic argument rejection, preserve confirmed facts and follow the same-turn repair loop):\n${JSON.stringify({ payload })}`;
+  return `YPmcn ready-to-use validate_requirement argument example. For the first call, use this single JSON object without merging the internal Preview. Its rawMessagesJson.atoms already demonstrate the final transport shape; parser-only field, resolution, and value keys are intentionally absent. Keep optional content/category fields only when they are present in this example. After a deterministic argument rejection, preserve confirmed facts and follow the same-turn repair loop.\n${JSON.stringify({ payload })}`;
 }
 
 function ambiguityQuestion(field: string, preview: StandardBriefPreview): string {
