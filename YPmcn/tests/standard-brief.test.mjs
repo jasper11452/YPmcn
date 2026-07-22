@@ -5,6 +5,7 @@ import {
   buildStandardBriefReadyPayload,
   extractStandardBrief,
   parseStandardBrief,
+  parseStandardBriefRequirements,
   renderStandardBriefReply,
 } from "../dist/standard-brief.js";
 
@@ -41,6 +42,55 @@ function assertExactPreview(preview) {
 }
 
 describe("deterministic standard Brief parser", () => {
+  it("keeps the legacy single-requirement result unchanged", () => {
+    const now = new Date("2026-07-18T00:00:00Z");
+    assert.deepEqual(
+      parseStandardBriefRequirements(EXACT_BRIEF, now, "Asia/Shanghai"),
+      [parseStandardBrief(EXACT_BRIEF, now, "Asia/Shanghai")],
+    );
+  });
+
+  it("splits explicit same-platform variants while inheriting shared fields", () => {
+    const brief = [
+      "项目：同项目双需求",
+      "平台：小红书",
+      "档期：2026-08-01至2026-08-05",
+      "单达人 L1 官方报价：8000元以内",
+      "数量：2个",
+      "母婴类粉丝要求2万粉丝以上",
+      "科技类粉丝要求1万以上",
+      "提报截止：2026-07-30 18:00",
+    ].join("；");
+    const previews = parseStandardBriefRequirements(brief);
+
+    assert.equal(previews.length, 2);
+    assert.deepEqual(previews.map(({ projection }) => ({
+      projectName: projection.projectName,
+      platform: projection.platform,
+      price: projection.kolOfficialPriceL1,
+      quantity: projection.quantityTotal,
+      contentTag: projection.contentTag,
+      followercount: projection.followercount,
+    })), [{
+      projectName: "同项目双需求",
+      platform: "xiaohongshu",
+      price: "[0,8000]",
+      quantity: 2,
+      contentTag: "母婴",
+      followercount: "[20000,999999999]",
+    }, {
+      projectName: "同项目双需求",
+      platform: "xiaohongshu",
+      price: "[0,8000]",
+      quantity: 2,
+      contentTag: "科技",
+      followercount: "[10000,999999999]",
+    }]);
+    const payloads = previews.map((preview) => buildStandardBriefReadyPayload(brief, preview));
+    assert.ok(payloads.every(Boolean));
+    assert.ok(payloads.every((payload) => payload.rawMessagesJson.originalBrief === brief));
+  });
+
   it("parses the exact semicolon-delimited Brief without greedily consuming fields", () => {
     assertExactPreview(parseStandardBrief(EXACT_BRIEF));
   });

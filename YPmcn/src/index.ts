@@ -20,6 +20,7 @@ import {
   extractStandardBrief,
   isStandardBrief,
   parseStandardBrief,
+  parseStandardBriefRequirements,
   renderStandardBriefPreview,
   renderStandardBriefReadyArguments,
   renderStandardBriefReply,
@@ -30,6 +31,7 @@ export {
   extractStandardBrief,
   isStandardBrief,
   parseStandardBrief,
+  parseStandardBriefRequirements,
   renderStandardBriefPreview,
   renderStandardBriefReadyArguments,
   renderStandardBriefReply,
@@ -263,10 +265,20 @@ export function createYpmcnPlugin(
       const multiPlatformGuidance = platforms.length > 1
         ? renderMultiPlatformRequirementGuidance(platforms)
         : "";
-      const preview = requirementLike && platforms.length <= 1
-        ? parseStandardBrief(prompt, now, timeZone)
-        : undefined;
+      const previews = requirementLike && platforms.length <= 1
+        ? parseStandardBriefRequirements(prompt, now, timeZone)
+        : [];
+      const preview = previews.length === 1 ? previews[0] : undefined;
       const readyPayload = preview ? buildStandardBriefReadyPayload(prompt, preview) : undefined;
+      const splitPayloads = previews.length > 1
+        ? previews.map((item) => buildStandardBriefReadyPayload(prompt, item))
+        : [];
+      const splitReady = splitPayloads.length > 1 && splitPayloads.every(Boolean);
+      const splitContext = previews.length > 1
+        ? splitReady
+          ? `YPmcn authoritative same-platform requirement units. Call validate_requirement once per payload in this exact order; do not merge or skip units.\n${JSON.stringify({ payloads: splitPayloads })}`
+          : `YPmcn authoritative same-platform requirement previews. Resolve all units in one AskUserQuestion popup before validation; do not merge units.\n${JSON.stringify({ previews })}`
+        : "";
       for (const brief of requirementBriefCandidates(hostPrompt, event?.messages)) {
         recordRequirementBriefReceipt(brief, rootDir);
       }
@@ -279,10 +291,11 @@ export function createYpmcnPlugin(
           buildRequirementRuntimeClock(now, timeZone),
           renderLocalWorkflowContext(rootDir),
           multiPlatformGuidance,
+          splitContext,
           preview && !readyPayload ? renderStandardBriefPreview(preview) : "",
           readyPayload ? renderStandardBriefReadyArguments(readyPayload) : "",
-          preview && preview.gate !== "ready"
-            ? `YPmcn mandatory unresolved-Brief interaction: call native AskUserQuestion now and do not return a plain text-only clarification. Use one user-facing form with up to 5 concise single-choice questions, covering every unresolved value, and keep at least one host-provided custom-input entry available. Every question must use line breaks in its non-option prompt text; options are exempt. Options may be strings or label/description objects. Do not expose internal gate, schema, or Tool terminology. Do not call validate_requirement until every value is concrete. A denied/cancelled/closed popup does not confirm anything. After a submitted answer, continue in this same interaction without asking for “继续”.\n<YPmcnClarificationAuthority>\n${renderStandardBriefReply(preview)}\n</YPmcnClarificationAuthority>`
+          (preview && preview.gate !== "ready") || (previews.length > 1 && !splitReady)
+            ? `YPmcn mandatory unresolved-Brief interaction: call native AskUserQuestion now and do not return a plain text-only clarification. Use one user-facing form with up to 5 concise single-choice questions, covering every unresolved value, and keep at least one host-provided custom-input entry available. Every question must use line breaks in its non-option prompt text; options are exempt. Options may be strings or label/description objects. Do not expose internal gate, schema, or Tool terminology. Do not call validate_requirement until every value is concrete. A denied/cancelled/closed popup does not confirm anything. After a submitted answer, continue in this same interaction without asking for “继续”.\n<YPmcnClarificationAuthority>\n${preview ? renderStandardBriefReply(preview) : JSON.stringify({ previews })}\n</YPmcnClarificationAuthority>`
             : "",
         ].filter(Boolean).join("\n\n"),
       };
