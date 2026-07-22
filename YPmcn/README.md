@@ -12,7 +12,7 @@ select_inquiry_form_fields(platform) → 网页选择字段
 → create_submission_batch(requirement_id, size, number) 导出表格
 ```
 
-`manual_source_creators` 可从任意既有阶段发起，但每次调用前必须重新解析完整需求并成功执行 `validate_requirement`；只允许把该响应的 32 位 `data.id` 用于紧邻的一次拓展达人，数字型 `data.demand_id` 和 `demand_version` 不是 Tool 主键。系统不查询该需求是否历史检索过，也不要求其他流程完成。只拓展达人时不要求字段选择；导出时字段选择必须发生在本次需求解析之前。`size` 与 `number` 使用正整数十进制字符串，排序只消费本轮拓展达人实际返回的 `inquiry_ids`，导出不再使用宿主 `export_csv`、旧 `target_count` 或 `run_id`。
+`manual_source_creators` 可从任意既有阶段发起，但每次调用前必须重新解析完整需求并成功执行 `validate_requirement`；只允许把该响应的 32 位 `data.id` 用于紧邻的一次拓展达人，数字型 `data.demand_id` 和 `demand_version` 不是 Tool 主键。系统不查询该需求是否历史检索过，也不要求其他流程完成。Tool 只接收 `requirement_id` 与正整数十进制字符串 `size`；实际成功响应中的唯一非空 `excel_file_path` 就是本次拓展及表格导出的终态证据，随后不调用字段选择、排序或批次导出。`rank_creators` 只属于独立的 MCN 询价回收链，其 `inquiry_ids` 必须来自本轮 `sync_mcn_inquiry_status` 的实际成功响应。
 
 ## Hook 边界
 

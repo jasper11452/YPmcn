@@ -1,6 +1,6 @@
 ---
 name: media-assistant
-description: "Use for YPmcn requirement parsing, phase-independent manual creator sourcing, optional field selection, creator filtering/deduplication, and spreadsheet batch export."
+description: "Use for YPmcn requirement parsing and phase-independent manual creator sourcing with Provider spreadsheet output."
 ---
 
 # YPmcn 媒介助手
@@ -9,12 +9,12 @@ description: "Use for YPmcn requirement parsing, phase-independent manual creato
 
 ## 执行规则
 
-- 开始前取得完整需求和拓展达人数量 `size`；导出时再取 `platform`、字段和批次号 `number`。`size`、`number` 是正整数十进制字符串，缺值不猜。
-- HITL：仅 `AskUserQuestion` 收集输入；只问未决必填/歧义、证据分支、外发或安全恢复，一次问全。凡停下前仍需人决定下一步，必须先调用 Ask，且每个弹窗至少保留一个宿主提供的用户自定义输入入口；不得用普通文字提问后直接停。其余 `next_action` 自动续接；提交即执行，取消即停，禁索要“继续”。
+- 开始前取得完整需求和拓展达人数量 `size`；`size` 是正整数十进制字符串，缺值不猜。
+- HITL：仅 `AskUserQuestion` 收集输入；只问未决必填/歧义、证据分支、外发或安全恢复，一次问全。凡说明事实后仍需人决定，须同轮立即 Ask，不得以问句、选项或邀请聊天回复结尾后停下，且每个弹窗保留用户自定义输入入口。其余 `next_action` 自动续接；提交即执行，取消即停，禁索要“继续”。
 - 多平台按原文顺序拆单；共用 Ask，不问先后或中途停。
 - Endpoint schema 优先，并与根 `spec/manifest.json` 指向的正式契约核对；必需 Tool 缺失、契约冲突或证据不足即 `integration_required`，不得回退旧参数。
 - 每次调用前先读 `references/tools/<tool>.json`，只传其中字段；只有实际 MCP 成功响应才是后续证据。
-- 拓展达人不受当前流程阶段限制。每次先按 `requirement-intake.md` 解析并成功调用 `validate_requirement`；只把新生成的 32 位 `data.id` 用于紧邻的一次拓展达人，禁用数字型 `data.demand_id`、`demand_version` 或旧 ID。
+- 拓展达人不受当前流程阶段限制。用户明确说“启动拓展”等启动/继续拓展命令时直接执行，不再弹旧供给确认；仅缺少必填值时 Ask。每次先按 `requirement-intake.md` 解析并成功调用 `validate_requirement`；只把新生成的 32 位 `data.id` 用于紧邻的一次拓展达人，禁用数字型 `data.demand_id`、`demand_version` 或旧 ID。
 - 除上述当次新 ID 外，不检查该需求是否历史检索过或其他流程是否完成。其余 ID 仍逐项核对 ID 血缘，只复制本轮实际成功响应返回的 ID；不得猜测、串用或用虚构 ID 探测。
 - 任一步失败都停止后续业务 Tool；必需证据无效不算成功。写结果未知时先对账，禁止盲重试；用户要求失败即停时绝不重试。
 - 主键格式错就改用当前响应的 `data.id`，不得再建需求；Hook 缺少宿主会话上下文时由插件自有的一次性回执完成校验，不得重新建需求。不得把 `DEMAND_NOT_FOUND` 猜成去重、清理、覆盖或延迟。
@@ -22,15 +22,13 @@ description: "Use for YPmcn requirement parsing, phase-independent manual creato
 
 ## 主链
 
-`select_inquiry_form_fields → validate_requirement → manual_source_creators → rank_creators → create_submission_batch`
+`validate_requirement → manual_source_creators`
 
-1. 仅导出时执行一次 `select_inquiry_form_fields({platform})`；使用 Tool 等待网页 callback 后返回的本次选择，按原序保留非空 `key/name`，禁止在 Tool 返回后重新打开网页。只拓展达人时跳过。
-2. 紧接拓展达人前重新解析完整需求并调用 `validate_requirement`；新建参数不得携带旧 `id/demandVersion`，也不要自动插入 `search_creators`。多平台拆分时，各 payload 的 `originalBrief` 都保留同一份完整客户原文，非当前平台条款作为 atom 保留，禁止添加去重标记。
-3. 仅用第 2 步实际成功响应新生成的 ID 调用 `manual_source_creators({requirement_id,size})`；该 ID 用后即失效，禁止发送 `target_count`。
-4. 导出时只取成功响应的非空 `inquiry_ids`，连同相同 `requirement_id` 和本轮 `columns` 调用 `rank_creators`。若其需求 ID 与上次相同，先提示“已根据需求进行排序，请注意”，仍继续调用，不得阻止。
-5. `rank_creators` 成功后同轮调用 `create_submission_batch({requirement_id,size,number})` 导出表格；禁止发送 `run_id` 或旧批次选项。
+1. 紧接拓展达人前重新解析完整需求并调用 `validate_requirement`；新建参数不得携带旧 `id/demandVersion`，也不要自动插入 `search_creators`。多平台拆分时，各 payload 的 `originalBrief` 都保留同一份完整客户原文，非当前平台条款作为 atom 保留，禁止添加去重标记。
+2. 仅用第 1 步实际成功响应新生成的 ID 调用 `manual_source_creators({requirement_id,size})`；该 ID 用后即失效，禁止发送 `inquiry_id`、`target_count`。
+3. 只有实际成功响应返回唯一非空 `excel_file_path` 才算完成；原样提供该文件入口，不得伪造路径、达人行或询价 ID。此 Tool 已完成表格导出，之后不调用字段选择、`rank_creators` 或 `create_submission_batch`。
 
-`requirement_id`、`size` 在拓展达人与导出步骤必须完全一致；`inquiry_ids` 和 `columns` 必须来自本轮前序成功结果。`validate_requirement` 与拓展达人之间不得插入其他业务 Tool；导出链中不要插入搜索、赛马、企微分发、详情查询、宿主 CSV 导出或额外确认。
+`validate_requirement` 与拓展达人之间不得插入其他业务 Tool；不要插入字段选择、搜索、赛马、企微分发、详情查询、排序、二次导出或额外确认。MCN 链路的 `inquiry_id(s)` 只能来自其实际 `sync_mcn_inquiry_status` 响应，与本链无关。
 
 ## 按需读取
 

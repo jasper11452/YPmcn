@@ -1,6 +1,6 @@
 {
   "id": "ypmcn-media-assistant",
-  "version": "3.4.11",
+  "version": "3.4.13",
   "description": "YPmcn 媒介助手：提供媒介工作流提示与企微外发一次性确认。纯 Node typed hooks。",
   "author": {
     "name": "Jasper"

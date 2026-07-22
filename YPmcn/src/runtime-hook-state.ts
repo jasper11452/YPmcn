@@ -16,7 +16,7 @@ export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 function initialWorkflowState(): Json {
   return {
     phase: "requirement_draft",
-    next_action: "select_inquiry_form_fields",
+    next_action: "validate_requirement",
     waiting_for: null,
     transition_seq: 0,
     updated_at_ms: null,
