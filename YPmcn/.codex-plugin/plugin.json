@@ -1,7 +1,7 @@
 {
   "id": "ypmcn-media-assistant",
   "name": "ypmcn-media-assistant",
-  "version": "3.4.15",
+  "version": "3.4.16",
   "description": "YPmcn 媒介助手：解析客户需求、检索与排序达人，并通过远程 MCP 推进媒介工作流。",
   "author": {
     "name": "Jasper"

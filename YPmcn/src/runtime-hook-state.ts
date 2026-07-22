@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, join } from "node:path";
 
@@ -9,7 +9,8 @@ export type Json = Record<string, any>;
 export type ConfirmationStatus = "pending" | "approved" | "in_flight" | "consumed" | "unknown" | "denied";
 export type GuardStore = { path: string; data: Json };
 const STATE_SCOPE = new AsyncLocalStorage<string>();
-const STATE_SCHEMA_VERSION = 20;
+const STATE_SCHEMA_VERSION = 21;
+const WORKFLOW_EVENT_LIMIT = 200;
 
 export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 
@@ -102,6 +103,36 @@ function storeAtPath(path: string): GuardStore {
     data.workflow = initialWorkflowState();
     changed = true;
   }
+  if (!data.execution_units || typeof data.execution_units !== "object" || Array.isArray(data.execution_units)) {
+    const unitId = "legacy";
+    data.execution_units = {
+      [unitId]: {
+        id: unitId,
+        status: "active",
+        workflow: data.workflow,
+        events: [],
+        created_at_ms: Date.now(),
+        updated_at_ms: Date.now(),
+      },
+    };
+    data.active_execution_unit_id = unitId;
+    changed = true;
+  }
+  if (!text(data.active_execution_unit_id) || !data.execution_units[data.active_execution_unit_id]) {
+    const firstUnitId = Object.keys(data.execution_units)[0];
+    if (firstUnitId) {
+      data.active_execution_unit_id = firstUnitId;
+      data.workflow = data.execution_units[firstUnitId].workflow;
+    }
+    changed = true;
+  }
+  const activeUnit = data.execution_units[data.active_execution_unit_id];
+  if (activeUnit && activeUnit.workflow !== data.workflow) {
+    // JSON persistence breaks object identity between the compatibility projection
+    // and the active unit snapshot. The top-level projection is the most recently
+    // written value, so rebind it into the active unit on every load.
+    activeUnit.workflow = data.workflow;
+  }
   if (previousSchemaVersion !== undefined && Number(previousSchemaVersion) < 17) {
     for (const key of [
       "supply_plan_status", "supply_plan_error", "matched_creator_count", "supply_ratio",
@@ -142,9 +173,18 @@ function storeAtPath(path: string): GuardStore {
   if (!Array.isArray(data.workflow_events)) {
     data.workflow_events = [];
     changed = true;
-  } else if (data.workflow_events.length > 50) {
-    data.workflow_events = data.workflow_events.slice(-50);
+  } else if (data.workflow_events.length > WORKFLOW_EVENT_LIMIT) {
+    data.workflow_events = data.workflow_events.slice(-WORKFLOW_EVENT_LIMIT);
     changed = true;
+  }
+  for (const unit of Object.values<Json>(data.execution_units)) {
+    if (!Array.isArray(unit.events)) {
+      unit.events = [];
+      changed = true;
+    } else if (unit.events.length > WORKFLOW_EVENT_LIMIT) {
+      unit.events = unit.events.slice(-WORKFLOW_EVENT_LIMIT);
+      changed = true;
+    }
   }
   for (const key of [
     "trusted_ids",
@@ -185,4 +225,15 @@ export function store(rootDir: string): GuardStore {
 
 export function globalStore(rootDir: string): GuardStore {
   return storeAtPath(join(rootDir, "state", "confirmation_guard.json"));
+}
+
+export function sessionStores(rootDir: string): GuardStore[] {
+  const sessionsDir = join(rootDir, "state", "sessions");
+  try {
+    return readdirSync(sessionsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => storeAtPath(join(sessionsDir, entry.name, "confirmation_guard.json")));
+  } catch {
+    return [];
+  }
 }
