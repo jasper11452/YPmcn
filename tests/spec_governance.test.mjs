@@ -124,6 +124,7 @@ describe("Spec governance", () => {
         "multi_platform_processing_order",
       ],
       batchRequirementQuestions: true,
+      multilineNonOptionPromptRequired: true,
       submittedAnswer: "execute_the_selected_safe_action_in_the_same_assistant_turn",
       cancelBehavior: "stop_without_a_following_business_write",
       continueMessageRequired: false,

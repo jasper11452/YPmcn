@@ -10,7 +10,7 @@ description: "Use for YPmcn requirement parsing, manual creator sourcing, audita
 ## 执行规则
 
 - 开始前取得完整需求和拓展达人数量 `size`；`size` 是正整数十进制字符串，缺值不猜。
-- HITL：仅 `AskUserQuestion` 收集输入；只问未决必填/歧义、证据分支、外发或安全恢复，一次问全。凡说明事实后仍需人决定，须同轮立即 Ask，不得以问句、选项或邀请聊天回复结尾后停下，且每个弹窗保留用户自定义输入入口。其余 `next_action` 自动续接；提交即执行，取消即停，禁索要“继续”。
+- HITL：仅 `AskUserQuestion` 收集输入；只问未决必填/歧义、证据分支、外发或安全恢复，一次问全。弹窗问题的非选项提示必须分行，禁止单行展示；选项不限。凡说明事实后仍需人决定，须同轮立即 Ask，不得以问句、选项或邀请聊天回复结尾后停下，且每个弹窗保留用户自定义输入入口。其余 `next_action` 自动续接；提交即执行，取消即停，禁索要“继续”。
 - 标准检索链中，`search_creators` 成功后同轮直接调用 `rank_mcns`，中间不弹供给确认、不询问是否继续。排序成功后才弹“赛后补量”：始终展示需求人数、已选机构数、预估机构达人去重覆盖量、供需倍数、建议手动拓展人数，以及“机构承接达人:手动拓展达人”比例；手动拓展为 `0` 时也必须显示（例如 `2:0`），并且不得发起零人拓展。响应含真实累计覆盖里程碑时，同时展示前 N 家可达到的实际供需倍数，禁止虚构。
 - 字段选择网页只允许用户操作。每轮 MCN 流程最多调用一次 `select_inquiry_form_fields`，调用后等待用户在网页选择并提交；禁止代选、预选、推断或提交字段，也禁止在等待、成功、取消、超时或无效 callback 后重复打开网页。
 - `sync_mcn_inquiry_status` 只允许在本轮 `create_with_distributions` 实际成功响应逐机构返回匹配需求、项目和机构集合的 `sent` 明细后调用；状态机记录授权、阻断和完成顺序。sync 只证明询价同步，绝不证明企微已发送。
@@ -31,7 +31,7 @@ description: "Use for YPmcn requirement parsing, manual creator sourcing, audita
 1. 紧接拓展达人前重新解析完整需求并调用 `validate_requirement`；新建参数不得携带旧 `id/demandVersion`，也不要自动插入 `search_creators`。多平台拆分时，各 payload 的 `originalBrief` 都保留同一份完整客户原文，非当前平台条款作为 atom 保留，禁止添加去重标记。
 2. 仅用第 1 步实际成功响应新生成的 ID 调用 `manual_source_creators({requirement_id,size})`；该 ID 用后即失效，禁止发送 `inquiry_id`、`target_count`。
 3. 成功响应必须返回非空达人列表；立即按固定字段展示 Markdown 表格：平台、达人ID、达人昵称、内容标签、主页链接。状态机按调用批次分别记录数据已收到与列表已展示，不保存原始达人行。
-4. 没有真实企微发送记录时，以空 `inquiry_ids` 直接 `rank_creators` 并生成提报表。有真实发送记录时，sync 必须已在发送后执行，再弹“机构回填确认”；不得用 inquiry ID 判断回填完成，只有人工选择“确认已完成回填”后才合并排序并生成提报表。
+4. 无企微发送返回 ID 时省略 `inquiry_id`，直接 `rank_creators` 并生成提报表；否则按发送调用从新到旧取首个有效 ID。当前流程有发送时，sync 后弹“机构回填确认”；只有人工选择“确认已完成回填”才合并排序，ID 本身不证明回填。
 
 直接拓展时，`validate_requirement` 与 `manual_source_creators` 之间不得插入其他业务 Tool。搜索链已启动时，必须先完整完成 MCN 链，再进入这段直接拓展与合并排序。
 

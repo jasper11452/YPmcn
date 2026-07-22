@@ -8,11 +8,11 @@ YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。
 select_inquiry_form_fields(platform) → 网页选择字段
 → validate_requirement(payload) → 取得本次响应的 32 位 data.id
 → manual_source_creators(requirement_id, size)
-→ rank_creators(inquiry_ids, requirement_id, columns) 筛选去重
+→ rank_creators(requirement_id, inquiry_id?) 筛选去重
 → create_submission_batch(requirement_id, size, number) 导出表格
 ```
 
-`manual_source_creators` 可从任意既有阶段发起，但每次调用前必须重新解析完整需求并成功执行 `validate_requirement`；只允许把该响应的 32 位 `data.id` 用于紧邻的一次拓展达人，数字型 `data.demand_id` 和 `demand_version` 不是 Tool 主键。系统不查询该需求是否历史检索过，也不要求其他流程完成。Tool 只接收 `requirement_id` 与正整数十进制字符串 `size`；实际成功响应中的唯一非空 `excel_file_path` 就是本次拓展及表格导出的终态证据，随后不调用字段选择、排序或批次导出。`rank_creators` 只属于独立的 MCN 询价回收链，其 `inquiry_ids` 必须来自本轮 `sync_mcn_inquiry_status` 的实际成功响应。
+`manual_source_creators` 可从任意既有阶段发起，但每次调用前必须重新解析完整需求并成功执行 `validate_requirement`；只允许把该响应的 32 位 `data.id` 用于紧邻的一次拓展达人，数字型 `data.demand_id` 和 `demand_version` 不是 Tool 主键。系统不查询该需求是否历史检索过，也不要求其他流程完成。Tool 只接收 `requirement_id` 与正整数十进制字符串 `size`。`rank_creators` 始终传当前 `requirement_id`；会话历史中没有企微发送返回的 `inquiry_id` 时省略该参数，有记录时按发送调用从新到旧选择第一个有效 ID。
 
 ## Hook 边界
 

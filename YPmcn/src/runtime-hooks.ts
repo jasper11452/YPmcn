@@ -8,6 +8,7 @@ import {
 } from "./runtime-hook-state.js";
 import {
   guardWorkflowTool,
+  isAskTool,
   normalize,
   recordWorkflowToolResult,
 } from "./runtime-hook-workflow.js";
@@ -79,6 +80,23 @@ export function beforeTool(
   const input = event.params && typeof event.params === "object" ? event.params :
     event.arguments && typeof event.arguments === "object" ? event.arguments : {};
   const tool = normalize(raw);
+
+  if (isAskTool(raw)) {
+    const questions = Array.isArray(input.questions) ? input.questions : [];
+    const allQuestionsAreMultiline = questions.length > 0 && questions.every((question: unknown) =>
+      Boolean(
+        question && typeof question === "object" && !Array.isArray(question) &&
+        text((question as Json).question) && /\r?\n/.test((question as Json).question),
+      )
+    );
+    if (!allQuestionsAreMultiline) {
+      return denyStructured(
+        "INVALID_INPUT",
+        "Every AskUserQuestion question must use multiline prompt text. Put non-option prompt content on separate lines; option labels and descriptions are exempt.",
+      );
+    }
+    return undefined;
+  }
 
   if (SHELL_TOOLS.has(raw.toLowerCase())) {
     const command = [input.command, input.cmd, input.script, input.input].filter(text).join("\n");

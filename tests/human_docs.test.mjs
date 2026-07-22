@@ -6,7 +6,6 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -123,7 +122,8 @@ describe("human documentation", () => {
     ]) {
       assert.equal(existsSync(join(repoRoot, relativePath)), true, relativePath);
     }
-    assert.ok((statSync(join(repoRoot, ".githooks/pre-commit")).mode & 0o111) !== 0, "hook must be executable");
+    const hookIndexEntry = git(repoRoot, "ls-files", "--stage", ".githooks/pre-commit");
+    assert.match(hookIndexEntry, /^100755\s/, "hook must be executable in the Git index");
 
     const fixtureRoot = mkdtempSync(join(tmpdir(), "ypmcn-hook-install-"));
     t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));

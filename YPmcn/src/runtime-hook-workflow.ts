@@ -704,17 +704,15 @@ function authorizeRankCreators(event: Json, input: Json, current: GuardStore): J
       "rank_creators requires either the current manual creator-data receipt or the current successfully ingested MCN submissions.",
     );
   }
-  const inquiryIds = (workflow.manual_sourcing_has_prior_wecom_send === true || workflow.mcn_submissions_ingested === true) &&
-    Array.isArray(workflow.sync_inquiry_ids)
-    ? workflow.sync_inquiry_ids
-    : [];
+  const inquiryId = latestWecomSendInquiryId(current.data);
   if (
     !text(workflow.requirement_id) || input.requirement_id !== workflow.requirement_id ||
-    canonical(input.inquiry_ids) !== canonical(inquiryIds)
+    Object.prototype.hasOwnProperty.call(input, "inquiry_ids") ||
+    (inquiryId ? input.inquiry_id !== inquiryId : Object.prototype.hasOwnProperty.call(input, "inquiry_id"))
   ) {
     return denyPreflight(
       event, "rank_creators", input, "workflow_lineage", "INVALID_INPUT",
-      "rank_creators must use the current manual-sourcing requirement_id; use the exact sync inquiry_ids after a verified WeCom flow, otherwise use an empty inquiry_ids array.",
+      "rank_creators must use the current manual-sourcing requirement_id. If a prior verified create_with_distributions result returned an inquiry_id, pass the most recent such inquiry_id; otherwise omit inquiry_id.",
     );
   }
   return undefined;
@@ -744,11 +742,28 @@ function authorizeSubmissionBatch(event: Json, input: Json, current: GuardStore)
 
 type DistributionOutcomeEvidence = {
   projectId?: string;
+  inquiryId?: string;
   requestedCount: number;
   sentCount: number;
   unboundCount: number;
   outcomes: Array<{ supplierId: string; status: "sent" | "unbound" }>;
 };
+
+function latestWecomSendInquiryId(data: Json): string | undefined {
+  if (!Array.isArray(data.wecom_send_inquiry_id_history)) return undefined;
+  return data.wecom_send_inquiry_id_history.find(text)?.trim();
+}
+
+function recordWecomSendInquiryId(data: Json, inquiryId: string | undefined): void {
+  if (!inquiryId) return;
+  const previous = Array.isArray(data.wecom_send_inquiry_id_history)
+    ? data.wecom_send_inquiry_id_history.filter(text).map((value: string) => value.trim())
+    : [];
+  data.wecom_send_inquiry_id_history = [
+    inquiryId,
+    ...previous.filter((value: string) => value !== inquiryId),
+  ].slice(0, 100);
+}
 
 type DistributionUnboundRejectionEvidence = {
   remainingSupplierIds: string[];
@@ -957,17 +972,21 @@ function submissionBatchEvidence(root: unknown): Json | undefined {
   );
 }
 
+function normalizeInstitutionId(value: string): string {
+  return value.replaceAll("-", "");
+}
+
 function distributionSupplierId(value: unknown): string | undefined {
-  if (text(value)) return value.trim();
+  if (text(value)) return normalizeInstitutionId(value.trim());
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Json;
   const direct = recordText(record, [...MCN_ID_KEYS, "supplier"]);
-  if (direct) return direct;
+  if (direct) return normalizeInstitutionId(direct);
   for (const key of ["supplier", "mcn", "institution", "agency", "vendor"]) {
     const nested = record[key];
     if (!nested || typeof nested !== "object" || Array.isArray(nested)) continue;
     const nestedId = recordText(nested as Json, ["id", ...MCN_ID_KEYS]);
-    if (nestedId) return nestedId;
+    if (nestedId) return normalizeInstitutionId(nestedId);
   }
   return undefined;
 }
@@ -1082,12 +1101,18 @@ function distributionUnboundRejectionEvidence(
   ) return undefined;
   const requested = input.supplierIds.filter(text).map((supplierId: string) => supplierId.trim());
   if (requested.length !== input.supplierIds.length || new Set(requested).size !== requested.length) return undefined;
-  const requestedSet = new Set(requested);
+  const requestedByNormalizedId = new Map(
+    requested.map((supplierId) => [normalizeInstitutionId(supplierId), supplierId]),
+  );
+  if (requestedByNormalizedId.size !== requested.length) return undefined;
   const unbound = new Set<string>();
   const unboundNames = new Set<string>();
   let structuredBindingEvidence = false;
   const addUnbound = (supplierId: string | undefined) => {
-    if (supplierId && requestedSet.has(supplierId)) unbound.add(supplierId);
+    const requestedSupplierId = supplierId
+      ? requestedByNormalizedId.get(normalizeInstitutionId(supplierId))
+      : undefined;
+    if (requestedSupplierId) unbound.add(requestedSupplierId);
   };
 
   for (const record of rawObjectRecords(event.result)) {
@@ -1166,12 +1191,18 @@ function distributionOutcomeEvidence(root: unknown, input: Json): DistributionOu
   if (!data || !Array.isArray(input.supplierIds) || input.supplierIds.length === 0) return undefined;
   const requested = input.supplierIds.filter(text).map((supplierId: string) => supplierId.trim());
   if (requested.length !== input.supplierIds.length || new Set(requested).size !== requested.length) return undefined;
-  const requestedSet = new Set(requested);
+  const requestedByNormalizedId = new Map(
+    requested.map((supplierId) => [normalizeInstitutionId(supplierId), supplierId]),
+  );
+  if (requestedByNormalizedId.size !== requested.length) return undefined;
   const outcomes = new Map<string, "sent" | "unbound" | "conflict">();
   const recordOutcome = (supplierId: string | undefined, outcome: "sent" | "unbound") => {
-    if (!supplierId || !requestedSet.has(supplierId)) return;
-    const existing = outcomes.get(supplierId);
-    outcomes.set(supplierId, existing && existing !== outcome ? "conflict" : outcome);
+    const requestedSupplierId = supplierId
+      ? requestedByNormalizedId.get(normalizeInstitutionId(supplierId))
+      : undefined;
+    if (!requestedSupplierId) return;
+    const existing = outcomes.get(requestedSupplierId);
+    outcomes.set(requestedSupplierId, existing && existing !== outcome ? "conflict" : outcome);
   };
 
   for (const record of objectRecords(data)) {
@@ -1181,7 +1212,7 @@ function distributionOutcomeEvidence(root: unknown, input: Json): DistributionOu
     }
 
     const supplierId = distributionSupplierId(record);
-    if (!supplierId || !requestedSet.has(supplierId)) continue;
+    if (!supplierId || !requestedByNormalizedId.has(normalizeInstitutionId(supplierId))) continue;
     const status = recordText(record, ["notification_status", "send_status", "outcome", "status"])?.toLowerCase();
     const bindingFlag = ["group_chat_bound", "wechat_group_bound", "wecom_group_bound", "is_group_bound"]
       .map((key) => record[key])
@@ -1201,9 +1232,11 @@ function distributionOutcomeEvidence(root: unknown, input: Json): DistributionOu
   if (outcomes.size !== requested.length || [...outcomes.values()].includes("conflict")) return undefined;
   const sentCount = [...outcomes.values()].filter((outcome) => outcome === "sent").length;
   const projectId = resultText(data, ["project_id", "provider_project_id"]);
+  const inquiryId = resultText(data, ["inquiry_id"]);
   if (sentCount > 0 && !projectId) return undefined;
   return {
     projectId,
+    inquiryId,
     requestedCount: requested.length,
     sentCount,
     unboundCount: requested.length - sentCount,
@@ -1675,6 +1708,7 @@ function updateLocalWorkflow(
     if (distributionEvidence?.sentCount === 1) {
       item.status = "sent";
       if (distributionEvidence.projectId) item.project_id = distributionEvidence.projectId;
+      recordWecomSendInquiryId(current.data, distributionEvidence.inquiryId);
     } else if (distributionEvidence?.unboundCount === 1) {
       item.status = "unbound";
     } else if (!event.error && definiteFailureEnvelope(event.result) && !hasDistributionWriteEvidence(event.result)) {
@@ -1872,6 +1906,9 @@ function updateLocalWorkflow(
       }
       case "create_with_distributions":
         if (!distributionEvidence) break;
+        if (distributionEvidence.sentCount > 0) {
+          recordWecomSendInquiryId(current.data, distributionEvidence.inquiryId);
+        }
         if (text(input.requirement_id)) workflow.requirement_id = input.requirement_id.trim();
         if (distributionEvidence.projectId) workflow.project_id = distributionEvidence.projectId;
         else delete workflow.project_id;

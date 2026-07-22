@@ -743,9 +743,7 @@
     },
     "rank_creators": {
       "name": "rank_creators",
-      "required": [
-        "inquiry_ids"
-      ],
+      "required": [],
       "properties": {
         "requirement_id": {
           "anyOf": [
@@ -753,17 +751,15 @@
             {"type": "null"}
           ]
         },
-        "inquiry_ids": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+        "inquiry_id": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "forbidden": [],
       "agentRequired": ["requirement_id"],
       "agentSemanticRequirements": {
-        "inquiry_ids": "empty when no verified WeCom send exists; otherwise the exact IDs returned by the send-bound sync_mcn_inquiry_status call, with a separate human confirmation required before treating MCN return as complete",
+        "inquiry_id": "omit when no prior verified create_with_distributions result returned an inquiry_id; otherwise use the most recent returned inquiry_id, scanning earlier send results only when a newer result has no usable ID",
         "requirement_id": "the same non-empty requirement_id used by the current MCN inquiry-recovery chain"
       },
       "sideEffects": "business-write",

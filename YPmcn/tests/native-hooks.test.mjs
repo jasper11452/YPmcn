@@ -265,7 +265,8 @@ describe("YP Action native hooks", () => {
     assert.match(YPMCN_FAST_PATH, /manual_source_creators\(\{requirement_id,size\}\)/);
     assert.match(YPMCN_FAST_PATH, /Immediately render every returned row as one Markdown table/);
     assert.match(YPMCN_FAST_PATH, /workflow\.manual_sourcing_display_marker/);
-    assert.match(YPMCN_FAST_PATH, /If no verified WeCom send exists[^]*inquiry_ids=\[\]/);
+    assert.match(YPMCN_FAST_PATH, /omit inquiry_id when no prior verified create_with_distributions result returned one/);
+    assert.match(YPMCN_FAST_PATH, /Every AskUserQuestion question must contain line breaks/);
     assert.match(YPMCN_FAST_PATH, /机构回填确认/);
     assert.match(YPMCN_FAST_PATH, /age1Rate\.\.age6Rate are direct JSON numbers/);
     assert.match(YPMCN_FAST_PATH, /Xiaohongshu bands are <18, 18–23, 24–29, 30–39, 40–49, and 50\+/);
@@ -299,7 +300,9 @@ describe("YP Action native hooks", () => {
 
     for (const [toolName, params] of [
       ["read", { file_path: "/tmp/SKILL.md" }],
-      ["AskUserQuestion", { questions: [{ header: "供给确认" }] }],
+      ["AskUserQuestion", {
+        questions: [{ header: "供给确认", question: "请核对供给信息：\n请选择下一步。" }],
+      }],
       ["mcp__ypmcn__validate_requirement", {
         payload: { rawMessagesJson: { originalBrief: UNRESOLVED_BRIEF } },
       }],
@@ -349,7 +352,7 @@ describe("YP Action native hooks", () => {
     });
     const rankParams = (requirement_id) => ({
       requirement_id,
-      inquiry_ids: ["31"],
+      inquiry_id: "31",
     });
 
     const activeRequirement = requirementId(31);
@@ -375,6 +378,7 @@ describe("YP Action native hooks", () => {
         success: true,
         data: {
           project_id: "project-31",
+          inquiry_id: "31",
           created: [{ supplier_id: "supplier-31", notification_status: "sent" }],
         },
         error: null,
@@ -541,6 +545,26 @@ describe("YP Action native hooks", () => {
     assert.equal(await guard("bash", { command: "rg create_with_distributions YPmcn/README.md" }), undefined);
   });
 
+  it("requires multiline non-option text in every AskUserQuestion prompt", async () => {
+    const singleLine = await guard("AskUserQuestion", {
+      questions: [{
+        header: "测试确认",
+        question: "请选择下一步？",
+        options: ["继续", "停止"],
+      }],
+    });
+    assert.equal(singleLine.errorCode, "INVALID_INPUT");
+    assert.match(singleLine.blockReason, /multiline prompt text/);
+
+    assert.equal(await guard("AskUserQuestion", {
+      questions: [{
+        header: "测试确认",
+        question: "请核对以下信息：\n请选择下一步？",
+        options: ["继续", "停止"],
+      }],
+    }), undefined);
+  });
+
   it("binds a multiline AskUserQuestion warning to the exact send parameters", async () => {
     const prepared = await requestConfirmation(distributionParams({
       supplierIds: ["supplier-1", "supplier-2"],
@@ -599,8 +623,8 @@ describe("YP Action native hooks", () => {
         data: {
           project_id: "project-1",
           created: [
-            { supplier_id: "supplier-1", notification_status: "sent" },
-            { supplier_id: "supplier-2", notification_status: "sent" },
+            { supplier_id: "supplier--1", notification_status: "sent" },
+            { supplier_id: "supplier--2", notification_status: "sent" },
           ],
         },
         error: null,
@@ -1621,6 +1645,7 @@ describe("YP Action native hooks", () => {
       sync_after_wecom_send: true,
       sync_inquiry_ids: ["inquiry-59"],
     });
+    state.wecom_send_inquiry_id_history = ["inquiry-59", "inquiry-older"];
     writeFileSync(stateFile, JSON.stringify(state, null, 2));
 
     const manualParams = { requirement_id: activeRequirement, size: "2" };
@@ -1631,7 +1656,7 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.next_action, "confirm_mcn_return_completed");
     assert.equal(state.workflow.waiting_for, "user");
 
-    const rankParams = { requirement_id: activeRequirement, inquiry_ids: ["inquiry-59"] };
+    const rankParams = { requirement_id: activeRequirement, inquiry_id: "inquiry-59" };
     assert.equal((await guard("mcp__ypmcn__rank_creators", rankParams)).errorCode, "INVALID_PHASE");
     const returnQuestion = {
       questions: [{
@@ -1648,6 +1673,10 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.manual_sourcing_mcn_return_confirmation_status, "confirmed");
     assert.equal(state.workflow.next_action, "rank_creators");
     assert.equal(state.workflow.waiting_for, null);
+    assert.equal((await guard("mcp__ypmcn__rank_creators", {
+      requirement_id: activeRequirement,
+      inquiry_id: "inquiry-older",
+    })).errorCode, "INVALID_INPUT");
     assert.equal(await guard("mcp__ypmcn__rank_creators", rankParams), undefined);
   });
 
@@ -1676,6 +1705,10 @@ describe("YP Action native hooks", () => {
       manualParams,
       manualCreatorResult("61"),
     );
+
+    assert.equal(await guard("mcp__ypmcn__rank_creators", {
+      requirement_id: activeRequirement,
+    }), undefined);
 
     const wrongRank = await guard("mcp__ypmcn__rank_creators", {
       requirement_id: activeRequirement,

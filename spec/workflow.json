@@ -128,7 +128,7 @@
     "briefIntegrity": "validate_requirement rawMessagesJson.originalBrief equals an exact real client Brief recovered from the current conversation after host-envelope stripping; AskUserQuestion and Tool JSON do not replace it, retry markers and platform-specific reconstructions are rejected, and independently validated platform payloads retain the same complete multi-platform originalBrief",
     "selectedSupplierBinding": "create_with_distributions supplierIds must equal the supplier set bound to the latest selected-supplier coverage calculation; any set change requires recalculation",
     "manualSourcingEvidence": "a successful manual_source_creators response supplies a non-empty creator array; local state records the batch fingerprint, fixed fields, received status, and separately observed Markdown-list display status without storing raw creator rows",
-    "rankCreatorsPrerequisite": "manual creator data is received; without verified WeCom send use inquiry_ids=[], while a verified send requires its later sync_mcn_inquiry_status result plus explicit human confirmation that MCN return is complete before combined ranking",
+    "rankCreatorsPrerequisite": "manual creator data is received; omit inquiry_id when no prior verified create_with_distributions result returned one, otherwise use the most recent returned inquiry_id and scan older sends only when newer results lack one; the active MCN flow still requires explicit human confirmation that MCN return is complete before combined ranking",
     "mcnReturnConfirmation": "inquiry IDs and sync success never prove return completion; a native 机构回填确认 popup and the exact 确认已完成回填 answer are required",
     "syncCallOrder": "sync_mcn_inquiry_status is blocked unless matching create_with_distributions sent evidence exists first, and local state records blocked, authorized, and completed ordering statuses",
     "submissionExport": "every successful manual creator flow continues through rank_creators and create_submission_batch"
@@ -214,7 +214,7 @@
       "id": "recommendation-ready",
       "from": "candidate_pool_enriched",
       "trigger": {"type": "tool", "name": "rank_creators"},
-      "guards": ["manual creator data was received", "without WeCom send inquiry_ids is empty", "with WeCom send inquiry_ids exactly match sync_mcn_inquiry_status and a human confirmed MCN return completion", "requirement_id matches the current manual flow"],
+      "guards": ["manual creator data was received", "without a prior verified WeCom send inquiry_id is omitted", "with prior verified WeCom sends inquiry_id is the most recent returned usable ID, falling back through older sends only when needed", "the active MCN flow requires human confirmation of return completion", "requirement_id matches the current manual flow"],
       "evidence": ["successful filtered and deduplicated persisted ranking result"],
       "nextPhase": "recommendation_ready"
     },

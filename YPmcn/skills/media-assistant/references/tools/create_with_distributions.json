@@ -42,7 +42,7 @@
     "每次实际调用（包括每个逐机构 fallback）都必须先弹出本次参数对应的 AskUserQuestion；只有返回“确认发送”才可同轮以完全相同参数调用。拒绝、关闭、超时、弹窗改写、参数变化或缺少已弹窗且已确认回执，均不得触达 Provider，也不得把 after-tool 结果记为发送成功。",
     "多供应商调用返回失败只表示该批无法作为一次群聊匹配整体完成，不得据此宣称所有供应商均发送失败；必须保留回执中已有的逐供应商 sent/unbound 证据。",
     "若批次失败能够排除未知写入结果，则将已明确未绑定的机构记为 unbound，其余仍为 pending 的 supplierIds 拆成单项逐个发送，保持其他参数不变，并在每个单项发送前重新弹出最终确认；禁止将剩余机构再次组成多供应商批次。只发送 pending 机构，不得重发 sent 或 unknown 机构。",
-    "成功回执必须逐机构返回可关联 supplier_id 的明确发送状态；只有逐机构状态 sent 证明已发送。顶层 sent_supplier_ids/sent_suppliers 等汇总名单、通用 success 或请求名单都不是发送明细。pending 不算已发送，failed/skipped 仅在 notification_error 明确说明缺少群聊绑定时才算未绑定。",
+    "成功回执必须逐机构返回可关联 supplier_id 的明确发送状态；只有逐机构状态 sent 证明已发送。Provider 返回的机构 ID 若错误包含连字符，读取时只删除 '-'，其他字符不变，再与请求 supplierIds 匹配。顶层 sent_supplier_ids/sent_suppliers 等汇总名单、通用 success 或请求名单都不是发送明细。pending 不算已发送，failed/skipped 仅在 notification_error 明确说明缺少群聊绑定时才算未绑定。",
     "状态机必须逐机构记录 pending/sent/unbound/failed/unknown；sent 还需绑定该机构实际返回的 project_id，逐个 fallback 结束后按机构与对应 project_id 分别同步。",
     "发送链结束后只按实际逐供应商回执提示一次未绑定且未发送的机构、明确失败机构、结果未知机构和已发送机构；通用 success、请求名单或缺失逐项状态不能作为发送证据。",
     "后续 sync_mcn_inquiry_status 只传实际回执为已发送的 supplierIds；全部未发送或结果不明时不调用 sync。"

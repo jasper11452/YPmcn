@@ -56,8 +56,8 @@ const EXPECTED_INPUTS = {
     properties: { requirement_id: "string", size: "string" },
   },
   rank_creators: {
-    required: ["inquiry_ids"],
-    properties: { requirement_id: "string|null", inquiry_ids: "array" },
+    required: [],
+    properties: { requirement_id: "string|null", inquiry_id: "string" },
   },
   create_submission_batch: {
     required: ["requirement_id", "size", "number"],
@@ -136,7 +136,7 @@ describe("current Endpoint MCP contract", () => {
     assert.match(profile.tools.get_workflow_state.semanticRequirement, /demand_id.*demand_version.*trace_id/);
     assert.match(profile.tools.get_recommendation_run_detail.semanticRequirement, /positive integer/);
     assert.deepEqual(profile.tools.rank_creators.agentRequired, ["requirement_id"]);
-    assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /sync_mcn_inquiry_status/);
+    assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_id, /most recent returned inquiry_id/);
     assert.match(
       profile.tools.manual_source_creators.agentSemanticRequirements.requirement_id,
       /32-character hexadecimal data\.id.*immediately preceding successful validate_requirement.*plugin-owned fresh receipt.*one manual_source_creators invocation/,
