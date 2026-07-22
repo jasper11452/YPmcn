@@ -25,8 +25,8 @@ const MCN_CONFIRMATION_HEADER = "MCN确认";
 const FIELD_CONFIRMATION_HEADER = "字段确认";
 const START_MCN_RACE_LABEL = "开始MCN赛马";
 const CONTINUE_MCN_RACE_LABEL = "仍继续MCN赛马";
-const PAUSE_FOR_SUPPLY_LABEL = "先扩充机构或预手扒";
-const START_POST_RACE_MANUAL_LABEL = "一键发起手扒补量";
+const PAUSE_FOR_SUPPLY_LABEL = "先扩充机构或预拓展达人";
+const START_POST_RACE_MANUAL_LABEL = "一键发起拓展达人补量";
 const REVISE_MCN_SELECTION_LABEL = "追加机构后重新计算";
 const SKIP_POST_RACE_MANUAL_LABEL = "暂不补量，继续询价";
 const MANUAL_TASK_STATUSES = new Set(["started", "running", "completed"]);
@@ -452,43 +452,55 @@ function recordRequirementReceipts(
   preflightDenial?: PreflightDenialReason,
 ): void {
   const current = store(rootDir);
-  const manualReceipt = current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
-  const searchReceipt = current.data[SEARCH_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
+  const global = globalStore(rootDir);
   const now = Date.now();
 
   if (tool === "validate_requirement") {
     const requirementId = event.error ? undefined : validationRequirementId(event.result);
-    if (requirementId) {
-      current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = freshRequirementReceipt(requirementId, now);
-      current.data[SEARCH_REQUIREMENT_RECEIPT_KEY] = freshRequirementReceipt(requirementId, now);
-    } else {
-      delete current.data[MANUAL_REQUIREMENT_RECEIPT_KEY];
-      delete current.data[SEARCH_REQUIREMENT_RECEIPT_KEY];
+    // Mirror the handoff receipt so before_tool_call can verify the immediately
+    // following manual call even when the host drops its session identifier.
+    for (const target of global.path === current.path ? [current] : [current, global]) {
+      if (requirementId) {
+        target.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = freshRequirementReceipt(requirementId, now);
+        target.data[SEARCH_REQUIREMENT_RECEIPT_KEY] = freshRequirementReceipt(requirementId, now);
+      } else {
+        delete target.data[MANUAL_REQUIREMENT_RECEIPT_KEY];
+        delete target.data[SEARCH_REQUIREMENT_RECEIPT_KEY];
+      }
+      save(target.path, target.data);
     }
-    save(current.path, current.data);
     return;
   }
 
   if (preflightDenial === "primary_key_format" || preflightDenial === "brief_mismatch") return;
-  let changed = false;
-  if (manualReceipt?.status === "fresh") {
-    manualReceipt.status = tool === "manual_source_creators" && preflightDenial !== "missing_session_context"
-      ? "consumed"
-      : "expired";
-    manualReceipt.updated_at_ms = now;
-    current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = manualReceipt;
-    changed = true;
+  const currentManualHash = (current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined)?.requirement_id_sha256;
+  const currentSearchHash = (current.data[SEARCH_REQUIREMENT_RECEIPT_KEY] as Json | undefined)?.requirement_id_sha256;
+  for (const target of global.path === current.path ? [current] : [current, global]) {
+    let changed = false;
+    const manualReceipt = target.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
+    const searchReceipt = target.data[SEARCH_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
+    if (manualReceipt?.status === "fresh" && (target === current || manualReceipt.requirement_id_sha256 === currentManualHash)) {
+      manualReceipt.status = tool === "manual_source_creators" ? "consumed" : "expired";
+      manualReceipt.updated_at_ms = now;
+      target.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = manualReceipt;
+      changed = true;
+    }
+    if (searchReceipt?.status === "fresh" && (target === current || searchReceipt.requirement_id_sha256 === currentSearchHash)) {
+      searchReceipt.status = tool === "search_creators" ? "consumed" : "expired";
+      searchReceipt.updated_at_ms = now;
+      target.data[SEARCH_REQUIREMENT_RECEIPT_KEY] = searchReceipt;
+      changed = true;
+    }
+    if (changed) save(target.path, target.data);
   }
-  if (searchReceipt?.status === "fresh") {
-    searchReceipt.status = tool === "search_creators" ? "consumed" : "expired";
-    searchReceipt.updated_at_ms = now;
-    current.data[SEARCH_REQUIREMENT_RECEIPT_KEY] = searchReceipt;
-    changed = true;
-  }
-  if (changed) save(current.path, current.data);
 }
 
-function authorizeFreshManualRequirement(event: Json, input: Json, current: GuardStore): Json | undefined {
+function authorizeFreshManualRequirement(
+  event: Json,
+  input: Json,
+  current: GuardStore,
+  rootDir: string,
+): Json | undefined {
   const receipt = current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
   if (receipt?.status !== "fresh" || !text(receipt.requirement_id_sha256)) {
     return denyPreflight(
@@ -511,6 +523,17 @@ function authorizeFreshManualRequirement(event: Json, input: Json, current: Guar
   receipt.updated_at_ms = Date.now();
   current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = receipt;
   save(current.path, current.data);
+  const global = globalStore(rootDir);
+  const mirrored = global.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
+  if (
+    global.path !== current.path && mirrored?.status === "fresh" &&
+    mirrored.requirement_id_sha256 === receipt.requirement_id_sha256
+  ) {
+    mirrored.status = "consumed";
+    mirrored.updated_at_ms = receipt.updated_at_ms;
+    global.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = mirrored;
+    save(global.path, global.data);
+  }
   return undefined;
 }
 
@@ -1799,13 +1822,7 @@ export function guardWorkflowTool(
         "manual_source_creators.requirement_id must be the 32-character hexadecimal data.id returned by validate_requirement; never pass numeric data.demand_id or demand_version. Correct the ID from the existing response without validating again.",
       );
     }
-    if (!scopeAvailable) {
-      return denyPreflight(
-        event, tool, input, "missing_session_context", "INTEGRATION_REQUIRED",
-        "The host omitted session context from before_tool_call, so the fresh manual-sourcing receipt cannot be verified safely. Stop this flow and do not call validate_requirement again; upgrade the host integration first.",
-      );
-    }
-    return authorizeFreshManualRequirement(event, input, _current);
+    return authorizeFreshManualRequirement(event, input, _current, rootDir);
   }
   if (tool === "create_with_distributions") {
     if (!scopeAvailable) {

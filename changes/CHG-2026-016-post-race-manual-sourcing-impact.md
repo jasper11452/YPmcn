@@ -14,11 +14,11 @@ production_provider_in_repository: false
 | Domain | Change | Constraint |
 | --- | --- | --- |
 | Algorithm | 批准刊例倍率、已选机构覆盖倍率、20/30 风险边界和 `<20` 缺口公式 | 比较原始整数，不用展示舍入值判档。 |
-| Search evidence | 赛马前只读取需求数、刊例资源数和刊例倍率 | 不接受赛前精确手扒数或 MCN/手扒比例作为决策证据。 |
+| Search evidence | 赛马前只读取需求数、刊例资源数和刊例倍率 | 不接受赛前精确拓展达人数或 MCN/拓展达人比例作为决策证据。 |
 | Rank evidence | 增加实际已选机构集合、去重并集覆盖、倍率、风险与条件性精确缺口 | Provider 必须按 `(platform, kwUid)` 去重并把结果绑定同一次询价。 |
 | Workflow | 精确数量确认由 search 后移动到 rank 成功后 | `<20` 才显示一键补量；`≥20` 不保存精确建议。 |
 | Hook state | 分离 `pre_race_*` 与 `post_race_*` 字段，并把外发对象绑定到覆盖计算集合 | 旧状态迁移时清除赛前待执行精确数量。 |
-| Skill / Prompt | 改写展示、弹窗选项和连续执行顺序 | 赛前不得出现“建议手扒 N 位”。 |
+| Skill / Prompt | 改写展示、弹窗选项和连续执行顺序 | 赛前不得出现“建议拓展达人 N 位”。 |
 | Provider / DB | 需要可审计的已选机构集合和覆盖并集计算版本 | 本仓库只能声明目标证据，不能证明生产实现。 |
 | Tests / package | 增加 19.8、20、29.8、30 倍边界和一键补量回放 | 不调用生产写 Tool。 |
 

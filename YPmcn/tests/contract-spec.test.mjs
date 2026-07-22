@@ -139,7 +139,7 @@ describe("current Endpoint MCP contract", () => {
     assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /manual_source_creators/);
     assert.match(
       profile.tools.manual_source_creators.agentSemanticRequirements.requirement_id,
-      /32-character hexadecimal data\.id.*immediately preceding successful validate_requirement.*same-session receipt.*one manual_source_creators invocation/,
+      /32-character hexadecimal data\.id.*immediately preceding successful validate_requirement.*plugin-owned fresh receipt.*one manual_source_creators invocation/,
     );
     assert.match(profile.tools.search_creators.agentSemanticRequirements.id, /data\.id.*data\.demand_id/);
     assert.match(

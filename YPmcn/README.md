@@ -1,6 +1,6 @@
 # YPmcn 媒介助手插件
 
-YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。插件对每次手扒绑定当次新需求 ID，并对不可逆企微外发做本地硬确认；业务结果仍由 MCP/Provider 提供。
+YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。插件对每次拓展达人绑定当次新需求 ID，并对不可逆企微外发做本地硬确认；业务结果仍由 MCP/Provider 提供。
 
 ## 完整链路
 
@@ -12,7 +12,7 @@ select_inquiry_form_fields(platform) → 网页选择字段
 → create_submission_batch(requirement_id, size, number) 导出表格
 ```
 
-`manual_source_creators` 可从任意既有阶段发起，但每次调用前必须重新解析完整需求并成功执行 `validate_requirement`；只允许把该响应的 32 位 `data.id` 用于紧邻的一次手扒，数字型 `data.demand_id` 和 `demand_version` 不是 Tool 主键。系统不查询该需求是否历史检索过，也不要求其他流程完成。只手扒时不要求字段选择；导出时字段选择必须发生在本次需求解析之前。`size` 与 `number` 使用正整数十进制字符串，排序只消费本轮手扒实际返回的 `inquiry_ids`，导出不再使用宿主 `export_csv`、旧 `target_count` 或 `run_id`。
+`manual_source_creators` 可从任意既有阶段发起，但每次调用前必须重新解析完整需求并成功执行 `validate_requirement`；只允许把该响应的 32 位 `data.id` 用于紧邻的一次拓展达人，数字型 `data.demand_id` 和 `demand_version` 不是 Tool 主键。系统不查询该需求是否历史检索过，也不要求其他流程完成。只拓展达人时不要求字段选择；导出时字段选择必须发生在本次需求解析之前。`size` 与 `number` 使用正整数十进制字符串，排序只消费本轮拓展达人实际返回的 `inquiry_ids`，导出不再使用宿主 `export_csv`、旧 `target_count` 或 `run_id`。
 
 ## Hook 边界
 
@@ -20,9 +20,9 @@ select_inquiry_form_fields(platform) → 网页选择字段
 
 - Hook 按会话把本地 phase、next_action 和脱敏事件写入 `state/confirmation_guard.json`；实际 MCP 结果仍是业务事实证据。
 - 需求 preview 只作为提示上下文，不形成通用 Tool 权限门禁；Skill、resources、prompts 和普通宿主工具均不被 Hook 阻断。
-- Hook 对搜索和手扒校验 32 位 `data.id`；手扒还核对同一会话中紧邻成功解析的一次性回执。若宿主未向 `before_tool_call` 传入会话上下文，则返回 `INTEGRATION_REQUIRED`，不会退回全局状态授权或再次建单。
+- Hook 对搜索和拓展达人校验 32 位 `data.id`；拓展达人还核对紧邻成功解析的一次性回执。若宿主未向 `before_tool_call` 传入会话上下文，则使用插件自有的全局一次性交接回执完成精确匹配与单次消费，不会再次建单。
 - Hook 只保存完整客户 Brief 的短期哈希来拒绝重试前缀、静默改写和多平台拆单重构，不保存 Brief 正文。
-- 本地 JSON 是 Agent 编排状态权威；除上述一次性手扒 ID 与企微外发确认外，Hook 不对普通 Tool 做严格顺序/参数阻断。Provider 状态仅用于业务事实和未知写对账。
+- 本地 JSON 是 Agent 编排状态权威；除上述一次性拓展达人 ID 与企微外发确认外，Hook 不对普通 Tool 做严格顺序/参数阻断。Provider 状态仅用于业务事实和未知写对账。
 - shell、PowerShell、curl 直连 provider 的企微外发接口会被阻断，避免绕过最终确认。
 - provider 发送调用会触发 Native Approval；Allow 由宿主继续同一待执行调用，Reject/超时/取消不触达 Provider。
 - 参数变化、重放或未知写结果都必须产生新的 Native Approval；唯一例外是 Provider 明确无写入并指出未绑定机构时，只缩减这些机构的续发可继承原确认。
@@ -30,7 +30,7 @@ select_inquiry_form_fields(platform) → 网页选择字段
 
 ## Provider 状态
 
-开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。插件只接受搜索响应的 `total_matched + supply_assessment` 当前契约。当前宿主未向 `before_tool_call` 传递会话上下文，因此手扒保持 `integration_required`，直到宿主升级；三参数 `create_submission_batch` 也尚待发布。
+开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。插件只接受搜索响应的 `total_matched + supply_assessment` 当前契约。拓展达人在宿主未向 `before_tool_call` 传递会话上下文时使用插件自有的一次性交接回执完成新鲜 ID 校验；三参数 `create_submission_batch` 仍尚待发布。
 
 ```bash
 npm run mcp:dev

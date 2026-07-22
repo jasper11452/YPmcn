@@ -13,7 +13,7 @@ production_provider_in_repository: false
 
 | Domain | Change | Constraint |
 | --- | --- | --- |
-| Skill / UX | 定义唯一会话输入面、允许提问条件与禁止停顿条件 | 不减少外发硬确认，不猜测缺失业务值。 |
+| Skill / UX | 定义唯一会话输入面、允许提问条件、停止前人工决策门禁与自定义输入入口 | 不减少外发硬确认，不猜测缺失业务值。 |
 | Requirement | 多平台不再把处理顺序当歧义；共享缺项一次收集 | 每个平台仍独立校验，完整原文不重写。 |
 | Workflow | 确定性 `next_action` 同轮执行；`waiting_for=user` 必须落到原生弹窗或已选择暂停 | 实际 Tool 结果仍是业务事实，未知写不重试。 |
 | Hook | `before_prompt_build` 注入统一 HITL 和多平台权威提示 | Host 无输出拦截能力，属于提示层约束。 |

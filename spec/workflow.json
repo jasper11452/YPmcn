@@ -103,13 +103,13 @@
       "create_with_distributions": "writes the external API but does not persist project or distribution identifiers in the local ledger",
       "sync_mcn_inquiry_status": "records sync metadata only; it does not query provider state or upsert mcn_inquiries",
       "rank_mcns": "the production Provider has not been verified to bind inquiry_id to the actual selected supplier set and return its (platform, kwUid)-deduplicated coverage union",
-      "manual_source_creators": "the live input accepts requirement_id and size, but the current host omits session context from before_tool_call; the plugin therefore returns INTEGRATION_REQUIRED instead of authorizing from global state until the host is upgraded",
+      "manual_source_creators": "the live input accepts requirement_id and size; when the host omits before_tool_call session context, the plugin authorizes only from its own immediately preceding one-time validation handoff receipt",
       "create_submission_batch": "the requirement_id, size, number target input is approved locally but not yet deployed on the production Provider",
       "maximumRecoverablePhase": "recommendation_ready until the target create_submission_batch input is deployed"
     }
   },
   "policies": {
-    "humanInTheLoop": "native AskUserQuestion is the only conversational input surface; plain-text questions and next-step menus never form a workflow gate, while a purpose-built Tool callback remains Tool-owned interaction",
+    "humanInTheLoop": "native AskUserQuestion is the only conversational input surface; invoke it before every nonterminal stop that still requires a human decision, keep at least one host-provided custom-input entry available in every popup, and never use plain-text questions or next-step menus as a workflow gate; a purpose-built Tool callback remains Tool-owned interaction",
     "deterministicContinuation": "when next_action is determined and no AskUserQuestion gate, provider wait, terminal state, or fail-closed stop applies, execute it in the same assistant turn without requesting continue; a submitted Ask answer is an executable command, not an acknowledgement step",
     "multiPlatformContinuation": "split every explicit platform into an independent requirement in first-appearance order, collect unresolved values once, retain one exact originalBrief, and never ask which platform to process first or whether to continue the remaining platform",
     "evidenceConflict": "when local required evidence marks a Tool result failed or invalid, do not report business success or offer unsupported downstream actions merely because the response contains generic success wording",
@@ -123,7 +123,7 @@
     "mcnRace": "after the media operator selects actual inquiry suppliers, rank_mcns persists the inquiry association and returns that exact supplier set plus its (platform, kwUid)-deduplicated coverage union; never hardcode five recommendations or display IDs",
     "directFlowEntry": "manual sourcing may be initiated from any existing phase; field selection is required only for the export continuation and, when needed, completes before the fresh requirement validation",
     "manualSourcingPlacement": "from any existing phase, run validate_requirement for this call and make manual_source_creators the next business Tool with exactly its newly returned 32-character data.id and a positive integer decimal string size; do not require historical search or another workflow completion",
-    "manualRequirementIdentity": "one successful validate_requirement response binds its fresh 32-character data.id to exactly one immediately following same-session manual_source_creators call; numeric data.demand_id and demand_version are never Tool IDs, a local format correction reuses the existing validation response, and missing before_tool session context stops with INTEGRATION_REQUIRED without revalidation",
+    "manualRequirementIdentity": "one successful validate_requirement response binds its fresh 32-character data.id to exactly one immediately following manual_source_creators call; numeric data.demand_id and demand_version are never Tool IDs, a local format correction reuses the existing validation response, and the plugin-owned one-time handoff receipt provides the fallback when before_tool_call has no host session context",
     "searchRequirementIdentity": "search_creators.id is the 32-character data.id from the latest successful validation; numeric data.demand_id and demand_version are rejected locally and corrected from the existing response without creating another demand",
     "briefIntegrity": "validate_requirement rawMessagesJson.originalBrief equals an exact real client Brief recovered from the current conversation after host-envelope stripping; AskUserQuestion and Tool JSON do not replace it, retry markers and platform-specific reconstructions are rejected, and independently validated platform payloads retain the same complete multi-platform originalBrief",
     "selectedSupplierBinding": "create_with_distributions supplierIds must equal the supplier set bound to the latest selected-supplier coverage calculation; any set change requires recalculation",
@@ -186,7 +186,7 @@
       "id": "direct-manual-sourcing-ready",
       "from": "requirement_ready",
       "trigger": {"type": "tool", "name": "manual_source_creators"},
-      "guards": ["the immediately preceding successful validate_requirement returned this fresh 32-character data.id", "the one-time same-session fresh requirement receipt is consumed by this call", "missing before_tool session context returns INTEGRATION_REQUIRED without revalidation", "size is a positive integer decimal string", "no phase, historical search, or other workflow-completion gate is applied"],
+      "guards": ["the immediately preceding successful validate_requirement returned this fresh 32-character data.id", "the plugin-owned one-time fresh requirement receipt is consumed by this call", "missing before_tool session context uses the plugin-owned global handoff receipt", "size is a positive integer decimal string", "no phase, historical search, or other workflow-completion gate is applied"],
       "evidence": ["successful manual response with actual non-empty inquiry_ids"],
       "nextPhase": "candidate_pool_enriched"
     },

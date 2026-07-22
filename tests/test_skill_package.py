@@ -78,10 +78,11 @@ class SkillPackageContractTest(unittest.TestCase):
             if path.is_file():
                 self.assertLessEqual(len(path.read_bytes().splitlines()), 50, path)
 
-    def test_skill_markdown_stays_within_three_thousand_han_characters(self):
+    def test_skill_markdown_stays_within_updated_han_character_budget(self):
         markdown = [SKILL, *sorted(REFERENCES.rglob("*.md"))]
         self.assertEqual(1 + len(EXPECTED_REFERENCE_FILES), len(markdown))
-        self.assertLessEqual(sum(count_han(read(path)) for path in markdown), 3000)
+        # “拓展达人” is two Han characters longer than the retired term at every use site.
+        self.assertLessEqual(sum(count_han(read(path)) for path in markdown), 3400)
 
     def test_skill_declares_phase_independent_manual_sourcing_with_a_fresh_id_gate(self):
         text = "\n".join((
@@ -94,10 +95,10 @@ class SkillPackageContractTest(unittest.TestCase):
             "manual_source_creators({requirement_id,size})",
             "create_submission_batch({requirement_id,size,number})",
             "任一步失败都停止后续业务 Tool",
-            "手扒不受当前流程阶段限制",
-            "新生成的 32 位 `data.id` 用于紧邻的一次手扒",
+            "拓展达人不受当前流程阶段限制",
+            "新生成的 32 位 `data.id` 用于紧邻的一次拓展达人",
             "不检查该需求是否历史检索过或其他流程是否完成",
-            "Hook 校验原始 Brief、搜索/手扒的 `data.id` 与企微外发",
+            "Hook 校验原始 Brief、搜索/拓展达人的 `data.id` 与企微外发",
             "preview 不限制 Skill 读取或其他 Tool",
             "本地状态只按实际成功结果推进",
             "用户要求失败即停时绝不重试",
@@ -172,7 +173,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "allowed_actions",
             "state/confirmation_guard.json",
             "仅导出时先调用 `select_inquiry_form_fields({platform})`",
-            "每次手扒前都重新解析完整 Brief 并调用 `validate_requirement`",
+            "每次拓展达人前都重新解析完整 Brief 并调用 `validate_requirement`",
             "不检查历史库是否检索过该需求，也不检查其他流程是否完成",
             "成功后同轮调用 `create_submission_batch({requirement_id,size,number})`",
             "禁止盲重试",
@@ -186,7 +187,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "写结果未知",
             "只有实际 MCP 成功响应才是后续证据",
             "字段页面取消、callback 超时或 Tool 返回无效字段时停止",
-            "只接受该手扒成功响应中的非空、唯一字符串 `inquiry_ids`",
+            "只接受该拓展达人成功响应中的非空、唯一字符串 `inquiry_ids`",
             "不得改用旧 `run_id`",
             "禁止盲重试",
         ):
@@ -302,6 +303,8 @@ class SkillPackageContractTest(unittest.TestCase):
             "禁文字提问",
             "字段 callback 直接用",
             "普通回复不收集输入",
+            "停下前仍需人决定",
+            "用户自定义输入入口",
         ):
             self.assertIn(required, joined)
 
@@ -511,7 +514,7 @@ class SkillPackageContractTest(unittest.TestCase):
     def test_hook_reference_keeps_state_projection_advisory(self):
         text = read(REFERENCES / "execution-gates.md")
         for required in (
-            "Hook 仅消费并核对本次手扒的新需求 ID",
+            "Hook 仅消费并核对本次拓展达人的新需求 ID",
             "不用 phase、历史检索或其他流程完成度阻断",
             "本地成功投影不等于 Provider 成功",
         ):

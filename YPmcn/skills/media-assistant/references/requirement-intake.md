@@ -14,7 +14,7 @@ Hook 剥离包装并哈希 Brief；Ask/JSON 不覆盖。无历史时仅回退明
 
 先把完整 Brief 拆成原子需求并生成缺失、歧义清单：必填无候选值为 `missing_required`；候选值不能唯一映射为 `semantic_ambiguity`；两者皆空才为 `ready`。未决时一次问全，业务 Tool 为零；禁传 `draft`、空值、假值或 `__UNRESOLVED__`。
 
-未决值用一次原生 AskUserQuestion，同次最多五题，每题 2–6 个单选项；不展示字段、门禁或 Tool 术语，也不自建“其他”。价格只说“小红书图文/视频”或“抖音1–20秒/21–60秒/60秒以上”，不得展示内部价格字段，也不得声称图文对应某视频时长。
+未决值用一次原生 AskUserQuestion，同次最多五题，每题 2–6 个单选项；每个弹窗至少保留一个宿主自带的用户自定义输入入口，不得关闭、隐藏或用固定选项替代，也不要重复自建“其他”。不展示字段、门禁或 Tool 术语。价格只说“小红书图文/视频”或“抖音1–20秒/21–60秒/60秒以上”，不得展示内部价格字段，也不得声称图文对应某视频时长。
 
 最小必填是 `platform`、正整数 `quantityTotal`、带秒 `submissionDeadlineAt`、合法 `ypmcn-brief-v1` `rawMessagesJson` 及一个上界大于零的平台单达人预算字段；项目总预算等其余项为业务可选。
 
@@ -27,7 +27,7 @@ Hook 剥离包装并哈希 Brief；Ask/JSON 不覆盖。无历史时仅回退明
 - 相对时间用宿主 `currentLocalDateTime + timeZone` 唯一换算为 `YYYY-MM-DD HH:mm:ss`；不能唯一确定即询问。
 - atom 只映射一个真实字段或逐字 preserved；`sourceText` 可来自原始 Brief 或明确补充答案。不得篡改 `originalBrief`；补充数量、形式/时长、截止时刻各成 atom。多平台需求共用完整 `originalBrief`，另一平台条款逐字 preserved；禁加“需求A”“快手”等标记。`rawMessagesJson` 的 atoms 非空、计数一致且 `unresolvedCount=0`。
 
-`ready` 时展示并原样调用 `{"payload": {..., "status": "ready"}}`。`search_creators.id` 和 `manual_source_creators.requirement_id` 只复制 `validate_requirement.data.id` 的 32 位主键，数字型 `data.demand_id` 只用于需求版本语义。主键格式错误直接从当前响应纠正，不得重新验证；宿主 Hook 上下文不兼容时停止。每次手扒前都按新建需求处理并省略旧 `id/demandVersion`；仅实际成功响应新生成的需求主键可授权紧邻的一次手扒，禁止复用。非手扒的补充版本才沿用上一成功响应的 `demandId`。Provider `workflow_state/allowed_actions` 不覆盖本地 phase，未知写结果先对账。
+`ready` 时展示并原样调用 `{"payload": {..., "status": "ready"}}`。`search_creators.id` 和 `manual_source_creators.requirement_id` 只复制 `validate_requirement.data.id` 的 32 位主键，数字型 `data.demand_id` 只用于需求版本语义。主键格式错误直接从当前响应纠正，不得重新验证；宿主 Hook 未提供会话上下文时使用插件自有的一次性交接回执。每次拓展达人前都按新建需求处理并省略旧 `id/demandVersion`；仅实际成功响应新生成的需求主键可授权紧邻的一次拓展达人，禁止复用。非拓展达人的补充版本才沿用上一成功响应的 `demandId`。Provider `workflow_state/allowed_actions` 不覆盖本地 phase，未知写结果先对账。
 
 ## 参数自修复
 

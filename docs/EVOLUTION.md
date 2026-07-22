@@ -19,17 +19,18 @@
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:2e90dabb1c7979dc0b3ca099f471209f55bd2e96e24ce7b2b0702659d2751698`
-变更记录摘要：`sha256:7dabb4ddcf798b51dc8e0f329b9db94abb06d12391337c90600c495821cb7b31`
+当前 Spec：`mvp-v2` · `sha256:656bd340b0df5d2f3a581ca9cc0b81f77a180ab5f49483073443ad3d169d8b37`
+变更记录摘要：`sha256:b9351ee8701e04aaff305cde10a371ebc4230ba6867e55bceb18be130e75963a`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-022 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.11 宿主无关手扒回执修复包](../changes/CHG-2026-022-release-3.4.11.md) |
 | CHG-2026-021 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.10 Human-in-the-loop 修复包](../changes/CHG-2026-021-release-3.4.10.md) |
 | CHG-2026-020 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [统一 Human-in-the-loop 与自动续接](../changes/CHG-2026-020-human-in-the-loop.md) |
 | CHG-2026-019 | `IMPLEMENTED_LOCAL_HOST_BLOCKED` | [修复需求主键、Brief 绑定与搜索供给契约](../changes/CHG-2026-019-runtime-id-and-supply-contract.md) |
-| CHG-2026-018 | `IMPLEMENTED_LOCAL_PROVIDER_UNVERIFIED` | [手扒调用绑定当次新需求 ID](../changes/CHG-2026-018-fresh-manual-requirement.md) |
-| CHG-2026-017 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [字段选择后直接手扒并导出](../changes/CHG-2026-017-direct-manual-export.md) |
-| CHG-2026-016 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [赛后决定精确手扒补量](../changes/CHG-2026-016-post-race-manual-sourcing.md) |
+| CHG-2026-018 | `IMPLEMENTED_LOCAL_PROVIDER_UNVERIFIED` | [拓展达人调用绑定当次新需求 ID](../changes/CHG-2026-018-fresh-manual-requirement.md) |
+| CHG-2026-017 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [字段选择后直接拓展达人并导出](../changes/CHG-2026-017-direct-manual-export.md) |
+| CHG-2026-016 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [赛后决定精确拓展达人补量](../changes/CHG-2026-016-post-race-manual-sourcing.md) |
 | CHG-2026-015 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [高风险供给启动达人拓展](../changes/CHG-2026-015-manual-sourcing-workflow.md) |
 | CHG-2026-014 | `IMPLEMENTED_LOCAL_TEST_ONLY` | [本地独立向量管线](../changes/CHG-2026-014-local-vector-integration.md) |
 | CHG-2026-013 | `SPEC_APPROVED` | [建立向量检索 MVP 正式契约基线](../changes/CHG-2026-013-vector-contract-baseline.md) |

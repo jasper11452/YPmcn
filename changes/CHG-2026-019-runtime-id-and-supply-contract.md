@@ -14,10 +14,10 @@ rollback_strategy: "回退本变更；不清理、不重放远程已创建的需
 
 1. `validate_requirement.data.id` 是 `search_creators.id` 与 `manual_source_creators.requirement_id` 的唯一 Tool 主键；数字型 `data.demand_id` 和 `demand_version` 仅是业务标识，不得混用。
 2. 主键格式错误在 Provider 调用前拒绝，并从既有验证响应纠正，不得再次执行 `validate_requirement`。
-3. 手扒授权必须绑定同一宿主会话的一次性验证回执；当前宿主若未向 `before_tool_call` 传递会话上下文，则明确返回 `INTEGRATION_REQUIRED`，禁止退回全局状态授权或重复建单。
+3. 拓展达人授权必须绑定同一宿主会话的一次性验证回执；当前宿主若未向 `before_tool_call` 传递会话上下文，则明确返回 `INTEGRATION_REQUIRED`，禁止退回全局状态授权或重复建单。
 4. `rawMessagesJson.originalBrief` 必须等于 Hook 捕获的完整原始 Brief；禁止添加重试标记或按平台重写。多平台拆单共享同一完整 Brief，其余平台条件进入审计 atom。
 5. `search_creators` 以 `total_matched + supply_assessment` 为主响应；3.4.9 曾兼容旧三字段形状，3.4.10 起按既定期限移除旧分支。
-6. 明确“继续手扒”的续接意图优先走手扒；一般新需求验证后默认走搜索。用户澄清统一为最多 5 问、每问 2–6 项，且不展示内部价格字段名。
+6. 明确“继续拓展达人”的续接意图优先走拓展达人；一般新需求验证后默认走搜索。用户澄清统一为最多 5 问、每问 2–6 项，且不展示内部价格字段名。
 7. 修复 `e5bca71` 引入的 Brief 捕获回归：先剥离宿主 `[Current user request]` 包装，再从当前会话真实用户需求消息建立候选哈希；AskUserQuestion/Tool JSON 不覆盖已有 Brief。无直接历史时仅以 payload 内明确的 `originalBrief` 兼容回退，避免把整段 JSON 当作需求。
 
 ## Task Boundary
@@ -46,10 +46,10 @@ forbidden_paths:
   - "remote Provider data"
 acceptance:
   - "search/manual 只接受 32 位 data.id，数字 demand_id 在本地拒绝且不触发重新验证"
-  - "缺失 before_tool_call 会话上下文时手扒明确阻断并等待宿主升级"
+  - "缺失 before_tool_call 会话上下文时拓展达人明确阻断并等待宿主升级"
   - "多平台 payload 保持同一个完整 originalBrief，篡改或加前缀会被拒绝"
   - "当前搜索响应正确判定 500/10 与 63/10，旧结构仅保留一版兼容且冲突时停止"
-  - "显式继续手扒不会被误路由到搜索"
+  - "显式继续拓展达人不会被误路由到搜索"
   - "AskUserQuestion 后无需重发需求；宿主包装和后续需求 JSON 不会替换已有原始 Brief"
 verification:
   - "npm run test:fast"
@@ -60,7 +60,7 @@ rollback: "回退本变更文件；不得删除现存远程重复需求"
 
 ## External Boundary
 
-插件不拥有宿主 Hook 上下文传递与 Provider 数据清理。当前宿主未向 `before_tool_call` 暴露会话标识时，手扒保持安全阻断；修复该宿主集成后，现有同会话回执逻辑即可放行。日志中已经产生的重复需求不在本次授权范围内，不做删除或合并。
+插件不拥有宿主 Hook 上下文传递与 Provider 数据清理。当前宿主未向 `before_tool_call` 暴露会话标识时，拓展达人保持安全阻断；修复该宿主集成后，现有同会话回执逻辑即可放行。日志中已经产生的重复需求不在本次授权范围内，不做删除或合并。
 
 ## Verification Result
 

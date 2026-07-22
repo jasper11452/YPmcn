@@ -81,12 +81,12 @@
     "manualSourcingGuard": {
       "phaseIndependent": true,
       "requiredPredecessor": "validate_requirement",
-      "requiredEvidence": "fresh 32-character data.id primary key from the immediately preceding successful response plus the same host session scope",
+      "requiredEvidence": "fresh 32-character data.id primary key from the immediately preceding successful response, persisted and consumed by the plugin itself",
       "oneTime": true,
       "checksHistoricalSearch": false,
       "checksOtherWorkflowCompletion": false,
       "storesRawRequirementId": false,
-      "missingSessionContext": "INTEGRATION_REQUIRED and await_host_upgrade; never fall back to global authorization or revalidate"
+      "missingSessionContext": "use the plugin-owned global one-time handoff receipt; exact ID matching and single consumption still apply"
     },
     "searchRequirementGuard": {
       "primaryKeySource": "validate_requirement.data.id",

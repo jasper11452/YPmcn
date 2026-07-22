@@ -8,23 +8,23 @@
 
 ## Human-in-the-loop
 
-- `waiting_for="user"` 必须 Ask（或已选暂停），禁文字提问；其余 `next_action` 同轮续接。字段 callback 直接用，多平台不停；证据无效、未知写或 `integration_required` 时停止。
+- `waiting_for="user"` 必须 Ask（或已选暂停），禁文字提问；凡准备停下且仍需人决定恢复、改参或下一步，必须在停止前调用 Ask，每个弹窗至少保留一个宿主提供的用户自定义输入入口。其余 `next_action` 同轮续接。字段 callback 直接用，多平台不停；证据无效、未知写或 `integration_required` 且没有安全的人类决策分支时才直接报告停止。
 
-## 手扒与五步导出链
+## 拓展达人与五步导出链
 
 1. 先确认完整需求和 `size`；导出时再确认 `platform`、字段与 `number`。`size`、`number` 必须匹配 `^[1-9][0-9]*$`。
-2. 仅导出时先调用 `select_inquiry_form_fields({platform})`，且只调用一次；直接使用 Tool 等待网页 callback 后返回的字段，并规范化为保持原序的 `{key,name}`，Tool 返回后不得重新打开字段网页。只手扒时不以字段选择为前置。
-3. 每次手扒前都重新解析完整 Brief 并调用 `validate_requirement`，省略旧 `id/demandVersion`，取得成功响应的 32 位 `data.id`。
-4. 紧邻调用 `manual_source_creators({requirement_id,size})`，ID 等于第 3 步且只使用一次；格式错从现有响应纠正，不重新验证。宿主无会话上下文时停止等待升级。
-5. 导出时只接受该手扒成功响应中的非空、唯一字符串 `inquiry_ids`，无实际 `inquiry_ids` 不 rank；用它们、相同 `requirement_id` 和本轮 `columns` 调用 `rank_creators`。调用前比较本次与上一次 `rank_creators.requirement_id`，相同时提示“已根据需求进行排序，请注意”并继续调用，不得阻断；成功后同轮调用 `create_submission_batch({requirement_id,size,number})`。
+2. 仅导出时先调用 `select_inquiry_form_fields({platform})`，且只调用一次；直接使用 Tool 等待网页 callback 后返回的字段，并规范化为保持原序的 `{key,name}`，Tool 返回后不得重新打开字段网页。只拓展达人时不以字段选择为前置。
+3. 每次拓展达人前都重新解析完整 Brief 并调用 `validate_requirement`，省略旧 `id/demandVersion`，取得成功响应的 32 位 `data.id`。
+4. 紧邻调用 `manual_source_creators({requirement_id,size})`，ID 等于第 3 步且只使用一次；格式错从现有响应纠正，不重新验证。宿主无会话上下文时由插件自有的一次性回执校验并消费。
+5. 导出时只接受该拓展达人成功响应中的非空、唯一字符串 `inquiry_ids`，无实际 `inquiry_ids` 不 rank；用它们、相同 `requirement_id` 和本轮 `columns` 调用 `rank_creators`。调用前比较本次与上一次 `rank_creators.requirement_id`，相同时提示“已根据需求进行排序，请注意”并继续调用，不得阻断；成功后同轮调用 `create_submission_batch({requirement_id,size,number})`。
 
-手扒可从任意 phase 发起，不检查历史库是否检索过该需求，也不检查其他流程是否完成；唯一调用门槛是紧邻需求解析的新 ID。禁止发送 `target_count`、`run_id`、`limit` 或旧批次选项，不得复用其他轮次的字段和 ID。
+拓展达人可从任意 phase 发起，不检查历史库是否检索过该需求，也不检查其他流程是否完成；唯一调用门槛是紧邻需求解析的新 ID。禁止发送 `target_count`、`run_id`、`limit` 或旧批次选项，不得复用其他轮次的字段和 ID。
 
 ## 失败与恢复
 
-- Hook 仅消费并核对本次手扒的新需求 ID，不用 phase、历史检索或其他流程完成度阻断；本地成功投影不等于 Provider 成功。
+- Hook 仅消费并核对本次拓展达人的新需求 ID，不用 phase、历史检索或其他流程完成度阻断；本地成功投影不等于 Provider 成功。
 - 导出场景的字段页面取消、callback 超时或 Tool 返回无效字段时停止该导出链；不得重开页面或拿旧字段继续。
 - 重复 `rank_creators.requirement_id` 只触发提示，不改变参数、不阻止调用，也不新增确认步骤。
-- 手扒、排序或导出写结果未知时先对账，禁止盲重试；无法取得权威结果就停止。
+- 拓展达人、排序或导出写结果未知时先对账，禁止盲重试；无法取得权威结果且不存在安全的人类决策分支时报告停止；若需用户选择恢复方式，停止前必须先 Ask。
 - 明确参数错误只修该字段；用户要求失败即停时绝不重试。
 - 生产 Provider 尚未发布三参数导出契约时，最后一步返回 `integration_required`，不得改用旧 `run_id`。
