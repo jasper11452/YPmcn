@@ -1,0 +1,90 @@
+name: tapd-auto-merge
+
+on:
+  workflow_run:
+    workflows: [verify]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  approve-and-enable-auto-merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Validate, approve, and enable auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo="$GITHUB_REPOSITORY"
+          event="$GITHUB_EVENT_PATH"
+
+          jq -e '.workflow_run.pull_requests | length == 1' "$event" >/dev/null
+          pr_number="$(jq -er '.workflow_run.pull_requests[0].number' "$event")"
+          workflow_sha="$(jq -er '.workflow_run.head_sha' "$event")"
+          workflow_branch="$(jq -er '.workflow_run.head_branch' "$event")"
+          [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]
+          [[ "$workflow_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$workflow_branch" == tapd/* ]]
+
+          pr_json="$(gh api "repos/$repo/pulls/$pr_number")"
+          jq -e \
+            --arg repo "$repo" \
+            --arg sha "$workflow_sha" \
+            --arg branch "$workflow_branch" '
+              .state == "open" and
+              .draft == false and
+              .base.ref == "main" and
+              .head.ref == $branch and
+              .head.sha == $sha and
+              .head.repo.full_name == $repo and
+              .user.login == "jasper11452" and
+              (.body | contains("<!-- tapd-codex:v1 -->")) and
+              any(.labels[]; .name == "tapd-codex")
+            ' <<<"$pr_json" >/dev/null
+
+          files_json="$(
+            gh api --paginate --slurp \
+              "repos/$repo/pulls/$pr_number/files?per_page=100"
+          )"
+          jq -e '
+            flatten |
+            length > 0 and length <= 3000 and
+            all(.[].filename;
+              test("^(?:YPmcn/|changes/|docs/|fix-logs/|spec/|src/|tests/|package\\.json$|package-lock\\.json$)") and
+              (startswith(".github/") | not)
+            )
+          ' <<<"$files_json" >/dev/null
+
+          reviews_json="$(
+            gh api --paginate --slurp \
+              "repos/$repo/pulls/$pr_number/reviews?per_page=100"
+          )"
+          if ! jq -e --arg sha "$workflow_sha" '
+            flatten |
+            any(.[];
+              .user.login == "github-actions[bot]" and
+              .state == "APPROVED" and
+              .commit_id == $sha
+            )
+          ' <<<"$reviews_json" >/dev/null; then
+            gh pr review "$pr_number" \
+              --repo "$repo" \
+              --approve \
+              --body "CI and TAPD automation policy checks passed for $workflow_sha."
+          fi
+
+          gh pr merge "$pr_number" \
+            --repo "$repo" \
+            --auto \
+            --squash \
+            --delete-branch
