@@ -241,7 +241,7 @@ describe("Spec governance", () => {
     assert.match(database.toolDatabaseEffects.sync_mcn_inquiry_status.currentLimitation, /not yet deployed/);
     assert.deepEqual(database.toolDatabaseEffects.rank_mcns.targetWrites, ["mcn_inquiries"]);
     assert.match(database.toolDatabaseEffects.rank_mcns.targetInquiryBehavior, /inquiry_id.*distribution/);
-    assert.match(database.toolDatabaseEffects.manual_source_creators.targetWriteBoundary, /requirement_id.*size.*inquiry_ids/);
+    assert.match(database.toolDatabaseEffects.manual_source_creators.targetWriteBoundary, /requirement_id.*size.*excel_file_path/);
     assert.ok(database.knownGaps.some(({ id, severity }) =>
       id === "submission-target-input-not-deployed" && severity === "high"
     ));

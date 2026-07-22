@@ -314,18 +314,6 @@ function validateSemanticRequirements(
     if (typeof params.requirement_id !== "string" || params.requirement_id.trim().length === 0) {
       return [issue("INVALID_INPUT", "$.requirement_id", "requirement_id must be a non-empty string.")];
     }
-    if (!Array.isArray(params.columns) || params.columns.length === 0) {
-      return [issue("INVALID_INPUT", "$.columns", "columns must contain the selected fields.")];
-    }
-    for (let index = 0; index < params.columns.length; index += 1) {
-      const column = params.columns[index];
-      if (
-        !isRecord(column) || typeof column.key !== "string" || column.key.trim().length === 0 ||
-        typeof column.name !== "string" || column.name.trim().length === 0
-      ) {
-        return [issue("INVALID_INPUT", `$.columns[${index}]`, "Each selected column requires non-empty key and name.")];
-      }
-    }
   }
   if (tool === "get_workflow_state") {
     const traceMode = typeof params.trace_id === "string" && params.trace_id.trim().length > 0;

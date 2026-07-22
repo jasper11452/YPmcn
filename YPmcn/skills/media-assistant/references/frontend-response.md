@@ -4,12 +4,8 @@
 
 普通回复不收集输入；需决策就 Ask，提交同轮执行；凡停下前仍需人决定恢复方式或下一步，必须先 Ask，且弹窗至少保留一个宿主提供的用户自定义输入入口。确定性步骤自动续接。
 
-导出场景只调用一次 `select_inquiry_form_fields`，等待 Tool 通过网页 callback 返回本次选择后直接使用；不要重新打开字段网页，也不要要求用户重复选择。只拓展达人场景不要求先选字段。
-
 每次拓展达人前重新解析需求并取得新 ID；不要向用户展示该 ID。无当前新 ID、ID 错配或重复使用被本地拒绝时，说明需重新解析本次需求，不得改用旧 ID。
 
-`manual_source_creators` 成功后，必须将实际返回的每条达人记录展示为 Markdown 表格，表头固定为 `| 平台 | 达人ID | 达人昵称 | 内容标签 | 主页链接 |`。字段依次读取 `platform`；抖音记录的 `douyinId` 或小红书记录的 `xiaohongshuId`；`nickname`；`contentTag`；`kwUserUrl`。缺失或 `null` 值写 `-`，不要猜测或补造，也不要展示 `inquiry_ids`。导出场景展示后立即用实际返回的询价集合调用 `rank_creators`，不增加确认；不得把通用 `success=true` 当作可排序证据。
-
-每次调用 `rank_creators` 前比较入参需求 ID 与上一次调用；相同时先原样提示“已根据需求进行排序，请注意”，随后照常调用，不弹确认、不停止。`rank_creators` 成功后不等待额外确认、不查询详情、不调用宿主 `export_csv`，直接调用 `create_submission_batch({requirement_id,size,number})`。最终只依据该 Tool 的实际响应报告表格是否导出，并提供响应中真实存在的文件入口；不得伪造文件名、路径或下载链接。
+`manual_source_creators` 成功后，只依据实际响应中的唯一非空 `excel_file_path` 报告完成并原样提供文件入口；不得伪造文件名、路径、下载链接、达人记录或 `inquiry_id(s)`。通用 `success=true` 不能替代该证据。此 Tool 已完成表格导出，不再调用字段选择、`rank_creators`、`create_submission_batch` 或宿主 `export_csv`。
 
 任一步失败时说明失败步骤和安全错误码，不把本地投影写成远端成功。写结果未知时说明正在对账或已停止，禁止声称已导出。

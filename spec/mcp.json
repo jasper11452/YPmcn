@@ -305,7 +305,7 @@
     },
     "manual_source_creators": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "Provider tools/list does not advertise outputSchema. The request requirement_id must be the fresh ID returned by the immediately preceding successful validate_requirement call and is one-time for this invocation. Continue only when the successful response contains the actual non-empty inquiry_ids produced for that requirement_id and size.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. The request requirement_id must be the fresh ID returned by the immediately preceding successful validate_requirement call and is one-time for this invocation. Complete only when the successful response contains one actual non-empty excel_file_path for that requirement_id and size.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -721,7 +721,8 @@
       "forbidden": [],
       "agentSemanticRequirements": {
         "requirement_id": "must be the 32-character hexadecimal data.id returned by the immediately preceding successful validate_requirement call, exactly match the plugin-owned fresh receipt, and authorize only this one manual_source_creators invocation; numeric data.demand_id is forbidden",
-        "eligibility": "independent of current workflow phase, historical creator search, and completion of other workflow steps"
+        "eligibility": "independent of current workflow phase, historical creator search, and completion of other workflow steps",
+        "completion": "the actual successful response contains one unique non-empty excel_file_path; manual sourcing is terminal and does not feed rank_creators"
       },
       "sideEffects": "business-write",
       "writers": {
@@ -736,7 +737,7 @@
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
-        "the successful response contains the actual non-empty inquiry_ids produced for the requested requirement_id and size",
+        "the successful response contains one actual non-empty excel_file_path produced for the requested requirement_id and size",
         "retain actual returned payload as downstream evidence"
       ]
     },
@@ -757,26 +758,13 @@
           "items": {
             "type": "string"
           }
-        },
-        "columns": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            },
-            {"type": "null"}
-          ]
         }
       },
       "forbidden": [],
-      "agentRequired": ["requirement_id", "columns"],
+      "agentRequired": ["requirement_id"],
       "agentSemanticRequirements": {
-        "inquiry_ids": "actual unique non-empty string inquiry IDs returned by manual_source_creators for this request",
-        "requirement_id": "the same non-empty requirement_id passed to manual_source_creators; new clients pass it for strict validation",
-        "columns": "the non-empty ordered key/name object array returned by the current field-selection submission"
+        "inquiry_ids": "actual unique non-empty string inquiry IDs returned by sync_mcn_inquiry_status for the current MCN inquiry-recovery chain; never source them from manual_source_creators or select_inquiry_form_fields",
+        "requirement_id": "the same non-empty requirement_id used by the current MCN inquiry-recovery chain"
       },
       "sideEffects": "business-write",
       "writers": {

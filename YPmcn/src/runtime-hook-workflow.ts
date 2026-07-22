@@ -489,7 +489,7 @@ type ManualSourcingEvidence = {
 type DirectManualSourcingEvidence = {
   requirementId: string;
   size: string;
-  inquiryIds: string[];
+  excelFilePath: string;
 };
 
 const MANUAL_REQUIREMENT_RECEIPT_KEY = "manual_sourcing_requirement_receipt";
@@ -661,23 +661,19 @@ function authorizeRankCreators(event: Json, input: Json, current: GuardStore): J
   if (workflow.phase !== "candidate_pool_enriched" || workflow.next_action !== "rank_creators") {
     return denyPreflight(
       event, "rank_creators", input, "workflow_order", "INVALID_PHASE",
-      "rank_creators requires the current successful manual_source_creators result and field-selection evidence.",
+      "rank_creators requires the current successful MCN inquiry recovery result.",
     );
   }
-  const inquiryIds = Array.isArray(workflow.manual_sourcing_inquiry_ids)
-    ? workflow.manual_sourcing_inquiry_ids
+  const inquiryIds = Array.isArray(workflow.sync_inquiry_ids)
+    ? workflow.sync_inquiry_ids
     : undefined;
-  const columns = validInquiryColumns(input.columns);
   if (
-    workflow.manual_sourcing_evidence_status !== "valid" ||
     !text(workflow.requirement_id) || input.requirement_id !== workflow.requirement_id ||
-    !inquiryIds || canonical(input.inquiry_ids) !== canonical(inquiryIds) ||
-    !columns || !text(workflow.field_selection_columns_sha256) ||
-    sha256Text(canonical(columns)) !== workflow.field_selection_columns_sha256
+    !inquiryIds || canonical(input.inquiry_ids) !== canonical(inquiryIds)
   ) {
     return denyPreflight(
       event, "rank_creators", input, "workflow_lineage", "INVALID_INPUT",
-      "rank_creators must use the exact requirement_id and inquiry_ids from this manual sourcing result and the ordered columns from this flow's field selection.",
+      "rank_creators must use the exact requirement_id and inquiry_ids returned by sync_mcn_inquiry_status for this MCN recovery flow.",
     );
   }
   return undefined;
@@ -842,21 +838,36 @@ function directManualSourcingEvidence(
   ) return undefined;
 
   const candidates = objectRecords(envelope.data)
-    .map((record) => record.inquiry_ids)
-    .filter((value): value is string[] =>
-      Array.isArray(value) && value.length > 0 &&
-      value.every((item) => text(item))
-    )
-    .map((value) => value.map((item) => item.trim()))
-    .filter((value) => new Set(value).size === value.length);
-  const unique = new Map(candidates.map((value) => [JSON.stringify(value), value]));
+    .map((record) => record.excel_file_path)
+    .filter(text)
+    .map((value) => value.trim());
+  const unique = new Set(candidates);
   if (unique.size !== 1) return undefined;
 
   return {
     requirementId: input.requirement_id.trim(),
     size: input.size.trim(),
-    inquiryIds: [...unique.values()][0],
+    excelFilePath: [...unique][0],
   };
+}
+
+function syncInquiryIdsEvidence(root: unknown): string[] | undefined {
+  const data = approvedTargetData(root);
+  if (!data) return undefined;
+  const candidates: string[][] = [];
+  for (const record of objectRecords(data)) {
+    if (Array.isArray(record.inquiry_ids) && record.inquiry_ids.length > 0) {
+      const ids = record.inquiry_ids.map(identifierText);
+      if (ids.every(text)) candidates.push(ids as string[]);
+    }
+    const inquiryId = identifierText(record.inquiry_id);
+    if (inquiryId) candidates.push([inquiryId]);
+  }
+  const normalized = candidates
+    .map((ids) => [...new Set(ids)])
+    .filter((ids) => ids.length > 0);
+  const unique = new Map(normalized.map((ids) => [canonical(ids), ids]));
+  return unique.size === 1 ? [...unique.values()][0] : undefined;
 }
 
 function rankCreatorsEvidence(root: unknown): Json | undefined {
@@ -1379,6 +1390,9 @@ function updateLocalWorkflow(
       ? directManualSourcingEvidence(event.result, input)
       : manualSourcingEvidence(event.result, input, workflow)
     : undefined;
+  const syncInquiryIds = tool === "sync_mcn_inquiry_status" && envelopeOk
+    ? syncInquiryIdsEvidence(event.result)
+    : undefined;
   const distributionEvidence = tool === "create_with_distributions" && envelopeOk
     ? distributionOutcomeEvidence(event.result, input)
     : undefined;
@@ -1536,7 +1550,7 @@ function updateLocalWorkflow(
       workflow.manual_sourcing_evidence_status = envelopeOk ? "invalid" : "unavailable";
       workflow.manual_sourcing_evidence_error = envelopeOk
         ? text(input.size)
-          ? "missing_or_conflicting_inquiry_ids"
+          ? "missing_or_conflicting_excel_file_path"
           : "missing_or_conflicting_task_evidence"
         : "provider_call_failed_or_unknown";
     }
@@ -1722,21 +1736,26 @@ function updateLocalWorkflow(
         workflow.waiting_for = null;
         break;
       case "sync_mcn_inquiry_status":
-        workflow.next_action = "await_or_ingest_mcn_submissions";
-        workflow.waiting_for = "provider";
+        if (syncInquiryIds) {
+          workflow.sync_inquiry_ids = syncInquiryIds;
+          workflow.next_action = "ingest_mcn_submissions";
+          workflow.waiting_for = null;
+        } else {
+          workflow.next_action = "await_or_ingest_mcn_submissions";
+          workflow.waiting_for = "provider";
+        }
         break;
       case "manual_source_creators":
         if (!manualEvidence) break;
-        if ("inquiryIds" in manualEvidence) {
+        if ("excelFilePath" in manualEvidence) {
           workflow.phase = "candidate_pool_enriched";
           workflow.requirement_id = manualEvidence.requirementId;
           workflow.manual_sourcing_size = manualEvidence.size;
-          workflow.manual_sourcing_inquiry_ids = manualEvidence.inquiryIds;
+          workflow.manual_sourcing_excel_file_sha256 = sha256Text(manualEvidence.excelFilePath);
           workflow.manual_sourcing_evidence_status = "valid";
           delete workflow.manual_sourcing_evidence_error;
-          workflow.next_action = workflow.field_selection_evidence_status === "valid"
-            ? "rank_creators"
-            : null;
+          delete workflow.manual_sourcing_inquiry_ids;
+          workflow.next_action = null;
           workflow.waiting_for = null;
         } else {
           workflow.manual_sourcing_task_id = manualEvidence.taskId;

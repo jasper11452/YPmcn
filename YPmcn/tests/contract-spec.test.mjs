@@ -57,7 +57,7 @@ const EXPECTED_INPUTS = {
   },
   rank_creators: {
     required: ["inquiry_ids"],
-    properties: { requirement_id: "string|null", inquiry_ids: "array", columns: "array|null" },
+    properties: { requirement_id: "string|null", inquiry_ids: "array" },
   },
   create_submission_batch: {
     required: ["requirement_id", "size", "number"],
@@ -135,8 +135,8 @@ describe("current Endpoint MCP contract", () => {
   it("keeps provider and manual-sourcing semantic constraints explicit", () => {
     assert.match(profile.tools.get_workflow_state.semanticRequirement, /demand_id.*demand_version.*trace_id/);
     assert.match(profile.tools.get_recommendation_run_detail.semanticRequirement, /positive integer/);
-    assert.deepEqual(profile.tools.rank_creators.agentRequired, ["requirement_id", "columns"]);
-    assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /manual_source_creators/);
+    assert.deepEqual(profile.tools.rank_creators.agentRequired, ["requirement_id"]);
+    assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /sync_mcn_inquiry_status/);
     assert.match(
       profile.tools.manual_source_creators.agentSemanticRequirements.requirement_id,
       /32-character hexadecimal data\.id.*immediately preceding successful validate_requirement.*plugin-owned fresh receipt.*one manual_source_creators invocation/,
@@ -146,10 +146,7 @@ describe("current Endpoint MCP contract", () => {
       profile.tools.manual_source_creators.agentSemanticRequirements.eligibility,
       /independent of current workflow phase, historical creator search, and completion of other workflow steps/,
     );
-    assert.match(
-      profile.tools.rank_creators.agentSemanticRequirements.columns,
-      /field-selection submission/,
-    );
+    assert.match(profile.tools.manual_source_creators.agentSemanticRequirements.completion, /excel_file_path/);
   });
 
   it("adds the Agent-required plain-text message without misreporting the live Provider required list", () => {
@@ -234,7 +231,7 @@ describe("current Endpoint MCP contract", () => {
     assert.deepEqual(profile.outputContracts.manual_source_creators.successSchema, {
       type: "object", additionalProperties: true,
     });
-    assert.match(profile.outputContracts.manual_source_creators.evidenceBasis, /inquiry_ids/);
+    assert.match(profile.outputContracts.manual_source_creators.evidenceBasis, /excel_file_path/);
     assert.match(profile.outputContracts.rank_creators.evidenceBasis, /filtering, deduplication/);
     assert.match(profile.outputContracts.select_inquiry_form_fields.evidenceBasis, /数据库字段名：字段备注/);
   });

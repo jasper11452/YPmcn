@@ -68,17 +68,16 @@ describe("current Endpoint contract loader", () => {
     assert.equal(workflow.stateAuthority.ledger.status, "schema-present-not-used-by-current-tools");
     assert.match(workflow.stateAuthority.currentProviderGaps.create_submission_batch, /not yet deployed/);
     assert.deepEqual(workflow.primaryFlow.sequence, [
-      "select_inquiry_form_fields", "validate_requirement", "manual_source_creators",
-      "rank_creators", "create_submission_batch",
+      "validate_requirement", "manual_source_creators",
     ]);
-    assert.match(workflow.policies.rankCreatorsPrerequisite, /manual_source_creators.*inquiry_ids/i);
+    assert.match(workflow.policies.rankCreatorsPrerequisite, /inquiry_ids.*sync_mcn_inquiry_status/i);
     const distributionTransitions = workflow.transitions.filter((item) =>
       ["create_with_distributions", "sync_mcn_inquiry_status"].includes(item.trigger?.name)
     );
     assert.ok(distributionTransitions.some((item) => item.implementationStatus === "target-blocked"));
     const rankTransition = workflow.transitions.find((item) => item.trigger?.name === "rank_creators");
     assert.ok(rankTransition.guards.some((guard) => /inquiry_ids/.test(guard)));
-    assert.ok(rankTransition.guards.some((guard) => /selected columns/.test(guard)));
+    assert.ok(rankTransition.guards.some((guard) => /sync_mcn_inquiry_status/.test(guard)));
     assert.equal(workflow.transitions.some((item) =>
       item.from === "waiting_mcn_return" && item.trigger?.name === "manual_source_creators"
     ), false);
@@ -90,7 +89,7 @@ describe("current Endpoint contract loader", () => {
     assert.match(workflow.policies.directFlowEntry, /any existing phase/);
     assert.match(workflow.policies.manualSourcingPlacement, /do not require historical search/);
     assert.match(workflow.policies.manualRequirementIdentity, /exactly one immediately following/);
-    assert.match(workflow.policies.manualSourcingEvidence, /inquiry_ids/);
+    assert.match(workflow.policies.manualSourcingEvidence, /excel_file_path/);
     assert.equal(Object.isFrozen(workflow), true);
     assert.equal(loadDatabaseContract().profile, "mvp-v2");
     assert.equal(loadErrorCatalog().profile, "mvp-v2");
@@ -154,7 +153,6 @@ describe("current Endpoint input validation", () => {
       ["rank_creators", {
         requirement_id: "req-1",
         inquiry_ids: ["10", "11"],
-        columns: validDistribution().columns,
       }],
       ["create_submission_batch", { requirement_id: "req-1", size: "4", number: "1" }],
       ["record_client_feedback", { run_id: "1", feedback_items: [{ status: "accepted" }] }],
@@ -197,16 +195,16 @@ describe("current Endpoint input validation", () => {
     );
     assert.equal(validateToolParams("ingest_mcn_submissions", { inquiry_ids: [1] })[0].path, "$.inquiry_ids[0]");
     assert.equal(validateToolParams("rank_creators", {
-      requirement_id: "req-1", inquiry_ids: [10], columns: validDistribution().columns,
+      requirement_id: "req-1", inquiry_ids: [10],
     })[0].path, "$.inquiry_ids[0]");
     assert.deepEqual(validateToolParams("rank_creators", {
       requirement_id: "req-1", inquiry_ids: ["10"], columns: [{ field_key: "kwUid", field_name: "达人 ID" }],
-    }).map(({ path }) => path), ["$.columns[0]"]);
+    }).map(({ path }) => path), ["$.columns"]);
     assert.equal(validateToolParams("rank_creators", {
-      requirement_id: "req-1", inquiry_ids: ["10", "10"], columns: validDistribution().columns,
+      requirement_id: "req-1", inquiry_ids: ["10", "10"],
     })[0].path, "$.inquiry_ids[1]");
     assert.equal(validateToolParams("rank_creators", {
-      requirement_id: "req-1", inquiry_ids: ["10"], columns: validDistribution().columns, limit: 20,
+      requirement_id: "req-1", inquiry_ids: ["10"], limit: 20,
     })[0].path, "$.limit");
     assert.equal(
       validateToolParams("create_with_distributions", validDistribution({ columns: ["not-an-object"] }))[0].path,

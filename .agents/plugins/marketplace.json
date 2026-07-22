@@ -1,0 +1,20 @@
+{
+  "name": "ypmcn-local",
+  "interface": {
+    "displayName": "YPmcn Local Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "ypmcn-media-assistant",
+      "source": {
+        "source": "local",
+        "path": "./YPmcn"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
