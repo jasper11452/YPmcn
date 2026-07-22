@@ -134,7 +134,8 @@
           "request_identity_resolves_one_requirement",
           "description_is_plain_text_wechat_message_from_confirmed_user_requirement_not_json",
           "wechat_notification_message_is_exactly_identical_to_description",
-          "ask_user_question_prompt_and_followup_input_fingerprints_current_and_one_time"
+          "ask_user_question_prompt_and_followup_input_fingerprints_current_and_one_time",
+          "missing_session_context_requires_exactly_one_unexpired_matching_local_confirmation_receipt_or_fails_closed"
         ],
         "ingest_mcn_submissions": [
           "server_allowed_action_ingest_mcn_submissions",

@@ -971,15 +971,73 @@ describe("YP Action native hooks", () => {
     ), undefined);
   });
 
-  it("fails closed when external-send before_tool_call has no session context", async () => {
+  it("keeps the confirmation gate usable when the host omits session context", async () => {
+    const params = distributionParams();
     const blocked = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__create_with_distributions",
-      params: distributionParams(),
+      params,
       toolCallId: "call-unscoped-send",
+    }, {});
+    const askInput = askInputFrom(blocked);
+    await recordTool("AskUserQuestion", askInput, {
+      content: [{ type: "text", text: `${askInput.questions[0].question}: 确认发送` }],
+    }, {});
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params,
+      toolCallId: "call-unscoped-send-execute",
+    }, {}), undefined);
+  });
+
+  it("uses one exact local receipt when before_tool_call loses session context after approval", async () => {
+    const prepared = await requestConfirmation(
+      distributionParams(),
+      DEFAULT_CONTEXT,
+      "call-sessionless-handoff-popup",
+    );
+    await answerExternalConfirmation(prepared);
+    const executionToolCallId = "call-sessionless-handoff-execute";
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params: prepared.params,
+      toolCallId: executionToolCallId,
+    }, {}), undefined);
+
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params: prepared.params,
+      toolCallId: executionToolCallId,
+      result: {
+        success: true,
+        data: {
+          project_id: "project-sessionless-handoff",
+          created: [{ supplier_id: "supplier-1", notification_status: "sent" }],
+        },
+        error: null,
+      },
+    }, {});
+
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "consumed");
+    assert.equal(state.workflow.distribution_send_evidence_status, "valid");
+    assert.equal(state.workflow.project_id, "project-sessionless-handoff");
+  });
+
+  it("fails closed when missing session context makes matching approvals ambiguous", async () => {
+    const params = distributionParams();
+    const first = await requestConfirmation(params, { sessionKey: "ambiguous-send-a" }, "call-ambiguous-a");
+    await answerExternalConfirmation(first);
+    const second = await requestConfirmation(params, { sessionKey: "ambiguous-send-b" }, "call-ambiguous-b");
+    await answerExternalConfirmation(second);
+
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params,
+      toolCallId: "call-ambiguous-execute",
     }, {});
     assert.equal(blocked.block, true);
     assert.equal(blocked.errorCode, "INTEGRATION_REQUIRED");
-    assert.match(blocked.blockReason, /omitted session context/);
+    assert.match(blocked.blockReason, /multiple matching local confirmation receipts/);
   });
 
   it("keeps the full multiline WeCom message in the scrollable AskUserQuestion body", async () => {

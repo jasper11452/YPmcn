@@ -6,6 +6,7 @@ import {
   denyStructured,
   fingerprint,
   globalStore,
+  sessionStores,
   type ConfirmationStatus,
   type GuardStore,
   type Json,
@@ -1503,6 +1504,7 @@ function updateLocalWorkflow(
   rootDir: string,
   preflightDenial?: PreflightDenialReason,
   externalSendConfirmed = false,
+  currentOverride?: GuardStore,
 ): void {
   const stateChangingTools = new Set([
     "validate_requirement", "search_creators", "rank_mcns", "select_inquiry_form_fields",
@@ -1512,7 +1514,7 @@ function updateLocalWorkflow(
   ]);
   if (!stateChangingTools.has(tool)) return;
 
-  const current = store(rootDir);
+  const current = currentOverride ?? store(rootDir);
   const workflow = current.data.workflow as Json;
   if (preflightDenial) {
     const now = Date.now();
@@ -2239,9 +2241,51 @@ function projectExternalConfirmation(
   workflow.wecom_confirmation_updated_at_ms = Date.now();
 }
 
-function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
+function confirmationStoreCandidates(rootDir: string, current: GuardStore): GuardStore[] {
+  const stores = [current, globalStore(rootDir), ...sessionStores(rootDir)];
+  return [...new Map(stores.map((candidate) => [candidate.path, candidate])).values()];
+}
+
+function matchingConfirmationStores(
+  rootDir: string,
+  current: GuardStore,
+  predicate: (receipt: Json) => boolean,
+): GuardStore[] {
+  return confirmationStoreCandidates(rootDir, current).flatMap((candidate) => {
+    const matches = Object.values<Json>(candidate.data.confirmations).filter(predicate);
+    return matches.map(() => candidate);
+  });
+}
+
+function authorizeExternalSend(
+  input: Json,
+  rootDir: string,
+  toolCallId?: string,
+  scopeAvailable = true,
+): Json | undefined {
   const requestFingerprint = fingerprint(input);
-  const current = store(rootDir);
+  let current = store(rootDir);
+  const matchesRequest = (receipt: Json) =>
+    receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
+    receipt.request_fingerprint === requestFingerprint &&
+    ["pending", "approved", "in_flight"].includes(receipt.status);
+  const localMatches = Object.values<Json>(current.data.confirmations).filter(matchesRequest);
+  if (!scopeAvailable) {
+    const matches = matchingConfirmationStores(rootDir, current, matchesRequest);
+    if (matches.length > 1) {
+      return denyStructured(
+        "INTEGRATION_REQUIRED",
+        "The host omitted session context and multiple matching local confirmation receipts were found. Reopen the confirmation from a stable session before sending.",
+      );
+    }
+    if (matches.length === 1) current = matches[0];
+  } else if (localMatches.length === 0) {
+    const fallback = globalStore(rootDir);
+    const fallbackMatches = fallback.path === current.path
+      ? []
+      : Object.values<Json>(fallback.data.confirmations).filter(matchesRequest);
+    if (fallbackMatches.length === 1) current = fallback;
+  }
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
     receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
     receipt.status === "in_flight" && receipt.request_fingerprint === requestFingerprint &&
@@ -2377,30 +2421,25 @@ export function guardWorkflowTool(
   if (tool === "sync_mcn_inquiry_status") return authorizeInquirySync(event, input, _current);
   if (tool === "create_submission_batch") return authorizeSubmissionBatch(event, input, _current);
   if (tool === "create_with_distributions") {
-    if (!scopeAvailable) {
-      return denyPreflight(
-        event, tool, input, "missing_session_context", "INTEGRATION_REQUIRED",
-        "The host omitted session context from before_tool_call, so external-send confirmation cannot be verified safely. Stop and upgrade the host integration before sending.",
-      );
-    }
     return authorizeExternalSend(input, rootDir, text(event.toolCallId)
       ? event.toolCallId.trim()
       : text(event.callID)
         ? event.callID.trim()
-        : undefined);
+        : undefined, scopeAvailable);
   }
   return undefined;
 }
 
-function recordExternalSendResult(event: Json, input: Json, rootDir: string): boolean {
-  const current = store(rootDir);
+function recordExternalSendResult(event: Json, input: Json, rootDir: string): GuardStore | undefined {
+  let current = store(rootDir);
+  const fallback = globalStore(rootDir);
   const requestFingerprint = fingerprint(input);
   const afterToolCallId = text(event.toolCallId)
     ? event.toolCallId.trim()
     : text(event.callID)
       ? event.callID.trim()
       : undefined;
-  const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) => {
+  const matchesInFlight = (receipt: Json) => {
     if (
       receipt.kind !== "external_send" ||
       !EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode)
@@ -2408,10 +2447,23 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): bo
     if (receipt.status !== "in_flight" || receipt.input_fingerprint !== requestFingerprint) return false;
     if (afterToolCallId && text(receipt.tool_call_id)) return receipt.tool_call_id === afterToolCallId;
     return true;
-  });
-  if (!inFlight) return false;
+  };
+  const localMatches = Object.values<Json>(current.data.confirmations).filter(matchesInFlight);
+  if (current.path === fallback.path) {
+    const matches = matchingConfirmationStores(rootDir, current, matchesInFlight);
+    if (matches.length !== 1) return undefined;
+    current = matches[0];
+  } else if (localMatches.length === 0) {
+    const fallbackMatches = Object.values<Json>(fallback.data.confirmations).filter(matchesInFlight);
+    if (fallbackMatches.length !== 1) return undefined;
+    current = fallback;
+  }
+  const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
+    matchesInFlight(receipt)
+  );
+  if (!inFlight) return undefined;
   const [id, receipt] = inFlight;
-  if (receipt.user_prompted !== true || receipt.user_confirmed !== true) return false;
+  if (receipt.user_prompted !== true || receipt.user_confirmed !== true) return undefined;
   const now = Date.now();
   const unboundRejection = distributionUnboundRejectionEvidence(
     event,
@@ -2490,7 +2542,7 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): bo
     projectExternalConfirmation(current, id, receipt, receipt.status);
   }
   save(current.path, current.data);
-  return true;
+  return current;
 }
 
 function recordExternalSendDecision(event: Json, input: Json, rootDir: string): void {
@@ -2526,13 +2578,14 @@ function recordExternalSendDecision(event: Json, input: Json, rootDir: string): 
   let current = store(rootDir);
   let matched = matchPending(current);
   if (!matched) {
-    const fallback = globalStore(rootDir);
-    if (fallback.path !== current.path) {
-      const fallbackMatch = matchPending(fallback);
-      if (fallbackMatch) {
-        current = fallback;
-        matched = fallbackMatch;
-      }
+    const matches = confirmationStoreCandidates(rootDir, current).flatMap((candidate) => {
+      if (candidate.path === current.path) return [];
+      const candidateMatch = matchPending(candidate);
+      return candidateMatch ? [{ current: candidate, matched: candidateMatch }] : [];
+    });
+    if (matches.length === 1) {
+      current = matches[0].current;
+      matched = matches[0].matched;
     }
   }
   if (!matched) return;
@@ -2565,9 +2618,9 @@ export function recordWorkflowToolResult(
   }
   if (!tool) return;
   const preflightDenial = takePreflightDenial(event, tool, input);
-  const externalSendConfirmed = tool === "create_with_distributions"
+  const externalSendStore = tool === "create_with_distributions"
     ? recordExternalSendResult(event, input, rootDir)
-    : false;
-  updateLocalWorkflow(event, tool, input, rootDir, preflightDenial, externalSendConfirmed);
+    : undefined;
+  updateLocalWorkflow(event, tool, input, rootDir, preflightDenial, Boolean(externalSendStore), externalSendStore);
   recordRequirementReceipts(event, tool, rootDir, preflightDenial);
 }

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, join } from "node:path";
 
@@ -185,4 +185,15 @@ export function store(rootDir: string): GuardStore {
 
 export function globalStore(rootDir: string): GuardStore {
   return storeAtPath(join(rootDir, "state", "confirmation_guard.json"));
+}
+
+export function sessionStores(rootDir: string): GuardStore[] {
+  const sessionsDir = join(rootDir, "state", "sessions");
+  try {
+    return readdirSync(sessionsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => storeAtPath(join(sessionsDir, entry.name, "confirmation_guard.json")));
+  } catch {
+    return [];
+  }
 }
