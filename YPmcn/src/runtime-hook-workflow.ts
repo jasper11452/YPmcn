@@ -1139,8 +1139,9 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
     workflow.waiting_for = approved ? null : "user";
   }
 
+  workflow.transition_seq = Number(workflow.transition_seq ?? 0) + 1;
   appendWorkflowEvent(current.data, {
-    seq: Number(workflow.transition_seq ?? 0),
+    seq: workflow.transition_seq,
     kind: "user_command",
     header,
     answer,

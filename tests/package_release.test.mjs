@@ -56,6 +56,7 @@ after(() => {
 });
 
 describe("3.4.11 release metadata", () => {
+
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
     const rootPackage = json("package.json");
     const rootLock = json("package-lock.json");
