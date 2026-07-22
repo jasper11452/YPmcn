@@ -11,7 +11,8 @@ jobs:
   approve-and-enable-auto-merge:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+      github.event.workflow_run.event == 'pull_request' &&
+      startsWith(github.event.workflow_run.head_branch, 'tapd/')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -61,7 +62,7 @@ jobs:
             length > 0 and length <= 3000 and
             all(.[].filename;
               test("^(?:YPmcn/|changes/|docs/|fix-logs/|spec/|src/|tests/|package\\.json$|package-lock\\.json$)") and
-              (test("[\\u0000-\\u001F\\u007F]") | not) and
+              (test("[\u0000-\u001F\u007F]") | not) and
               (startswith(".github/") | not)
             )
           ' <<<"$files_json" >/dev/null
