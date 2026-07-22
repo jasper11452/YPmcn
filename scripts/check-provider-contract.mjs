@@ -67,6 +67,105 @@ function sameValue(left, right) {
   return canonicalJson(left) === canonicalJson(right);
 }
 
+function schemaTypes(schema) {
+  if (!isRecord(schema) || schema.type === undefined) return [];
+  return Array.isArray(schema.type) ? schema.type : [schema.type];
+}
+
+function providerTypeAccepts(providerType, localType) {
+  return providerType === localType || (providerType === "number" && localType === "integer");
+}
+
+function providerAcceptsLocalSchema(provider, local) {
+  if (!isRecord(provider) || !isRecord(local)) return false;
+
+  if (Array.isArray(local.anyOf)) {
+    return local.anyOf.every((branch) => providerAcceptsLocalSchema(provider, branch));
+  }
+  if (Array.isArray(provider.anyOf)) {
+    return provider.anyOf.some((branch) => providerAcceptsLocalSchema(branch, local));
+  }
+
+  if (provider.const !== undefined) {
+    if (local.const === undefined || !sameValue(provider.const, local.const)) return false;
+  }
+  if (Array.isArray(provider.enum)) {
+    const localValues = local.const !== undefined
+      ? [local.const]
+      : Array.isArray(local.enum)
+        ? local.enum
+        : undefined;
+    if (!localValues || localValues.some((value) => !provider.enum.some((candidate) => sameValue(candidate, value)))) {
+      return false;
+    }
+  }
+
+  const providerTypes = schemaTypes(provider);
+  const localTypes = schemaTypes(local);
+  if (
+    providerTypes.length > 0 &&
+    (localTypes.length === 0 || localTypes.some((type) =>
+      !providerTypes.some((candidate) => providerTypeAccepts(candidate, type))
+    ))
+  ) {
+    return false;
+  }
+
+  if (localTypes.includes("string")) {
+    if (provider.minLength !== undefined && (local.minLength === undefined || local.minLength < provider.minLength)) {
+      return false;
+    }
+  }
+  if (localTypes.some((type) => type === "number" || type === "integer")) {
+    if (provider.minimum !== undefined && (local.minimum === undefined || local.minimum < provider.minimum)) {
+      return false;
+    }
+    if (provider.maximum !== undefined && (local.maximum === undefined || local.maximum > provider.maximum)) {
+      return false;
+    }
+  }
+  if (localTypes.includes("array")) {
+    if (provider.minItems !== undefined && (local.minItems === undefined || local.minItems < provider.minItems)) {
+      return false;
+    }
+    if (provider.maxItems !== undefined && (local.maxItems === undefined || local.maxItems > provider.maxItems)) {
+      return false;
+    }
+    if (provider.items !== undefined && local.items !== undefined &&
+      !providerAcceptsLocalSchema(provider.items, local.items)) {
+      return false;
+    }
+    if (provider.items !== undefined && local.items === undefined) return false;
+  }
+
+  const localIsObject = localTypes.includes("object") ||
+    isRecord(local.properties) || Array.isArray(local.required);
+  if (localIsObject) {
+    const providerRequired = Array.isArray(provider.required) ? provider.required : [];
+    const localRequired = Array.isArray(local.required) ? local.required : [];
+    if (providerRequired.some((key) => !localRequired.includes(key))) return false;
+
+    const providerProperties = isRecord(provider.properties) ? provider.properties : {};
+    const localProperties = isRecord(local.properties) ? local.properties : {};
+    for (const [key, localProperty] of Object.entries(localProperties)) {
+      if (Object.prototype.hasOwnProperty.call(providerProperties, key)) {
+        if (!providerAcceptsLocalSchema(providerProperties[key], localProperty)) return false;
+      } else if (provider.additionalProperties === false) {
+        return false;
+      } else if (isRecord(provider.additionalProperties) &&
+        !providerAcceptsLocalSchema(provider.additionalProperties, localProperty)) {
+        return false;
+      }
+    }
+
+    if (local.additionalProperties !== false) {
+      if (provider.additionalProperties === false || isRecord(provider.additionalProperties)) return false;
+    }
+  }
+
+  return true;
+}
+
 function pushDiff(diffs, tool, path, reason, expected, actual) {
   diffs.push({ tool, path, reason, expected, actual });
 }
@@ -201,6 +300,15 @@ function targetInputSchema(contract) {
   };
 }
 
+function strictLocalInputSchema(contract) {
+  return {
+    type: "object",
+    required: [...new Set([...contract.required, ...(contract.agentRequired ?? [])])],
+    properties: contract.properties,
+    additionalProperties: false,
+  };
+}
+
 function detectedProfile(toolNames, missingTools) {
   const legacyNames = legacyProfile.observedSummary.toolNames;
   const expectedGap = new Set(legacyProfile.missingTargetTools);
@@ -222,23 +330,25 @@ export function compareProviderTools(tools) {
   }
   const missingTools = targetProfile.requiredTools.filter((name) => !toolMap.has(name));
   const schemaDiffs = [];
+  const compatibleSchemaDiffs = [];
 
   for (const name of [...targetProfile.requiredTools, ...targetProfile.optionalTools]) {
     const providerTool = toolMap.get(name);
     if (!providerTool) continue;
     const providerSchema = providerTool.inputSchema ?? providerTool.input_schema;
+    const toolDiffs = [];
     compareSchemaNode(
       name,
       targetInputSchema(targetProfile.tools[name]),
       providerSchema,
       "inputSchema",
-      schemaDiffs,
+      toolDiffs,
     );
     const providerProperties = isRecord(providerSchema?.properties) ? providerSchema.properties : {};
     for (const forbidden of targetProfile.tools[name].forbidden ?? []) {
       if (Object.prototype.hasOwnProperty.call(providerProperties, forbidden)) {
         pushDiff(
-          schemaDiffs,
+          toolDiffs,
           name,
           `inputSchema.properties.${forbidden}`,
           "forbidden_property",
@@ -247,6 +357,14 @@ export function compareProviderTools(tools) {
         );
       }
     }
+    const locallyStricter = targetProfile.tools[name].providerInputCompatibility ===
+      "local-input-subset-of-provider";
+    if (locallyStricter && toolDiffs.length > 0 &&
+      providerAcceptsLocalSchema(providerSchema, strictLocalInputSchema(targetProfile.tools[name]))) {
+      compatibleSchemaDiffs.push(...toolDiffs);
+    } else {
+      schemaDiffs.push(...toolDiffs);
+    }
   }
 
   return {
@@ -254,6 +372,7 @@ export function compareProviderTools(tools) {
     detectedProfile: detectedProfile(new Set(toolMap.keys()), missingTools),
     missingTools,
     schemaDiffs,
+    ...(compatibleSchemaDiffs.length > 0 ? { compatibleSchemaDiffs } : {}),
     schemaHash: schemaHash([...toolMap.values()]),
   };
 }

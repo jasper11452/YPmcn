@@ -1,1 +1,37 @@
-{"schemaVersion":1,"contractSource":"spec/mcp.json#tools/create_submission_batch","tool":"create_submission_batch","hostQualifiedName":"mcp__ypmcn__create_submission_batch","readImmediatelyBeforeCall":true,"providerRequired":["requirement_id","size","number"],"required":["requirement_id","size","number"],"argumentSchema":{"type":"object","required":["requirement_id","size","number"],"properties":{"requirement_id":{"type":"string"},"size":{"type":"string","description":"导出数量，必须与本轮拓展达人 size 一致"},"number":{"type":"string","description":"批次号，使用正整数十进制字符串"}},"additionalProperties":false},"sideEffects":"business-write","retry":{"policy":"no-blind-retry","blindRetry":false,"unknownOutcome":"stop-and-request-returned-evidence","reconcileWith":null},"rules":["仅在本轮 rank_creators 成功后调用。","requirement_id、size 必须与本轮拓展达人一致；number 必须是用户确认的正整数十进制批次号。","此 Tool 负责最终表格导出；不得传 run_id 或旧批次选项。"]}
+{
+  "schemaVersion": 1,
+  "contractSource": "spec/mcp.json#tools/create_submission_batch",
+  "tool": "create_submission_batch",
+  "hostQualifiedName": "mcp__ypmcn__create_submission_batch",
+  "readImmediatelyBeforeCall": true,
+  "executionAvailability": {
+    "status": "blocked-current-production-provider-contract",
+    "reason": "Production requires integer size, submission_batche_page, and columns; there is no safe mapping from the approved export input.",
+    "recovery": "Do not invoke this tool until Provider deploys the approved requirement_id, string size, and string number input."
+  },
+  "providerRequired": ["requirement_id", "size", "number"],
+  "required": ["requirement_id", "size", "number"],
+  "argumentSchema": {
+    "type": "object",
+    "required": ["requirement_id", "size", "number"],
+    "properties": {
+      "requirement_id": {"type": "string"},
+      "size": {"type": "string", "description": "导出数量，必须与本轮拓展达人 size 一致"},
+      "number": {"type": "string", "description": "批次号，使用正整数十进制字符串"}
+    },
+    "additionalProperties": false
+  },
+  "sideEffects": "business-write",
+  "retry": {
+    "policy": "no-blind-retry",
+    "blindRetry": false,
+    "unknownOutcome": "stop-and-request-returned-evidence",
+    "reconcileWith": null
+  },
+  "rules": [
+    "当前 production 不得调用此 Tool；返回 integration_required，禁止猜测 submission_batche_page 或 columns。",
+    "仅在 Provider 发布批准入参后，才可在本轮 rank_creators 成功后调用。",
+    "requirement_id、size 必须与本轮拓展达人一致；number 必须是用户确认的正整数十进制批次号。",
+    "此 Tool 负责最终表格导出；不得传 run_id 或旧批次选项。"
+  ]
+}

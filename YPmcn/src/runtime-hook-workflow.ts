@@ -6,7 +6,6 @@ import {
   denyStructured,
   fingerprint,
   globalStore,
-  sessionStores,
   type ConfirmationStatus,
   type GuardStore,
   type Json,
@@ -14,6 +13,7 @@ import {
   sha256Text,
   store,
   text,
+  withStoreLock,
 } from "./runtime-hook-state.js";
 
 const PREFIXES = ["ypmcn__", "mcp__ypmcn__", "ypmcn-mcp__", "ypmcn-provider__"];
@@ -58,6 +58,10 @@ const REQUIREMENT_PRIMARY_KEY = /^[0-9a-f]{32}$/i;
 const REQUIREMENT_BRIEF_TTL_MS = 30 * 60 * 1_000;
 const PREFLIGHT_DENIAL_TTL_MS = 5 * 60 * 1_000;
 const SEARCH_REQUIREMENT_RECEIPT_KEY = "search_requirement_receipt";
+const CURRENT_PROVIDER_CONTRACT_BLOCKS: Record<string, string> = {
+  create_submission_batch: "The current Provider requires submission_batche_page and columns instead of the approved number contract. Their semantics cannot be derived from local state, so do not call this write tool or invent a mapping; deploy the approved Provider input contract first.",
+  get_workflow_state: "The current Provider requires requirement_id, but approved recovery uses trace_id or demand_id with demand_version. Do not synthesize a requirement_id or call this incompatible recovery tool; deploy the approved Provider input contract first.",
+};
 
 type PreflightDenialReason =
   | "brief_mismatch"
@@ -706,14 +710,18 @@ function authorizeRankCreators(event: Json, input: Json, current: GuardStore): J
     );
   }
   const inquiryId = latestWecomSendInquiryId(current.data);
+  const hasInquiryIds = Object.prototype.hasOwnProperty.call(input, "inquiry_ids");
+  const inquiryIds = input.inquiry_ids;
+  const matchesLatestInquiry = Array.isArray(inquiryIds) && inquiryIds.length === 1 &&
+    inquiryIds[0] === inquiryId;
   if (
     !text(workflow.requirement_id) || input.requirement_id !== workflow.requirement_id ||
-    Object.prototype.hasOwnProperty.call(input, "inquiry_ids") ||
-    (inquiryId ? input.inquiry_id !== inquiryId : Object.prototype.hasOwnProperty.call(input, "inquiry_id"))
+    Object.prototype.hasOwnProperty.call(input, "inquiry_id") ||
+    (inquiryId ? !matchesLatestInquiry : hasInquiryIds && inquiryIds !== null)
   ) {
     return denyPreflight(
       event, "rank_creators", input, "workflow_lineage", "INVALID_INPUT",
-      "rank_creators must use the current manual-sourcing requirement_id. If a prior verified create_with_distributions result returned an inquiry_id, pass the most recent such inquiry_id; otherwise omit inquiry_id.",
+      "rank_creators must use the current manual-sourcing requirement_id. If a prior verified create_with_distributions result returned an inquiry_id, pass an inquiry_ids array containing exactly the most recent such inquiry_id; otherwise omit inquiry_ids or use null.",
     );
   }
   return undefined;
@@ -1967,8 +1975,9 @@ function updateLocalWorkflow(
         break;
       case "rank_creators": {
         workflow.phase = "recommendation_ready";
-        workflow.next_action = "create_submission_batch";
-        workflow.waiting_for = null;
+        workflow.next_action = "await_provider_submission_contract_upgrade";
+        workflow.waiting_for = "integration";
+        workflow.provider_contract_blocked_tool = "create_submission_batch";
         workflow.rank_creators_evidence_status = "valid";
         workflow.rank_creators_input_sha256 = sha256Text(canonical(input));
         delete workflow.rank_creators_evidence_error;
@@ -2241,57 +2250,42 @@ function projectExternalConfirmation(
   workflow.wecom_confirmation_updated_at_ms = Date.now();
 }
 
-function confirmationStoreCandidates(rootDir: string, current: GuardStore): GuardStore[] {
-  const stores = [current, globalStore(rootDir), ...sessionStores(rootDir)];
-  return [...new Map(stores.map((candidate) => [candidate.path, candidate])).values()];
-}
-
-function matchingConfirmationStores(
-  rootDir: string,
-  current: GuardStore,
-  predicate: (receipt: Json) => boolean,
-): GuardStore[] {
-  return confirmationStoreCandidates(rootDir, current).flatMap((candidate) => {
-    const matches = Object.values<Json>(candidate.data.confirmations).filter(predicate);
-    return matches.map(() => candidate);
-  });
-}
-
 function authorizeExternalSend(
   input: Json,
   rootDir: string,
   toolCallId?: string,
   scopeAvailable = true,
 ): Json | undefined {
-  const requestFingerprint = fingerprint(input);
-  let current = store(rootDir);
-  const matchesRequest = (receipt: Json) =>
-    receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
-    receipt.request_fingerprint === requestFingerprint &&
-    ["pending", "approved", "in_flight"].includes(receipt.status);
-  const localMatches = Object.values<Json>(current.data.confirmations).filter(matchesRequest);
-  if (!scopeAvailable) {
-    const matches = matchingConfirmationStores(rootDir, current, matchesRequest);
-    if (matches.length > 1) {
-      return denyStructured(
-        "INTEGRATION_REQUIRED",
-        "The host omitted session context and multiple matching local confirmation receipts were found. Reopen the confirmation from a stable session before sending.",
-      );
-    }
-    if (matches.length === 1) current = matches[0];
-  } else if (localMatches.length === 0) {
-    const fallback = globalStore(rootDir);
-    const fallbackMatches = fallback.path === current.path
-      ? []
-      : Object.values<Json>(fallback.data.confirmations).filter(matchesRequest);
-    if (fallbackMatches.length === 1) current = fallback;
+  const selected = scopeAvailable ? store(rootDir) : globalStore(rootDir);
+  const locked = withStoreLock(selected.path, (current) =>
+    authorizeExternalSendInStore(input, toolCallId, current)
+  );
+  if (!locked.acquired) {
+    return denyStructured(
+      "INTEGRATION_REQUIRED",
+      "A local external-send confirmation transition is already in progress. Wait for it to finish, then retry the declared MCP tool without sending directly.",
+    );
   }
+  return locked.value;
+}
+
+function authorizeExternalSendInStore(
+  input: Json,
+  toolCallId: string | undefined,
+  current: GuardStore,
+): Json | undefined {
+  const requestFingerprint = fingerprint(input);
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
     receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
-    receipt.status === "in_flight" && receipt.request_fingerprint === requestFingerprint &&
-    receipt.tool_call_id === (toolCallId ?? null)
+    receipt.status === "in_flight" && receipt.request_fingerprint === requestFingerprint
   );
-  if (inFlight) return undefined;
+  if (inFlight) {
+    if (inFlight[1].tool_call_id === (toolCallId ?? null)) return undefined;
+    return denyStructured(
+      "INTEGRATION_REQUIRED",
+      "This exact external-send request is already in flight under another tool call. Wait for its result or reconcile the unknown outcome before any retry.",
+    );
+  }
 
   const completedFallbackStatus = completedIndividualFallbackStatus(
     current.data.workflow as Json,
@@ -2397,6 +2391,8 @@ export function guardWorkflowTool(
   rootDir: string,
   scopeAvailable: boolean,
 ): Json | undefined {
+  const providerContractBlock = CURRENT_PROVIDER_CONTRACT_BLOCKS[tool];
+  if (providerContractBlock) return denyStructured("INTEGRATION_REQUIRED", providerContractBlock);
   if (tool === "select_inquiry_form_fields") return authorizeFieldSelection(event, input, _current);
   if (tool === "validate_requirement") return authorizeRequirementBrief(event, input);
   if (tool === "search_creators") {
@@ -2431,8 +2427,18 @@ export function guardWorkflowTool(
 }
 
 function recordExternalSendResult(event: Json, input: Json, rootDir: string): GuardStore | undefined {
-  let current = store(rootDir);
-  const fallback = globalStore(rootDir);
+  const selected = store(rootDir);
+  const locked = withStoreLock(selected.path, (current) =>
+    recordExternalSendResultInStore(event, input, current)
+  );
+  return locked.acquired ? locked.value : undefined;
+}
+
+function recordExternalSendResultInStore(
+  event: Json,
+  input: Json,
+  current: GuardStore,
+): GuardStore | undefined {
   const requestFingerprint = fingerprint(input);
   const afterToolCallId = text(event.toolCallId)
     ? event.toolCallId.trim()
@@ -2448,16 +2454,6 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): Gu
     if (afterToolCallId && text(receipt.tool_call_id)) return receipt.tool_call_id === afterToolCallId;
     return true;
   };
-  const localMatches = Object.values<Json>(current.data.confirmations).filter(matchesInFlight);
-  if (current.path === fallback.path) {
-    const matches = matchingConfirmationStores(rootDir, current, matchesInFlight);
-    if (matches.length !== 1) return undefined;
-    current = matches[0];
-  } else if (localMatches.length === 0) {
-    const fallbackMatches = Object.values<Json>(fallback.data.confirmations).filter(matchesInFlight);
-    if (fallbackMatches.length !== 1) return undefined;
-    current = fallback;
-  }
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
     matchesInFlight(receipt)
   );
@@ -2546,6 +2542,11 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): Gu
 }
 
 function recordExternalSendDecision(event: Json, input: Json, rootDir: string): void {
+  const selected = store(rootDir);
+  withStoreLock(selected.path, (current) => recordExternalSendDecisionInStore(event, input, current));
+}
+
+function recordExternalSendDecisionInStore(event: Json, input: Json, current: GuardStore): void {
   const askInputFingerprint = fingerprint(input);
   const matchPending = (candidate: GuardStore): { pending: [string, Json]; answer?: string } | undefined => {
     let pending = Object.entries<Json>(candidate.data.confirmations).find(([, receipt]) =>
@@ -2575,19 +2576,7 @@ function recordExternalSendDecision(event: Json, input: Json, rootDir: string): 
     return pending ? { pending, answer } : undefined;
   };
 
-  let current = store(rootDir);
-  let matched = matchPending(current);
-  if (!matched) {
-    const matches = confirmationStoreCandidates(rootDir, current).flatMap((candidate) => {
-      if (candidate.path === current.path) return [];
-      const candidateMatch = matchPending(candidate);
-      return candidateMatch ? [{ current: candidate, matched: candidateMatch }] : [];
-    });
-    if (matches.length === 1) {
-      current = matches[0].current;
-      matched = matches[0].matched;
-    }
-  }
+  const matched = matchPending(current);
   if (!matched) return;
 
   const { pending: [id, receipt], answer } = matched;

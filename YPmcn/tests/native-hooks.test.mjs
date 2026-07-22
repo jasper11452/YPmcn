@@ -12,6 +12,7 @@ const DEFAULT_SESSION_KEY = "ypmcn-native-hooks-default";
 const DEFAULT_CONTEXT = { sessionKey: DEFAULT_SESSION_KEY };
 const defaultSessionHash = createHash("sha256").update(DEFAULT_SESSION_KEY).digest("hex").slice(0, 24);
 const stateFile = join(tempDir, "state", "sessions", defaultSessionHash, "confirmation_guard.json");
+const globalStateFile = join(tempDir, "state", "confirmation_guard.json");
 const hooks = new Map();
 const UNRESOLVED_BRIEF = "找5位小红书达人，单达人预算口径待确认，明天提报。";
 const contract = JSON.parse(readFileSync(new URL("../../spec/mcp.json", import.meta.url), "utf8"));
@@ -265,7 +266,7 @@ describe("YP Action native hooks", () => {
     assert.match(YPMCN_FAST_PATH, /manual_source_creators\(\{requirement_id,size\}\)/);
     assert.match(YPMCN_FAST_PATH, /Immediately render every returned row as one Markdown table/);
     assert.match(YPMCN_FAST_PATH, /workflow\.manual_sourcing_display_marker/);
-    assert.match(YPMCN_FAST_PATH, /omit inquiry_id when no prior verified create_with_distributions result returned one/);
+    assert.match(YPMCN_FAST_PATH, /omit inquiry_ids \(or use null\) when no prior verified create_with_distributions result returned an inquiry_id/);
     assert.match(YPMCN_FAST_PATH, /Every AskUserQuestion question must contain line breaks/);
     assert.match(YPMCN_FAST_PATH, /机构回填确认/);
     assert.match(YPMCN_FAST_PATH, /age1Rate\.\.age6Rate are direct JSON numbers/);
@@ -317,6 +318,7 @@ describe("YP Action native hooks", () => {
     for (const name of [...contract.requiredTools, ...contract.optionalTools]) {
       if ([
         "select_inquiry_form_fields", "sync_mcn_inquiry_status", "rank_creators", "create_submission_batch",
+        "get_workflow_state",
       ].includes(name)) continue;
       let params = name === "create_with_distributions" ? distributionParams() : {};
       if (name === "create_with_distributions") await recordMcnRecipients(params);
@@ -352,7 +354,7 @@ describe("YP Action native hooks", () => {
     });
     const rankParams = (requirement_id) => ({
       requirement_id,
-      inquiry_id: "31",
+      inquiry_ids: ["31"],
     });
 
     const activeRequirement = requirementId(31);
@@ -989,7 +991,37 @@ describe("YP Action native hooks", () => {
     }, {}), undefined);
   });
 
-  it("uses one exact local receipt when before_tool_call loses session context after approval", async () => {
+  it("permits exactly one concurrent unscoped tool call for an approved global receipt", async () => {
+    const params = distributionParams();
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params,
+      toolCallId: "call-unscoped-concurrent-popup",
+    }, {});
+    const askInput = askInputFrom(blocked);
+    await recordTool("AskUserQuestion", askInput, {
+      content: [{ type: "text", text: `${askInput.questions[0].question}: 确认发送` }],
+    }, {});
+
+    const [first, second] = await Promise.all([
+      hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__create_with_distributions",
+        params,
+        toolCallId: "call-unscoped-concurrent-one",
+      }, {}),
+      hooks.get("before_tool_call")({
+        toolName: "mcp__ypmcn__create_with_distributions",
+        params,
+        toolCallId: "call-unscoped-concurrent-two",
+      }, {}),
+    ]);
+    assert.equal([first, second].filter((result) => result === undefined).length, 1);
+    const rejected = [first, second].find((result) => result !== undefined);
+    assert.equal(rejected?.errorCode, "INTEGRATION_REQUIRED");
+    assert.match(rejected?.blockReason ?? "", /already in flight/);
+  });
+
+  it("requires a new global confirmation when before_tool_call loses session context", async () => {
     const prepared = await requestConfirmation(
       distributionParams(),
       DEFAULT_CONTEXT,
@@ -997,6 +1029,21 @@ describe("YP Action native hooks", () => {
     );
     await answerExternalConfirmation(prepared);
     const executionToolCallId = "call-sessionless-handoff-execute";
+    const sessionState = JSON.parse(readFileSync(stateFile, "utf8"));
+    const sessionReceiptId = sessionState.latest_external_confirmation_id;
+    const unscoped = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params: prepared.params,
+      toolCallId: executionToolCallId,
+    }, {});
+    const globalAskInput = askInputFrom(unscoped);
+    let globalState = JSON.parse(readFileSync(globalStateFile, "utf8"));
+    assert.equal(globalState.confirmations[globalState.latest_external_confirmation_id].status, "pending");
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).confirmations[sessionReceiptId].status, "approved");
+
+    await recordTool("AskUserQuestion", globalAskInput, {
+      content: [{ type: "text", text: `${globalAskInput.questions[0].question}: 确认发送` }],
+    }, {});
     assert.equal(await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__create_with_distributions",
       params: prepared.params,
@@ -1017,13 +1064,14 @@ describe("YP Action native hooks", () => {
       },
     }, {});
 
-    const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "consumed");
-    assert.equal(state.workflow.distribution_send_evidence_status, "valid");
-    assert.equal(state.workflow.project_id, "project-sessionless-handoff");
+    globalState = JSON.parse(readFileSync(globalStateFile, "utf8"));
+    assert.equal(globalState.confirmations[globalState.latest_external_confirmation_id].status, "consumed");
+    assert.equal(globalState.workflow.distribution_send_evidence_status, "valid");
+    assert.equal(globalState.workflow.project_id, "project-sessionless-handoff");
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).confirmations[sessionReceiptId].status, "approved");
   });
 
-  it("fails closed when missing session context makes matching approvals ambiguous", async () => {
+  it("never authorizes matching session approvals when the host omits session context", async () => {
     const params = distributionParams();
     const first = await requestConfirmation(params, { sessionKey: "ambiguous-send-a" }, "call-ambiguous-a");
     await answerExternalConfirmation(first);
@@ -1035,9 +1083,57 @@ describe("YP Action native hooks", () => {
       params,
       toolCallId: "call-ambiguous-execute",
     }, {});
-    assert.equal(blocked.block, true);
+    const unscopedAskInput = askInputFrom(blocked);
+    const globalState = JSON.parse(readFileSync(globalStateFile, "utf8"));
+    assert.equal(globalState.confirmations[globalState.latest_external_confirmation_id].status, "pending");
+    assert.equal(
+      JSON.parse(readFileSync(sessionStateFile("ambiguous-send-a"), "utf8")).confirmations[
+        JSON.parse(readFileSync(sessionStateFile("ambiguous-send-a"), "utf8")).latest_external_confirmation_id
+      ].status,
+      "approved",
+    );
+    assert.equal(
+      JSON.parse(readFileSync(sessionStateFile("ambiguous-send-b"), "utf8")).confirmations[
+        JSON.parse(readFileSync(sessionStateFile("ambiguous-send-b"), "utf8")).latest_external_confirmation_id
+      ].status,
+      "approved",
+    );
+    assert.match(unscopedAskInput.questions[0].question, /是否确认立即发送/);
+  });
+
+  it("fails closed while an external-send confirmation transition is locked", async () => {
+    const prepared = await requestConfirmation(distributionParams(), DEFAULT_CONTEXT, "call-lock-popup");
+    await answerExternalConfirmation(prepared);
+    const lockPath = `${stateFile}.lock`;
+    writeFileSync(lockPath, "locked");
+
+    const blocked = await guard(
+      "mcp__ypmcn__create_with_distributions",
+      prepared.params,
+      "call-lock-execute",
+    );
     assert.equal(blocked.errorCode, "INTEGRATION_REQUIRED");
-    assert.match(blocked.blockReason, /multiple matching local confirmation receipts/);
+    assert.match(blocked.blockReason, /confirmation transition is already in progress/);
+
+    rmSync(lockPath, { force: true });
+    assert.equal(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      prepared.params,
+      "call-lock-execute",
+    ), undefined);
+  });
+
+  it("permits exactly one concurrent tool call for an approved external-send receipt", async () => {
+    const prepared = await requestConfirmation(distributionParams(), DEFAULT_CONTEXT, "call-concurrent-popup");
+    await answerExternalConfirmation(prepared);
+    const [first, second] = await Promise.all([
+      guard("mcp__ypmcn__create_with_distributions", prepared.params, "call-concurrent-one"),
+      guard("mcp__ypmcn__create_with_distributions", prepared.params, "call-concurrent-two"),
+    ]);
+    assert.equal([first, second].filter((result) => result === undefined).length, 1);
+    const blocked = [first, second].find((result) => result !== undefined);
+    assert.equal(blocked?.errorCode, "INTEGRATION_REQUIRED");
+    assert.match(blocked?.blockReason ?? "", /already in flight/);
   });
 
   it("keeps the full multiline WeCom message in the scrollable AskUserQuestion body", async () => {
@@ -1714,7 +1810,7 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.next_action, "confirm_mcn_return_completed");
     assert.equal(state.workflow.waiting_for, "user");
 
-    const rankParams = { requirement_id: activeRequirement, inquiry_id: "inquiry-59" };
+    const rankParams = { requirement_id: activeRequirement, inquiry_ids: ["inquiry-59"] };
     assert.equal((await guard("mcp__ypmcn__rank_creators", rankParams)).errorCode, "INVALID_PHASE");
     const returnQuestion = {
       questions: [{
@@ -1733,7 +1829,7 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.waiting_for, null);
     assert.equal((await guard("mcp__ypmcn__rank_creators", {
       requirement_id: activeRequirement,
-      inquiry_id: "inquiry-older",
+      inquiry_ids: ["inquiry-older"],
     })).errorCode, "INVALID_INPUT");
     assert.equal(await guard("mcp__ypmcn__rank_creators", rankParams), undefined);
   });
@@ -1749,7 +1845,11 @@ describe("YP Action native hooks", () => {
     const earlyExport = await guard("mcp__ypmcn__create_submission_batch", {
       requirement_id: requirementId(60), size: "1", number: "1",
     });
-    assert.equal(earlyExport.errorCode, "INVALID_PHASE");
+    assert.equal(earlyExport.errorCode, "INTEGRATION_REQUIRED");
+    assert.match(earlyExport.blockReason, /submission_batche_page/);
+    const workflowRead = await guard("mcp__ypmcn__get_workflow_state", { trace_id: "trace-60" });
+    assert.equal(workflowRead.errorCode, "INTEGRATION_REQUIRED");
+    assert.match(workflowRead.blockReason, /requirement_id/);
     assert.equal((await guard("mcp__ypmcn__select_inquiry_form_fields", {
       platform: "weibo",
     })).errorCode, "INVALID_INPUT");
@@ -1774,6 +1874,21 @@ describe("YP Action native hooks", () => {
       columns: [{ key: "kwUid", name: "达人 ID" }],
     });
     assert.equal(wrongRank.errorCode, "INVALID_INPUT");
+    await recordTool(
+      "mcp__ypmcn__rank_creators",
+      { requirement_id: activeRequirement },
+      { success: true, data: { run_id: "run-61", ranked_count: 1 }, error: null },
+    );
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "recommendation_ready");
+    assert.equal(state.workflow.next_action, "await_provider_submission_contract_upgrade");
+    assert.equal(state.workflow.waiting_for, "integration");
+    assert.equal(state.workflow.provider_contract_blocked_tool, "create_submission_batch");
+    const blockedExportAfterRank = await guard("mcp__ypmcn__create_submission_batch", {
+      requirement_id: activeRequirement, size: "3", number: "1",
+    });
+    assert.equal(blockedExportAfterRank.errorCode, "INTEGRATION_REQUIRED");
+    assert.match(blockedExportAfterRank.blockReason, /submission_batche_page/);
   });
 
   it("requires business evidence and records unknown writes without advancing", async () => {
@@ -2037,6 +2152,11 @@ describe("YP Action native hooks", () => {
       params: { id: requirementId(31) },
     }, {});
     assert.equal(search.errorCode, "INTEGRATION_REQUIRED");
-    assert.equal(errors.length, 5);
+    const workflowRead = await localHooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__get_workflow_state",
+      params: { trace_id: "trace-guard" },
+    }, {});
+    assert.equal(workflowRead.errorCode, "INTEGRATION_REQUIRED");
+    assert.equal(errors.length, 6);
   });
 });

@@ -6,7 +6,7 @@
     "productionEndpoint": "https://mcp.eshypdata.com/sse",
     "activeProfile": "development",
     "inputAuthority": "approved-target-with-live-tools-list-comparison",
-    "schemaSelection": "2026-07-22-search-supply-v2-plus-primary-id-guards",
+    "schemaSelection": "2026-07-23-rank-inquiry-ids-compatibility",
     "ignoredToolPrefix": "pgy",
     "advertisedOutputSchema": false
   },
@@ -560,6 +560,7 @@
     },
     "create_with_distributions": {
       "name": "create_with_distributions",
+      "providerInputCompatibility": "local-input-subset-of-provider",
       "required": [
         "requirement_id",
         "columns",
@@ -751,15 +752,26 @@
             {"type": "null"}
           ]
         },
-        "inquiry_id": {
-          "type": "string",
-          "minLength": 1
+        "inquiry_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inquiry Ids"
         }
       },
       "forbidden": [],
       "agentRequired": ["requirement_id"],
       "agentSemanticRequirements": {
-        "inquiry_id": "omit when no prior verified create_with_distributions result returned an inquiry_id; otherwise use the most recent returned inquiry_id, scanning earlier send results only when a newer result has no usable ID",
+        "inquiry_ids": "omit or use null when no prior verified create_with_distributions result returned an inquiry_id; otherwise use an array containing exactly the most recent returned inquiry_id, scanning earlier send results only when a newer result has no usable ID",
         "requirement_id": "the same non-empty requirement_id used by the current MCN inquiry-recovery chain"
       },
       "sideEffects": "business-write",
@@ -781,6 +793,11 @@
     },
     "create_submission_batch": {
       "name": "create_submission_batch",
+      "executionAvailability": {
+        "status": "blocked-current-production-provider-contract",
+        "reason": "Production requires an integer size plus submission_batche_page and columns. The approved number and selected export columns cannot be transformed safely, so the runtime must not call this tool or invent a mapping.",
+        "recovery": "Deploy the approved requirement_id, string size, and string number input contract before enabling submission export."
+      },
       "required": [
         "requirement_id",
         "size",
@@ -984,6 +1001,11 @@
     },
     "get_workflow_state": {
       "name": "get_workflow_state",
+      "executionAvailability": {
+        "status": "blocked-current-production-provider-contract",
+        "reason": "Production requires requirement_id, while the approved recovery identity is trace_id or demand_id with demand_version. The runtime must not synthesize a requirement_id from either identity.",
+        "recovery": "Deploy the approved trace_id or demand_id plus demand_version recovery input contract before enabling Provider workflow recovery."
+      },
       "required": [],
       "properties": {
         "demand_id": {

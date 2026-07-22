@@ -171,6 +171,11 @@ describe("Spec governance", () => {
       "numeric_data_demand_id_and_demand_version_are_rejected_without_revalidation",
       "missing_before_tool_session_context_never_uses_global_state_as_authorization",
     ]);
+    assert.ok(
+      mediaAssistant.toolPolicy.preconditions.create_submission_batch.includes(
+        "current_production_provider_contract_matches_the_approved_submission_input",
+      ),
+    );
     assert.equal(
       existsSync(join(repoRoot, mediaAssistant.implementation)),
       true,

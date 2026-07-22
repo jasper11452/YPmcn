@@ -300,10 +300,16 @@ function validateSemanticRequirements(
   }
   if (tool === "rank_creators") {
     if (
-      hasOwn(params, "inquiry_id") &&
-      (typeof params.inquiry_id !== "string" || params.inquiry_id.trim().length === 0)
+      hasOwn(params, "inquiry_ids") &&
+      params.inquiry_ids !== null &&
+      (!Array.isArray(params.inquiry_ids) || params.inquiry_ids.length !== 1 ||
+        typeof params.inquiry_ids[0] !== "string" || params.inquiry_ids[0].trim().length === 0)
     ) {
-      return [issue("INVALID_INPUT", "$.inquiry_id", "inquiry_id must be a non-empty string when supplied.")];
+      return [issue(
+        "INVALID_INPUT",
+        "$.inquiry_ids",
+        "inquiry_ids must contain exactly one non-empty string when supplied.",
+      )];
     }
     if (typeof params.requirement_id !== "string" || params.requirement_id.trim().length === 0) {
       return [issue("INVALID_INPUT", "$.requirement_id", "requirement_id must be a non-empty string.")];

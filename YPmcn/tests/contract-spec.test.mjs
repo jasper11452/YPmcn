@@ -57,7 +57,7 @@ const EXPECTED_INPUTS = {
   },
   rank_creators: {
     required: [],
-    properties: { requirement_id: "string|null", inquiry_id: "string" },
+    properties: { requirement_id: "string|null", inquiry_ids: "array|null" },
   },
   create_submission_batch: {
     required: ["requirement_id", "size", "number"],
@@ -115,7 +115,7 @@ describe("current Endpoint MCP contract", () => {
       productionEndpoint: "https://mcp.eshypdata.com/sse",
       activeProfile: "development",
       inputAuthority: "approved-target-with-live-tools-list-comparison",
-      schemaSelection: "2026-07-22-search-supply-v2-plus-primary-id-guards",
+      schemaSelection: "2026-07-23-rank-inquiry-ids-compatibility",
       ignoredToolPrefix: "pgy",
       advertisedOutputSchema: false,
     });
@@ -133,10 +133,20 @@ describe("current Endpoint MCP contract", () => {
   });
 
   it("keeps provider and manual-sourcing semantic constraints explicit", () => {
+    assert.equal(
+      profile.tools.create_submission_batch.executionAvailability.status,
+      "blocked-current-production-provider-contract",
+    );
+    assert.match(profile.tools.create_submission_batch.executionAvailability.reason, /submission_batche_page.*columns/);
+    assert.equal(
+      profile.tools.get_workflow_state.executionAvailability.status,
+      "blocked-current-production-provider-contract",
+    );
+    assert.match(profile.tools.get_workflow_state.executionAvailability.reason, /requires requirement_id/);
     assert.match(profile.tools.get_workflow_state.semanticRequirement, /demand_id.*demand_version.*trace_id/);
     assert.match(profile.tools.get_recommendation_run_detail.semanticRequirement, /positive integer/);
     assert.deepEqual(profile.tools.rank_creators.agentRequired, ["requirement_id"]);
-    assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_id, /most recent returned inquiry_id/);
+    assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /exactly the most recent returned inquiry_id/);
     assert.match(
       profile.tools.manual_source_creators.agentSemanticRequirements.requirement_id,
       /32-character hexadecimal data\.id.*immediately preceding successful validate_requirement.*plugin-owned fresh receipt.*one manual_source_creators invocation/,

@@ -66,11 +66,16 @@ describe("current Endpoint contract loader", () => {
     assert.equal(workflow.stateAuthority.providerOutputSchemaAdvertised, false);
     assert.equal(workflow.stateAuthority.missingEvidenceBehavior, "no-phase-advance");
     assert.equal(workflow.stateAuthority.ledger.status, "schema-present-not-used-by-current-tools");
-    assert.match(workflow.stateAuthority.currentProviderGaps.create_submission_batch, /not yet deployed/);
+    assert.match(workflow.stateAuthority.currentProviderGaps.create_submission_batch, /runtime fail-closes/);
+    assert.match(workflow.stateAuthority.currentProviderGaps.get_workflow_state, /runtime fail-closes/);
+    assert.ok(workflow.phases.includes("inquiry_sending"));
     assert.deepEqual(workflow.primaryFlow.sequence, [
       "validate_requirement", "manual_source_creators", "rank_creators", "create_submission_batch",
     ]);
-    assert.match(workflow.policies.rankCreatorsPrerequisite, /omit inquiry_id.*most recent returned inquiry_id/i);
+    assert.match(workflow.policies.rankCreatorsPrerequisite, /omit inquiry_ids.*most recent returned inquiry_id/i);
+    assert.match(workflow.policies.stateRefresh, /get_workflow_state is fail-closed/);
+    assert.match(workflow.policies.unknownWriteRecovery, /no safe approved recovery lookup/);
+    assert.match(workflow.policies.submissionExport, /integration wait/);
     const distributionTransitions = workflow.transitions.filter((item) =>
       ["create_with_distributions", "sync_mcn_inquiry_status"].includes(item.trigger?.name)
     );
@@ -151,8 +156,9 @@ describe("current Endpoint input validation", () => {
       ["manual_source_creators", { requirement_id: PRIMARY_REQUIREMENT_ID, size: "4" }],
       ["rank_creators", {
         requirement_id: "req-1",
-        inquiry_id: "10",
+        inquiry_ids: ["10"],
       }],
+      ["rank_creators", { requirement_id: "req-1", inquiry_ids: null }],
       ["create_submission_batch", { requirement_id: "req-1", size: "4", number: "1" }],
       ["record_client_feedback", { run_id: "1", feedback_items: [{ status: "accepted" }] }],
       ["get_recommendation_run_detail", { run_id: "1" }],
@@ -198,13 +204,16 @@ describe("current Endpoint input validation", () => {
     })[0].path, "$.inquiry_id");
     assert.deepEqual(validateToolParams("rank_creators", {
       requirement_id: "req-1", inquiry_id: "10", columns: [{ field_key: "kwUid", field_name: "达人 ID" }],
-    }).map(({ path }) => path), ["$.columns"]);
+    }).map(({ path }) => path), ["$.inquiry_id", "$.columns"]);
     assert.equal(validateToolParams("rank_creators", {
-      requirement_id: "req-1", inquiry_ids: ["10"],
+      requirement_id: "req-1", inquiry_ids: ["10", "11"],
     })[0].path, "$.inquiry_ids");
     assert.equal(validateToolParams("rank_creators", {
+      requirement_id: "req-1", inquiry_ids: [],
+    })[0].path, "$.inquiry_ids");
+    assert.deepEqual(validateToolParams("rank_creators", {
       requirement_id: "req-1", inquiry_id: "10", limit: 20,
-    })[0].path, "$.limit");
+    }).map(({ path }) => path), ["$.inquiry_id", "$.limit"]);
     assert.equal(
       validateToolParams("create_with_distributions", validDistribution({ columns: ["not-an-object"] }))[0].path,
       "$.columns[0]",

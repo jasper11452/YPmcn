@@ -504,7 +504,7 @@
         "creator_submissions"
       ],
       "targetWriteBoundary": "Resolve ranked rows by requirement_id, export exactly size rows for batch number, and persist one auditable submission batch without requiring a client-supplied run_id.",
-      "currentLimitation": "The requirement_id, size, number input is not yet deployed on the production Provider."
+      "currentLimitation": "The production Provider requires integer size plus submission_batche_page and columns rather than the approved requirement_id, string size, and number input. The runtime must fail closed because no safe mapping exists."
     },
     "record_client_feedback": {
       "reads": [
@@ -561,7 +561,8 @@
         "submission_batches",
         "creator_submissions"
       ],
-      "writes": []
+      "writes": [],
+      "currentLimitation": "The production Provider requires requirement_id, but approved recovery uses trace_id or demand_id with demand_version. The runtime must fail closed and never synthesize requirement_id."
     }
   },
   "knownGaps": [

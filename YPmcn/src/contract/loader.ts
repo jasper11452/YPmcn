@@ -297,6 +297,12 @@ function validateWritableToolMap(
     if (!isStringArray(tool.forbidden)) {
       throw new Error(`${label}.${name}.forbidden must be a string array`);
     }
+    if (
+      hasOwn(tool, "providerInputCompatibility") &&
+      tool.providerInputCompatibility !== "local-input-subset-of-provider"
+    ) {
+      throw new Error(`${label}.${name}.providerInputCompatibility is unsupported`);
+    }
     if (hasOwn(tool, "inputModes")) {
       validateInputModes(tool.inputModes, properties, `${label}.${name}.inputModes`);
     }

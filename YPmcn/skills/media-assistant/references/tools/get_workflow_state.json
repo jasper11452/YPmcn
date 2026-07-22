@@ -1,1 +1,35 @@
-{"schemaVersion":1,"contractSource":"spec/mcp.json#tools/get_workflow_state","tool":"get_workflow_state","hostQualifiedName":"mcp__ypmcn__get_workflow_state","readImmediatelyBeforeCall":true,"providerRequired":[],"required":[],"argumentSchema":{"type":"object","required":[],"properties":{"demand_id":{"anyOf":[{"type":"string"},{"type":"null"}]},"demand_version":{"anyOf":[{"type":"integer"},{"type":"null"}]},"trace_id":{"anyOf":[{"type":"string"},{"type":"null"}]}},"additionalProperties":false},"sideEffects":"read-only","retry":{"policy":"query-safe","blindRetry":true,"unknownOutcome":"not-applicable","reconcileWith":null},"rules":["只复制实际成功响应或已验证本地状态中的 ID；不得猜测参数。"]}
+{
+  "schemaVersion": 1,
+  "contractSource": "spec/mcp.json#tools/get_workflow_state",
+  "tool": "get_workflow_state",
+  "hostQualifiedName": "mcp__ypmcn__get_workflow_state",
+  "readImmediatelyBeforeCall": true,
+  "executionAvailability": {
+    "status": "blocked-current-production-provider-contract",
+    "reason": "Production requires requirement_id, but approved recovery uses trace_id or demand_id with demand_version; no safe identity mapping exists.",
+    "recovery": "Do not invoke this tool until Provider deploys the approved recovery input contract."
+  },
+  "providerRequired": [],
+  "required": [],
+  "argumentSchema": {
+    "type": "object",
+    "required": [],
+    "properties": {
+      "demand_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+      "demand_version": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+      "trace_id": {"anyOf": [{"type": "string"}, {"type": "null"}]}
+    },
+    "additionalProperties": false
+  },
+  "sideEffects": "read-only",
+  "retry": {
+    "policy": "query-safe",
+    "blindRetry": true,
+    "unknownOutcome": "not-applicable",
+    "reconcileWith": null
+  },
+  "rules": [
+    "当前 production 不得调用此 Tool；返回 integration_required，禁止由 trace_id 或 demand_id + demand_version 推导 requirement_id。",
+    "只在 Provider 发布批准恢复入参后复制实际成功响应或已验证本地状态中的 ID；不得猜测参数。"
+  ]
+}

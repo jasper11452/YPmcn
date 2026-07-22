@@ -31,9 +31,9 @@ description: "Use for YPmcn requirement parsing, manual creator sourcing, audita
 1. 紧接拓展达人前重新解析完整需求并调用 `validate_requirement`；新建参数不得携带旧 `id/demandVersion`，也不要自动插入 `search_creators`。多平台拆分时，各 payload 的 `originalBrief` 都保留同一份完整客户原文，非当前平台条款作为 atom 保留，禁止添加去重标记。
 2. 仅用第 1 步实际成功响应新生成的 ID 调用 `manual_source_creators({requirement_id,size})`；该 ID 用后即失效，禁止发送 `inquiry_id`、`target_count`。
 3. 成功响应必须返回非空达人列表；立即按固定字段展示 Markdown 表格：平台、达人ID、达人昵称、内容标签、主页链接。状态机按调用批次分别记录数据已收到与列表已展示，不保存原始达人行。
-4. 无企微发送返回 ID 时省略 `inquiry_id`，直接 `rank_creators` 并生成提报表；否则按发送调用从新到旧取首个有效 ID。当前流程有发送时，sync 后弹“机构回填确认”；只有人工选择“确认已完成回填”才合并排序，ID 本身不证明回填。
+4. 无企微返回 ID 时省略 `inquiry_ids`（或传 `null`），直接 `rank_creators` 并生成提报表（目标契约）；否则只传最新有效 ID 的单元素数组。有发送时经“机构回填确认”才合并排序。当前 production 上述两 Tool 不兼容，排序后 `integration_required`。
 
-直接拓展时，`validate_requirement` 与 `manual_source_creators` 之间不得插入其他业务 Tool。搜索链已启动时，必须先完整完成 MCN 链，再进入这段直接拓展与合并排序。
+直接拓展时两 Tool 间不得插入业务 Tool；搜索链已启动则先完整完成 MCN 链。
 
 ## 按需读取
 

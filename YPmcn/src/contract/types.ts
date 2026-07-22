@@ -88,6 +88,7 @@ export interface ToolInputModes {
 
 export interface ToolContract {
   name: string;
+  providerInputCompatibility?: "local-input-subset-of-provider";
   required: string[];
   agentRequired?: string[];
   requiredAlternatives?: string[][];

@@ -2,7 +2,7 @@
 
 ## 契约与状态
 
-以根 `spec/manifest.json` 指向的 `spec/mcp.json`、`spec/workflow.json` 和运行时 schema 为准。每次业务 Tool 调用前先读 `tools/<tool>.json`；只传其中字段。Endpoint schema 优先；与目标导出契约冲突时返回 `integration_required`，不得自动回退。
+以根 `spec/manifest.json` 指向的 `spec/mcp.json`、`spec/workflow.json` 和运行时 schema 为准。每次业务 Tool 调用前先读 `tools/<tool>.json`；只传其中字段。Endpoint schema 优先；与目标导出契约冲突时返回 `integration_required`，不得自动回退。当前 production 的 `create_submission_batch` 与 `get_workflow_state` 入参语义不兼容，均为运行时硬阻断：不得调用、不得猜测 `submission_batche_page`/`columns`，也不得由 `trace_id` 或 `demand_id + demand_version` 推导 `requirement_id`。
 
 会话状态写入 `state/confirmation_guard.json`。`phase/next_action` 是 Agent 编排权威；Provider 的 `workflow_state/allowed_actions` 只供事实或对账，不能覆盖本地 phase。状态只按实际成功响应推进。
 
@@ -19,7 +19,7 @@
 1. 先确认完整需求和 `size`，且 `size` 必须匹配 `^[1-9][0-9]*$`。
 2. 每次拓展达人前都重新解析完整 Brief 并调用 `validate_requirement`，省略旧 `id/demandVersion`，取得成功响应的 32 位 `data.id`。
 3. 紧邻调用 `manual_source_creators({requirement_id,size})`，ID 等于第 2 步且只使用一次；格式错从现有响应纠正，不重新验证。宿主无会话上下文时由插件自有的一次性回执校验并消费。
-4. 成功的非空达人列表是后续证据；立即展示固定五列表格并记录收到、展示状态。无企微返回 ID 就省略 `inquiry_id` 直接排序；否则从新到旧取首个有效 ID。当前流程有发送则弹“机构回填确认”，人工确认后合并排序、导出。
+4. 成功的非空达人列表是后续证据；立即展示固定五列表格并记录收到、展示状态。无企微返回 ID 就省略 `inquiry_ids`（或传 `null`）直接排序；否则从新到旧取首个有效 ID，并以仅含该 ID 的单元素数组传入。当前流程有发送则弹“机构回填确认”，人工确认后合并排序。当前 production 排序成功后必须报告 `integration_required` 并等待 Provider 升级，不能调用不兼容的导出或恢复 Tool。
 
 拓展达人可从任意 phase 发起，不检查历史库是否检索过该需求，也不检查其他流程是否完成；用户最新明确说“启动拓展”等启动/继续命令时直接进入该分支，仅缺必填值时 Ask。唯一调用门槛是紧邻需求解析的新 ID。禁止发送 `inquiry_id`、`target_count`、`run_id`、`limit` 或旧批次选项。
 

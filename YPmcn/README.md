@@ -8,11 +8,11 @@ YP Action/OpenClaw 插件，按 `mvp-v2` 机器契约执行达人提报链路。
 select_inquiry_form_fields(platform) → 网页选择字段
 → validate_requirement(payload) → 取得本次响应的 32 位 data.id
 → manual_source_creators(requirement_id, size)
-→ rank_creators(requirement_id, inquiry_id?) 筛选去重
+→ rank_creators(requirement_id, inquiry_ids?) 筛选去重
 → create_submission_batch(requirement_id, size, number) 导出表格
 ```
 
-`manual_source_creators` 可从任意既有阶段发起，但每次调用前必须重新解析完整需求并成功执行 `validate_requirement`；只允许把该响应的 32 位 `data.id` 用于紧邻的一次拓展达人，数字型 `data.demand_id` 和 `demand_version` 不是 Tool 主键。系统不查询该需求是否历史检索过，也不要求其他流程完成。Tool 只接收 `requirement_id` 与正整数十进制字符串 `size`。`rank_creators` 始终传当前 `requirement_id`；会话历史中没有企微发送返回的 `inquiry_id` 时省略该参数，有记录时按发送调用从新到旧选择第一个有效 ID。
+`manual_source_creators` 可从任意既有阶段发起，但每次调用前必须重新解析完整需求并成功执行 `validate_requirement`；只允许把该响应的 32 位 `data.id` 用于紧邻的一次拓展达人，数字型 `data.demand_id` 和 `demand_version` 不是 Tool 主键。系统不查询该需求是否历史检索过，也不要求其他流程完成。Tool 只接收 `requirement_id` 与正整数十进制字符串 `size`。`rank_creators` 始终传当前 `requirement_id`；会话历史中没有企微发送返回的 `inquiry_id` 时省略 `inquiry_ids`（或传 `null`），有记录时按发送调用从新到旧选择第一个有效 ID，并以单元素数组传入。当前 production 在排序后会停在 `integration_required`：不调用入参不兼容的导出或恢复 Tool，也不猜测字段映射。
 
 ## Hook 边界
 
@@ -31,7 +31,7 @@ select_inquiry_form_fields(platform) → 网页选择字段
 
 ## Provider 状态
 
-开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。插件只接受搜索响应的 `total_matched + supply_assessment` 当前契约。拓展达人在宿主未向 `before_tool_call` 传递会话上下文时使用插件自有的一次性交接回执完成新鲜 ID 校验；三参数 `create_submission_batch` 仍尚待发布。
+开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。插件只接受搜索响应的 `total_matched + supply_assessment` 当前契约。拓展达人在宿主未向 `before_tool_call` 传递会话上下文时使用插件自有的一次性交接回执完成新鲜 ID 校验；当前 production 的 `create_submission_batch`（要求 `submission_batche_page` 与 `columns`）和 `get_workflow_state`（要求 `requirement_id`）都与批准契约不兼容，插件已硬阻断，直至 Provider 发布目标入参。
 
 ```bash
 npm run mcp:dev

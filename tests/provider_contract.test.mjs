@@ -91,6 +91,25 @@ describe("read-only provider contract checker", () => {
     assert.deepEqual(first.schemaDiffs, []);
   });
 
+  it("classifies a wider Provider input as compatible when it accepts every strict local send input", () => {
+    const definitions = currentToolDefinitions();
+    const send = definitions.find((tool) => tool.name === "create_with_distributions");
+    send.inputSchema.properties.wechat_notification_message = {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    };
+    send.inputSchema.properties.columns.items = {
+      type: "object",
+      additionalProperties: true,
+    };
+
+    const report = compareProviderTools(definitions);
+
+    assert.equal(report.status, "PASS");
+    assert.deepEqual(report.schemaDiffs, []);
+    assert.equal(report.compatibleSchemaDiffs?.length, 7);
+    assert.ok(report.compatibleSchemaDiffs?.every((diff) => diff.tool === "create_with_distributions"));
+  });
+
   it("compares nullable anyOf branches recursively", () => {
     const definitions = currentToolDefinitions();
     const rank = definitions.find((tool) => tool.name === "rank_mcns");
@@ -108,15 +127,22 @@ describe("read-only provider contract checker", () => {
     }]);
   });
 
-  it("does not synthesize or ignore a root additionalProperties constraint", () => {
+  it("reports a root additionalProperties constraint, including compatible local strictness", () => {
     const definitions = currentToolDefinitions();
     for (const tool of definitions) tool.inputSchema.additionalProperties = false;
     const report = compareProviderTools(definitions);
     assert.equal(report.status, "FAIL");
-    assert.equal(report.schemaDiffs.length, definitions.length);
+    assert.equal(report.schemaDiffs.length, definitions.length - 1);
     assert.ok(report.schemaDiffs.every((diff) =>
       diff.path === "inputSchema.additionalProperties" && diff.reason === "unexpected_schema"
     ));
+    assert.deepEqual(report.compatibleSchemaDiffs, [{
+      tool: "create_with_distributions",
+      path: "inputSchema.additionalProperties",
+      reason: "unexpected_schema",
+      expected: null,
+      actual: false,
+    }]);
   });
 
   it("ignores every pgy-prefixed tool", () => {

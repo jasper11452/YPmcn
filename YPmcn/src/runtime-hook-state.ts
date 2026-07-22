@@ -1,5 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, join } from "node:path";
 
@@ -8,8 +17,10 @@ import { loadErrorCatalog } from "./contract/loader.js";
 export type Json = Record<string, any>;
 export type ConfirmationStatus = "pending" | "approved" | "in_flight" | "consumed" | "unknown" | "denied";
 export type GuardStore = { path: string; data: Json };
+export type StoreLockResult<T> = { acquired: true; value: T } | { acquired: false };
 const STATE_SCOPE = new AsyncLocalStorage<string>();
 const STATE_SCHEMA_VERSION = 20;
+const STORE_LOCK_STALE_MS = 60 * 1_000;
 
 export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 
@@ -52,6 +63,34 @@ export function save(path: string, data: Json): void {
   const temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   writeFileSync(temp, JSON.stringify(data, null, 2), "utf8");
   renameSync(temp, path);
+}
+
+function errorCode(error: unknown): string | undefined {
+  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
+function acquireStoreLock(path: string): number | undefined {
+  const lockPath = `${path}.lock`;
+  mkdirSync(dirname(path), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return openSync(lockPath, "wx");
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") throw error;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > STORE_LOCK_STALE_MS) {
+          unlinkSync(lockPath);
+          continue;
+        }
+      } catch (lockError) {
+        if (errorCode(lockError) === "ENOENT") continue;
+      }
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 export function canonical(value: unknown): string {
@@ -179,21 +218,30 @@ function storeAtPath(path: string): GuardStore {
   return { path, data };
 }
 
+/**
+ * Applies a synchronous state transition while holding an inter-process lock.
+ * Callers must fail closed when the lock is unavailable; spinning would risk
+ * bypassing a one-time external-send confirmation under concurrent hosts.
+ */
+export function withStoreLock<T>(path: string, callback: (current: GuardStore) => T): StoreLockResult<T> {
+  const handle = acquireStoreLock(path);
+  if (handle === undefined) return { acquired: false };
+  try {
+    return { acquired: true, value: callback(storeAtPath(path)) };
+  } finally {
+    closeSync(handle);
+    try {
+      unlinkSync(`${path}.lock`);
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") throw error;
+    }
+  }
+}
+
 export function store(rootDir: string): GuardStore {
   return storeAtPath(statePath(rootDir));
 }
 
 export function globalStore(rootDir: string): GuardStore {
   return storeAtPath(join(rootDir, "state", "confirmation_guard.json"));
-}
-
-export function sessionStores(rootDir: string): GuardStore[] {
-  const sessionsDir = join(rootDir, "state", "sessions");
-  try {
-    return readdirSync(sessionsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => storeAtPath(join(sessionsDir, entry.name, "confirmation_guard.json")));
-  } catch {
-    return [];
-  }
 }

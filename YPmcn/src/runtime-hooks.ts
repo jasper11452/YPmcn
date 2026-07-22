@@ -24,6 +24,7 @@ const GUARDED_REQUIREMENT_TOOLS = new Set([
   "manual_source_creators",
   "rank_creators",
   "create_submission_batch",
+  "get_workflow_state",
 ]);
 const PROVIDER_WRITE_TARGET = /create[-_]with[-_]distributions|\/api\/projects\/create-with-distributions/i;
 const SHELL_WRITE_CLIENT = /\b(?:curl|wget|httpie)\b|\bInvoke-(?:WebRequest|RestMethod)\b|\brequests\.(?:post|put|patch|delete)\b|\baxios\.(?:post|put|patch|delete)\b|\bfetch\s*\(|\b(?:mcp|mcporter|openclaw)\b[^\n]*(?:call|invoke|run)\b/i;

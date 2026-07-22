@@ -19,6 +19,7 @@
         "candidate_pool_ready",
         "mcn_planning",
         "inquiry_fields_ready",
+        "inquiry_sending",
         "waiting_mcn_return",
         "candidate_pool_enriched",
         "recommendation_ready",

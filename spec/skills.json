@@ -121,13 +121,14 @@
           "rank_creators": [
             "manual_source_creators_succeeded_for_the_same_requirement_and_size",
             "manual_creator_data_receipt_is_recorded",
-            "inquiry_ids_are_empty_without_wecom_or_exactly_copied_from_sync_with_wecom",
+            "inquiry_ids_are_omitted_or_null_without_wecom_or_contain_exactly_the_latest_verified_wecom_inquiry_id",
             "human_confirmed_mcn_return_completion_when_wecom_was_sent"
           ],
           "create_submission_batch": [
             "rank_creators_succeeded_for_the_same_manual_inquiries",
             "requirement_id_and_size_match_the_manual_sourcing_call",
-            "number_is_a_positive_integer_decimal_string"
+            "number_is_a_positive_integer_decimal_string",
+            "current_production_provider_contract_matches_the_approved_submission_input"
           ],
           "create_with_distributions": [
           "local_orchestration_state_has_confirmed_supply_mcn_and_columns",
@@ -135,7 +136,8 @@
           "description_is_plain_text_wechat_message_from_confirmed_user_requirement_not_json",
           "wechat_notification_message_is_exactly_identical_to_description",
           "ask_user_question_prompt_and_followup_input_fingerprints_current_and_one_time",
-          "missing_session_context_requires_exactly_one_unexpired_matching_local_confirmation_receipt_or_fails_closed"
+          "missing_session_context_uses_only_a_plugin_owned_global_no_session_receipt_and_never_authorizes_session_scoped_state",
+          "approved_to_in_flight_transition_is_lock_protected_and_lock_conflict_fails_closed"
         ],
         "ingest_mcn_submissions": [
           "server_allowed_action_ingest_mcn_submissions",

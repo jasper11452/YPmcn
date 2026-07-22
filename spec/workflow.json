@@ -29,6 +29,7 @@
     "candidate_pool_ready",
     "mcn_planning",
     "inquiry_fields_ready",
+    "inquiry_sending",
     "waiting_mcn_return",
     "candidate_pool_enriched",
     "recommendation_ready",
@@ -67,6 +68,7 @@
       "submission-batch-ready",
       "recommendation-ready",
       "candidate-pool-enriched",
+      "inquiry-sending",
       "waiting-mcn-return",
       "mcn-planning",
       "candidate-pool-ready",
@@ -103,8 +105,9 @@
       "sync_mcn_inquiry_status": "records sync metadata only; it does not query provider state or upsert mcn_inquiries",
       "rank_mcns": "the production Provider has not been verified to bind inquiry_id to the actual selected supplier set and return its (platform, kwUid)-deduplicated coverage union",
       "manual_source_creators": "the live input accepts requirement_id and size and returns excel_file_path; when the host omits before_tool_call session context, the plugin authorizes only from its own immediately preceding one-time validation handoff receipt",
-      "create_submission_batch": "the requirement_id, size, number target input is approved locally but not yet deployed on the production Provider",
-      "maximumRecoverablePhase": "recommendation_ready until the target create_submission_batch input is deployed"
+      "create_submission_batch": "the production Provider requires integer size, submission_batche_page, and columns instead of the approved requirement_id, string size, and number input; the runtime fail-closes because no safe mapping exists",
+      "get_workflow_state": "the production Provider requires requirement_id while approved recovery uses trace_id or demand_id with demand_version; the runtime fail-closes because it must not synthesize a requirement_id",
+      "maximumRecoverablePhase": "recommendation_ready with an integration wait until the target create_submission_batch input is deployed"
     }
   },
   "policies": {
@@ -113,12 +116,12 @@
     "multiPlatformContinuation": "split every explicit platform into an independent requirement in first-appearance order, collect unresolved values once, retain one exact originalBrief, and never ask which platform to process first or whether to continue the remaining platform",
     "evidenceConflict": "when local required evidence marks a Tool result failed or invalid, do not report business success or offer unsupported downstream actions merely because the response contains generic success wording",
     "outwardSendConfirmation": "every create_with_distributions attempt, including each individual fallback, is blocked locally with exact AskUserQuestion arguments; only an explicit confirmed answer authorizes one subsequent invocation with the same parameter fingerprint, and popup_required/approved/in_flight/consumed are projected into local workflow state",
-    "externalConfirmationSessionFallback": "when before_tool_call lacks host session context, create the confirmation in local global state or authorize only from exactly one unexpired local receipt whose request fingerprint, approval state, and one-time lifecycle match; multiple matches fail closed",
+    "externalConfirmationSessionFallback": "when before_tool_call lacks host session context, create and consume the confirmation only in plugin-owned global no-session state; never enumerate, read, or authorize a session-scoped receipt. Every approved-to-in_flight transition is lock-protected and a lock conflict fails closed",
     "wecomSendEvidence": "only a successful create_with_distributions response with explicit per-supplier sent details proves WeCom delivery; sync_mcn_inquiry_status records synchronization facts and inquiry IDs only and must never create, overwrite, or imply send success",
     "fieldSelectionBinding": "the selector is opened exactly once per active MCN flow and remains exclusively user-operated; the agent waits for the user's callback without clicking, preselecting, inferring, submitting, or reopening, and only the returned ordered fields are used by the MCN distribution flow",
     "unsupportedProviderArguments": ["candidate_pool_id", "mcn_recommendation_id", "preview_only", "remindAt", "trigger"],
-    "stateRefresh": "read local JSON on every prompt; use get_workflow_state only for context loss or unknown write reconciliation",
-    "unknownWriteRecovery": "current provider: get_workflow_state by demand identity from existing business facts; ledger trace_id reconciliation is target-only and an unknown external create remains blocked; never blind retry",
+    "stateRefresh": "read local JSON on every prompt; current production get_workflow_state is fail-closed because its requirement_id input conflicts with approved recovery identities, so context loss requires Provider contract upgrade rather than a synthesized lookup",
+    "unknownWriteRecovery": "the current Provider exposes no safe approved recovery lookup: get_workflow_state is blocked because it requires requirement_id rather than trace_id or demand_id with demand_version; an unknown external create remains blocked and must never blind retry",
     "postValidationContinuation": "a successful validate_requirement result immediately continues to manual_source_creators when the current user intent is manual sourcing, including a concise continuation reply to an assistant offer to start manual sourcing; otherwise it continues to search_creators in the same turn",
     "postSearchContinuation": "require total_matched plus supply_assessment, record the consumed response contract, then immediately continue to rank_mcns in the same turn without a supply popup or a request to continue; legacy demand_count/eligible_creator_count/supply_ratio-only responses are invalid evidence",
     "mcnRace": "rank_mcns persists the inquiry association and returns the selected supplier set plus its (platform, kwUid)-deduplicated coverage union; after every successful rank, show one native post-race popup with demand count, selected MCN count, estimated coverage, multiplier, manual expansion count, and demand:manual ratio, including an explicit 0 and N:0 when supply is sufficient; never hardcode recommendation counts, milestones, or display IDs",
@@ -129,10 +132,10 @@
     "briefIntegrity": "validate_requirement rawMessagesJson.originalBrief equals an exact real client Brief recovered from the current conversation after host-envelope stripping; AskUserQuestion and Tool JSON do not replace it, retry markers and platform-specific reconstructions are rejected, and independently validated platform payloads retain the same complete multi-platform originalBrief",
     "selectedSupplierBinding": "create_with_distributions supplierIds must equal the supplier set bound to the latest selected-supplier coverage calculation; any set change requires recalculation",
     "manualSourcingEvidence": "a successful manual_source_creators response supplies a non-empty creator array; local state records the batch fingerprint, fixed fields, received status, and separately observed Markdown-list display status without storing raw creator rows",
-    "rankCreatorsPrerequisite": "manual creator data is received; omit inquiry_id when no prior verified create_with_distributions result returned one, otherwise use the most recent returned inquiry_id and scan older sends only when newer results lack one; the active MCN flow still requires explicit human confirmation that MCN return is complete before combined ranking",
+    "rankCreatorsPrerequisite": "manual creator data is received; omit inquiry_ids or use null when no prior verified create_with_distributions result returned an inquiry_id, otherwise pass a single-element inquiry_ids array containing the most recent returned inquiry_id and scan older sends only when newer results lack one; the active MCN flow still requires explicit human confirmation that MCN return is complete before combined ranking",
     "mcnReturnConfirmation": "inquiry IDs and sync success never prove return completion; a native 机构回填确认 popup and the exact 确认已完成回填 answer are required",
     "syncCallOrder": "sync_mcn_inquiry_status is blocked unless matching create_with_distributions sent evidence exists first, and local state records blocked, authorized, and completed ordering statuses",
-    "submissionExport": "every successful manual creator flow continues through rank_creators and create_submission_batch"
+    "submissionExport": "the target manual creator flow is rank_creators then create_submission_batch; on current production a successful rank_creators result enters an integration wait and the runtime does not call create_submission_batch until its approved input contract is deployed"
   },
   "transitions": [
     {
@@ -215,7 +218,7 @@
       "id": "recommendation-ready",
       "from": "candidate_pool_enriched",
       "trigger": {"type": "tool", "name": "rank_creators"},
-      "guards": ["manual creator data was received", "without a prior verified WeCom send inquiry_id is omitted", "with prior verified WeCom sends inquiry_id is the most recent returned usable ID, falling back through older sends only when needed", "the active MCN flow requires human confirmation of return completion", "requirement_id matches the current manual flow"],
+      "guards": ["manual creator data was received", "without a prior verified WeCom send inquiry_ids is omitted or null", "with prior verified WeCom sends inquiry_ids is a single-element array containing the most recent returned usable ID, falling back through older sends only when needed", "the active MCN flow requires human confirmation of return completion", "requirement_id matches the current manual flow"],
       "evidence": ["successful filtered and deduplicated persisted ranking result"],
       "nextPhase": "recommendation_ready"
     },
