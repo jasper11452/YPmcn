@@ -104,6 +104,33 @@ describe("Spec governance", () => {
       exposeInternalPriceFieldNames: false,
       contentFormImpliesDuration: false,
     });
+    assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.humanInTheLoop, {
+      conversationInputSurface: "native-AskUserQuestion-only",
+      toolOwnedInteractiveSurface: "select_inquiry_form_fields webpage callback without a redundant chat confirmation",
+      askTriggers: [
+        "unresolved_required_or_semantically_ambiguous_business_value",
+        "evidence_bound_business_branch",
+        "irreversible_external_send",
+        "non_deterministic_safe_recovery_choice",
+      ],
+      prohibitedPauses: [
+        "plain_text_question_or_next_step_menu",
+        "permission_to_run_a_deterministic_next_action",
+        "acknowledgement_only_after_a_submitted_answer",
+        "optional_explicit_or_uniquely_derivable_value",
+        "multi_platform_processing_order",
+      ],
+      batchRequirementQuestions: true,
+      submittedAnswer: "execute_the_selected_safe_action_in_the_same_assistant_turn",
+      cancelBehavior: "stop_without_a_following_business_write",
+      continueMessageRequired: false,
+    });
+    assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.multiPlatform, {
+      askExecutionOrder: false,
+      defaultExecutionOrder: "first appearance in the exact original Brief",
+      clarification: "collect all unresolved values in one AskUserQuestion popup and ask one question per shared value instead of duplicating it per platform",
+      completion: "process every explicit platform without asking whether to continue the remaining platform",
+    });
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.manualSourcingResultTable, {
       format: "markdown-table",
       columns: [
@@ -476,9 +503,7 @@ describe("Spec governance", () => {
     assert.deepEqual(mcp.outputContracts.search_creators.successSchema.properties.data.required, [
       "total_matched", "supply_assessment",
     ]);
-    assert.equal(mcp.outputContracts.search_creators.compatibility.primary, "supply-assessment-v2");
-    assert.equal(mcp.outputContracts.search_creators.compatibility.legacyAcceptedIn, "3.4.9-only");
-    assert.equal(mcp.outputContracts.search_creators.compatibility.conflictBehavior, "fail-closed");
+    assert.equal("compatibility" in mcp.outputContracts.search_creators, false);
     assert.deepEqual(mcp.outputContracts.rank_mcns.successSchema.properties.data.required, [
       "inquiry_id", "demand_count", "selected_supplier_ids", "selected_mcn_count",
       "coverage_scope", "selected_mcn_covered_creator_count",

@@ -357,7 +357,7 @@ type SearchSupplyEvidence = {
   rateCardCreatorCount: number;
   rateCardMultiplier: number;
   riskLevel: SupplyRiskLevel;
-  contract: "supply-assessment-v2" | "legacy-v1";
+  contract: "supply-assessment-v2";
   recommendedAction?: string;
 };
 
@@ -396,42 +396,10 @@ function currentSearchSupplyEvidence(data: Json, workflow: Json): SearchSupplyEv
   };
 }
 
-function legacySearchSupplyEvidence(data: Json, workflow: Json): SearchSupplyEvidence | undefined {
-  for (const record of objectRecords(data)) {
-    const demandCount = record.demand_count;
-    const rateCardCreatorCount = record.eligible_creator_count;
-    const rateCardMultiplier = record.supply_ratio;
-    if (
-      !Number.isInteger(demandCount) || demandCount < 1 ||
-      !Number.isInteger(rateCardCreatorCount) || rateCardCreatorCount < 0 ||
-      !multiplierMatches(rateCardMultiplier, rateCardCreatorCount, demandCount)
-    ) continue;
-    if (Number.isInteger(workflow.quantity_total) && workflow.quantity_total !== demandCount) continue;
-    return {
-      demandCount,
-      rateCardCreatorCount,
-      rateCardMultiplier,
-      riskLevel: supplyRiskLevel(rateCardCreatorCount, demandCount),
-      contract: "legacy-v1",
-    };
-  }
-  return undefined;
-}
-
-function sameSearchSupplyEvidence(left: SearchSupplyEvidence, right: SearchSupplyEvidence): boolean {
-  return left.demandCount === right.demandCount &&
-    left.rateCardCreatorCount === right.rateCardCreatorCount &&
-    Math.abs(left.rateCardMultiplier - right.rateCardMultiplier) <= 0.01 &&
-    left.riskLevel === right.riskLevel;
-}
-
 function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEvidence | undefined {
   const data = approvedTargetData(root);
   if (!data) return undefined;
-  const current = currentSearchSupplyEvidence(data, workflow);
-  const legacy = legacySearchSupplyEvidence(data, workflow);
-  if (current && legacy && !sameSearchSupplyEvidence(current, legacy)) return undefined;
-  return current ?? legacy;
+  return currentSearchSupplyEvidence(data, workflow);
 }
 
 type RankMcnCoverageEvidence = {
@@ -1523,7 +1491,7 @@ function updateLocalWorkflow(
       case "record_client_feedback":
         workflow.phase = "feedback_routing";
         workflow.next_action = null;
-        workflow.waiting_for = "user";
+        workflow.waiting_for = null;
         break;
       case "sync_mcn_inquiry_status":
         workflow.next_action = "await_or_ingest_mcn_submissions";
@@ -1580,6 +1548,7 @@ export function renderLocalWorkflowContext(rootDir: string): string {
     "YPmcn authoritative local orchestration state (state/confirmation_guard.json):",
     JSON.stringify(workflow),
     "Use this local phase/next_action instead of Provider workflow_state/allowed_actions for orchestration. Actual Tool results remain the authority for business facts and identifiers.",
+    "Human-in-the-loop rule: waiting_for=user requires an immediate native AskUserQuestion gate (or reflects an explicit user-selected pause), never a prose question. A deterministic next_action with no Ask gate continues in the same assistant turn without asking for 继续.",
   ].join("\n");
 }
 

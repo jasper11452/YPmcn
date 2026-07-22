@@ -114,12 +114,6 @@
       "evidenceBasis": "Provider tools/list does not advertise outputSchema. The current observed response uses total_matched plus supply_assessment for demand count, deduplicated eligible rate-card creator count, multiplier, risk, and recommended action; an exact manual-sourcing target is forbidden at this stage.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
-      "compatibility": {
-        "primary": "supply-assessment-v2",
-        "legacyAcceptedIn": "3.4.9-only",
-        "legacyFields": ["demand_count", "eligible_creator_count", "supply_ratio"],
-        "conflictBehavior": "fail-closed"
-      },
       "successSchema": {
         "type": "object",
         "required": [

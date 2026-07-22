@@ -323,26 +323,12 @@ function validateOutputContractMap(
       "successSchema",
       "errorCodes",
     ]);
-    const allowedKeys = new Set([...requiredKeys, "compatibility"]);
+    const allowedKeys = requiredKeys;
     for (const key of requiredKeys) {
       if (!hasOwn(contract, key)) throw new Error(`${label}.${name}.${key} is missing`);
     }
     for (const key of Object.keys(contract)) {
       if (!allowedKeys.has(key)) throw new Error(`${label}.${name}.${key} is not declared`);
-    }
-    if (name === "search_creators") {
-      const compatibility = requireRecord(contract.compatibility, `${label}.${name}.compatibility`);
-      if (
-        compatibility.primary !== "supply-assessment-v2" ||
-        compatibility.legacyAcceptedIn !== "3.4.9-only" ||
-        JSON.stringify(compatibility.legacyFields) !==
-          JSON.stringify(["demand_count", "eligible_creator_count", "supply_ratio"]) ||
-        compatibility.conflictBehavior !== "fail-closed"
-      ) {
-        throw new Error(`${label}.${name}.compatibility is invalid`);
-      }
-    } else if (hasOwn(contract, "compatibility")) {
-      throw new Error(`${label}.${name}.compatibility is not declared`);
     }
     if (
       typeof contract.successEnvelope !== "string" ||

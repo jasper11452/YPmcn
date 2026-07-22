@@ -9,14 +9,16 @@ description: "Use for YPmcn requirement parsing, phase-independent manual creato
 
 ## 执行规则
 
-- 开始前取得完整需求和手扒数量 `size`；需要导出时再确认 `platform`、字段和批次号 `number`。`size`、`number` 都使用正整数十进制字符串，缺值时一次性询问，不猜测。
+- 开始前取得完整需求和手扒数量 `size`；导出时再取 `platform`、字段和批次号 `number`。`size`、`number` 是正整数十进制字符串，缺值不猜。
+- HITL：仅 `AskUserQuestion` 收集输入；只问未决必填/歧义、证据分支、外发或安全恢复，一次问全。其余 `next_action` 自动续接；提交即执行，取消即停，禁索要“继续”。
+- 多平台按原文顺序拆单；共用 Ask，不问先后或中途停。
 - Endpoint schema 优先，并与根 `spec/manifest.json` 指向的正式契约核对；必需 Tool 缺失、契约冲突或证据不足即 `integration_required`，不得回退旧参数。
 - 每次调用前先读 `references/tools/<tool>.json`，只传其中字段；只有实际 MCP 成功响应才是后续证据。
 - 手扒不受当前流程阶段限制。每次先按 `requirement-intake.md` 解析并成功调用 `validate_requirement`；只把新生成的 32 位 `data.id` 用于紧邻的一次手扒，禁用数字型 `data.demand_id`、`demand_version` 或旧 ID。
 - 除上述当次新 ID 外，不检查该需求是否历史检索过或其他流程是否完成。其余 ID 仍逐项核对 ID 血缘，只复制本轮实际成功响应返回的 ID；不得猜测、串用或用虚构 ID 探测。
-- 任一步失败都停止后续业务 Tool。写结果未知时先对账，禁止盲重试；用户要求失败即停时绝不重试。
+- 任一步失败都停止后续业务 Tool；必需证据无效不算成功。写结果未知时先对账，禁止盲重试；用户要求失败即停时绝不重试。
 - 主键格式错就改用当前响应的 `data.id`，不得再建需求；`INTEGRATION_REQUIRED` 时等待宿主升级。不得把 `DEMAND_NOT_FOUND` 猜成去重、清理、覆盖或延迟。
-- Hook 校验原始 Brief、搜索/手扒的 `data.id` 与企微外发；手扒额外绑定一次性新需求 ID，但不把 phase 或历史流程当门槛。重复 `rank_creators` 只提示。本地状态只按实际成功结果推进，preview 不限制 Skill 读取或其他 Tool。
+- Hook 校验原始 Brief、搜索/手扒的 `data.id` 与企微外发；先剥离包装，Ask/Tool JSON 不覆盖原文。手扒绑定一次性新 ID，但不以 phase 或历史为门槛。重复 `rank_creators` 只提示。本地状态只按实际成功结果推进，preview 不限制 Skill 读取或其他 Tool。
 
 ## 主链
 
