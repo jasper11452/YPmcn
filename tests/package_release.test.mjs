@@ -186,7 +186,7 @@ describe("reproducible plugin package", () => {
     assert.equal(manifest.mcpServers, "./.mcp.json");
     assert.equal(mcp.mcpServers["ypmcn-mcp"].url, "https://mcp.eshypdata.com/sse");
     assert.equal("command" in mcp.mcpServers["ypmcn-mcp"], false);
-    assert.equal(state.schema_version, 20);
+    assert.equal(state.schema_version, 21);
   });
 
   it("does not trigger npm install in the OpenClaw plugin installer", () => {

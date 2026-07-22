@@ -275,6 +275,9 @@ describe("YP Action native hooks", () => {
     assert.match(YPMCN_FAST_PATH, /hasOrganization, hasOrder30day, and hasSocial30day are direct JSON booleans/);
     assert.match(YPMCN_FAST_PATH, /skills\/media-assistant\/references\/reference_schema\.json/);
     assert.match(YPMCN_FAST_PATH, /Only a native AskUserQuestion call may request conversational user input/);
+    assert.match(YPMCN_FAST_PATH, /During a nonterminal workflow, output Tool calls only/);
+    assert.match(YPMCN_FAST_PATH, /Never end it with “如果你要，我下一步继续处理”/);
+    assert.match(YPMCN_FAST_PATH, /Stop matrix:[^]*stopping is forbidden/);
     assert.match(YPMCN_FAST_PATH, /must never ask “是否继续”, “要怎么推进”/);
     assert.match(YPMCN_FAST_PATH, /fact summary exposes a decision[^]*same assistant turn/);
     assert.match(YPMCN_FAST_PATH, /submitted AskUserQuestion answer is an executable command/);
@@ -296,8 +299,9 @@ describe("YP Action native hooks", () => {
     assert.doesNotMatch(YPMCN_FAST_PATH, /max\(quantityTotal-actual count,0\)/);
     assert.match(prompt.prependContext, /authoritative local orchestration state/);
     assert.match(prompt.prependContext, /"next_action":"validate_requirement"/);
+    assert.match(prompt.prependContext, /"stop_disposition":"continue_same_turn_required"/);
     assert.match(prompt.prependContext, /waiting_for=user requires an immediate native AskUserQuestion gate/);
-    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 20);
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 21);
 
     for (const [toolName, params] of [
       ["read", { file_path: "/tmp/SKILL.md" }],
@@ -565,6 +569,38 @@ describe("YP Action native hooks", () => {
         options: ["继续", "停止"],
       }],
     }), undefined);
+  });
+
+  it("limits post-rank AskUserQuestion prompt lines to 40 Unicode characters", async () => {
+    const overlong = {
+      questions: [{
+        header: "赛后补量",
+        question: `${"甲".repeat(41)}\n请选择执行方案。`,
+        options: ["继续", "停止"],
+      }],
+    };
+    const blocked = await guard("AskUserQuestion", overlong);
+    assert.equal(blocked?.errorCode, "INVALID_INPUT");
+    assert.match(blocked.blockReason, /at most 40 Unicode characters/);
+
+    assert.equal(await guard("AskUserQuestion", {
+      questions: [{
+        ...overlong.questions[0],
+        question: `${"甲".repeat(40)}\n甲\n请选择执行方案。`,
+      }],
+    }), undefined);
+  });
+
+  it("records a cancelled workflow popup as an allowed wait for a new user message", async () => {
+    await recordHighRiskSupply();
+    await recordRankForManual();
+    await recordTool("AskUserQuestion", postRaceQuestion, { isError: true, error: "cancelled" });
+
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.user_pause_status, "ask_cancelled_closed_timed_out_or_failed");
+    assert.equal(state.workflow_events.at(-1).kind, "user_gate_stopped");
+    const prompt = await hooks.get("before_prompt_build")({ prompt: "查看当前状态", messages: [] }, DEFAULT_CONTEXT);
+    assert.match(prompt.prependContext, /"stop_disposition":"allowed_wait_for_new_user_message"/);
   });
 
   it("binds a multiline AskUserQuestion warning to the exact send parameters", async () => {
@@ -2034,7 +2070,70 @@ describe("YP Action native hooks", () => {
     assert.deepEqual(secondState.confirmations, {});
   });
 
-  it("migrates v18 state to v20 without rewriting a completed workflow phase", async () => {
+  it("isolates same-platform differing requirements and logs suspend, resume, and completion locally", async () => {
+    const firstId = requirementId(201);
+    const secondId = requirementId(202);
+    const shared = {
+      platform: "xiaohongshu",
+      projectName: "同项目双需求",
+      quantityTotal: 2,
+      budget: 20000,
+    };
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload: { ...shared, contentTag: "母婴", followerCount: "[20000,999999999]" } },
+      { success: true, data: { id: firstId }, error: null },
+    );
+    await recordTool(
+      "mcp__ypmcn__search_creators",
+      { id: firstId },
+      { success: true, data: preRaceSupply({ quantity_total: 2, candidate_count: 50 }), error: null },
+    );
+
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload: { ...shared, contentTag: "科技", followerCount: "[10000,999999999]" } },
+      { success: true, data: { id: secondId }, error: null },
+    );
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    const firstUnitId = state.requirement_execution_unit_ids[
+      createHash("sha256").update(firstId).digest("hex")
+    ];
+    const secondUnitId = state.requirement_execution_unit_ids[
+      createHash("sha256").update(secondId).digest("hex")
+    ];
+    assert.notEqual(firstUnitId, secondUnitId);
+    assert.equal(state.execution_units[firstUnitId].status, "suspended");
+    assert.equal(state.execution_units[firstUnitId].workflow.next_action, "rank_mcns");
+    assert.equal(state.execution_units[secondUnitId].status, "active");
+
+    assert.equal(await guard("mcp__ypmcn__rank_mcns", {
+      id: firstId,
+      platform: "xiaohongshu",
+    }), undefined);
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.active_execution_unit_id, firstUnitId);
+    assert.equal(state.execution_units[firstUnitId].status, "active");
+    assert.equal(state.execution_units[secondUnitId].status, "suspended");
+    assert.ok(state.execution_units[firstUnitId].events.some(({ kind }) =>
+      kind === "execution_unit_resumed"
+    ));
+
+    await recordTool(
+      "mcp__ypmcn__record_client_feedback",
+      {},
+      { success: true, data: {}, error: null },
+    );
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.execution_units[firstUnitId].status, "completed");
+    assert.ok(state.execution_units[firstUnitId].completed_at_ms > 0);
+    assert.ok(state.execution_units[firstUnitId].events.some(({ kind }) =>
+      kind === "execution_unit_completed"
+    ));
+    assert.ok(state.workflow_events.every(({ execution_unit_id }) => typeof execution_unit_id === "string"));
+  });
+
+  it("migrates v18 state to v21 without rewriting a completed workflow phase", async () => {
     mkdirSync(join(tempDir, "state", "sessions", defaultSessionHash), { recursive: true });
     writeFileSync(stateFile, JSON.stringify({
       schema_version: 18,
@@ -2052,7 +2151,7 @@ describe("YP Action native hooks", () => {
     }));
     await hooks.get("before_prompt_build")({ prompt: "查看状态", messages: [] }, DEFAULT_CONTEXT);
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.schema_version, 20);
+    assert.equal(state.schema_version, 21);
     assert.equal(state.workflow.phase, "recommendation_ready");
     assert.equal(state.workflow.next_action, null);
     assert.equal(state.manual_sourcing_requirement_receipt, undefined);

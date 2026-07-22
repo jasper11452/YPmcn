@@ -20,6 +20,7 @@ import {
   extractStandardBrief,
   isStandardBrief,
   parseStandardBrief,
+  parseStandardBriefRequirements,
   renderStandardBriefPreview,
   renderStandardBriefReadyArguments,
   renderStandardBriefReply,
@@ -30,6 +31,7 @@ export {
   extractStandardBrief,
   isStandardBrief,
   parseStandardBrief,
+  parseStandardBriefRequirements,
   renderStandardBriefPreview,
   renderStandardBriefReadyArguments,
   renderStandardBriefReply,
@@ -148,6 +150,7 @@ function renderMultiPlatformRequirementGuidance(platforms: RequirementPlatform[]
   return `YPmcn authoritative multi-platform intake:
 - Explicit platforms in first-appearance order: ${labels.join(" -> ")}. Platform presence and execution order are resolved; never ask which platform to process first.
 - Create and execute one independent requirement per platform in this order. Every payload keeps the same exact complete originalBrief and preserves the other platform clauses as audit atoms.
+- Within each platform, split differing requirement clauses into independent execution units. Inherit every shared field into each unit; only differing fields define the split. Example: a shared 20,000 RMB budget plus 母婴粉丝>=20,000 and 科技粉丝>=10,000 becomes two units, each retaining the 20,000 RMB budget and its own category/follower threshold.
 - Scan all shared and platform-specific requirements before pausing. If concrete required values are still absent or semantically ambiguous, call one native AskUserQuestion containing every necessary question; never split dependent clarification across several popups. Keep the host-provided custom-input entry available in every popup.
 - Ask one question per shared missing value, not one copy per platform. For quantity, ask how many creators each platform needs and accept one shared choice or typed platform-specific counts through that same popup's custom-input entry.
 - Do not reconfirm an explicit Xiaohongshu 图文/视频 price form or an explicit Douyin duration. Douyin 图文 alone does not imply a video duration, so only that unresolved tier may be asked when a Provider price field is required.
@@ -177,14 +180,17 @@ export function buildRequirementRuntimeClock(now = new Date(), timeZone = localT
 }
 
 export const YPMCN_HITL_POLICY = `YPmcn human-in-the-loop invariant:
+- During a nonterminal workflow, output Tool calls only. Do not emit progress updates, explanations, acknowledgements, summaries, transition narration, or conversational filler between Tool calls. Plain assistant text is allowed only once as the final result at an allowed stop.
 - Only a native AskUserQuestion call may request conversational user input. Ordinary assistant text may report facts but must never ask “是否继续”, “要怎么推进”, present a next-step menu, or request confirmation for a deterministic next_action. If AskUserQuestion is unavailable when truly required, stop with integration_required instead of asking in prose.
-- Every AskUserQuestion question must contain line breaks in its non-option prompt text so the prompt is never rendered as one continuous line. Option labels and descriptions do not need line breaks.
+- Final-result text must be declarative and concise. Never end it with “如果你要，我下一步继续处理”, “需要我继续吗”, an offer, a question, alternatives, or any invitation to reply. All nonterminal questions, choices, warnings, confirmations, and recovery decisions belong in AskUserQuestion.
+- Every AskUserQuestion question must contain line breaks in its non-option prompt text so the prompt is never rendered as one continuous line. After rank_mcns, each non-option prompt line is at most 40 Unicode characters; preserve existing line breaks and wrap longer text. Option labels and descriptions do not need line breaks.
 - When a fact summary exposes a decision, invoke AskUserQuestion in that same assistant turn immediately after the summary. Never end the turn with a question, alternatives, or an invitation to reply in chat and defer the popup until a later “继续”.
 - Ask only for an unresolved required or semantically ambiguous business value that cannot be uniquely derived, an evidence-bound business branch, an irreversible external send, or a non-deterministic safe recovery choice. Never ask for optional omissions, already explicit facts, uniquely resolvable dates or mappings, platform execution order, deterministic argument repair, or permission to continue.
 - Before any nonterminal workflow stop or pause that still requires a human decision about recovery, changed inputs, or the next action, invoke AskUserQuestion first. Never ask in prose and then stop. A terminal failure with no safe human decision branch may be reported directly.
 - Collect every independently unresolved requirement value in one self-contained popup. For dependent choices, combine them into one question or provide all valid combined choices; do not open a second popup merely because the first answer selects a platform or price family. Every popup must keep at least one host-provided custom-input entry available; never disable, hide, or replace it with fixed choices.
 - A submitted AskUserQuestion answer is an executable command: perform the selected safe next action as soon as its callback reaches the assistant. Never return only an acknowledgement and never require a later “继续”. The final 企微外发 confirmation is the exception to same-turn transport: its one-time local receipt survives the AskUserQuestion turn boundary for 10 minutes, so consume the approved receipt once when the callback reaches a later assistant turn instead of reopening the popup. A cancelled, denied, closed, timed-out, or failed popup stops without the following business write; an explicit later resume may reopen the same complete unresolved form, not a fragmented subset.
 - waiting_for="user" means invoke the named native AskUserQuestion gate immediately, unless the user already selected an explicit pause that requires new business data. waiting_for=null continues automatically; waiting_for="provider" reports the external wait without asking the user to continue.
+- Stop matrix: next_action=null, waiting_for="provider", a terminal failure with no safe recovery branch, and a cancelled/denied/closed/timed-out AskUserQuestion are allowed stops. At every other nonterminal state, stopping is forbidden: waiting_for=null or "assistant" with a non-null next_action continues immediately; waiting_for="user" invokes AskUserQuestion before stopping; a submitted Ask answer executes immediately; unfinished explicit platform or requirement units continue automatically.
 - An explicit latest user command to start or continue manual sourcing, including “启动拓展”, is already the decision: route to the phase-independent fresh validate_requirement -> manual_source_creators path. If required manual-sourcing inputs are still missing, collect only those missing inputs through AskUserQuestion.
 - A valid search_creators result continues immediately to rank_mcns in the same turn. Do not show a supply popup, ask whether to race, or pause for “继续” between them. Only invalid search evidence may enter recovery.
 - Map evidence-bound gates exactly: confirm_post_race_manual_sourcing -> header “赛后补量”; confirm_mcn_selection -> header “MCN确认” with “确认MCN方案”; confirm_inquiry_fields -> header “字段确认” with “确认字段”. Invoke the matching popup immediately from actual evidence; never print these as a prose menu.
@@ -260,10 +266,20 @@ export function createYpmcnPlugin(
       const multiPlatformGuidance = platforms.length > 1
         ? renderMultiPlatformRequirementGuidance(platforms)
         : "";
-      const preview = requirementLike && platforms.length <= 1
-        ? parseStandardBrief(prompt, now, timeZone)
-        : undefined;
+      const previews = requirementLike && platforms.length <= 1
+        ? parseStandardBriefRequirements(prompt, now, timeZone)
+        : [];
+      const preview = previews.length === 1 ? previews[0] : undefined;
       const readyPayload = preview ? buildStandardBriefReadyPayload(prompt, preview) : undefined;
+      const splitPayloads = previews.length > 1
+        ? previews.map((item) => buildStandardBriefReadyPayload(prompt, item))
+        : [];
+      const splitReady = splitPayloads.length > 1 && splitPayloads.every(Boolean);
+      const splitContext = previews.length > 1
+        ? splitReady
+          ? `YPmcn authoritative same-platform requirement units. Call validate_requirement once per payload in this exact order; do not merge or skip units.\n${JSON.stringify({ payloads: splitPayloads })}`
+          : `YPmcn authoritative same-platform requirement previews. Resolve all units in one AskUserQuestion popup before validation; do not merge units.\n${JSON.stringify({ previews })}`
+        : "";
       for (const brief of requirementBriefCandidates(hostPrompt, event?.messages)) {
         recordRequirementBriefReceipt(brief, rootDir);
       }
@@ -276,10 +292,11 @@ export function createYpmcnPlugin(
           buildRequirementRuntimeClock(now, timeZone),
           renderLocalWorkflowContext(rootDir),
           multiPlatformGuidance,
+          splitContext,
           preview && !readyPayload ? renderStandardBriefPreview(preview) : "",
           readyPayload ? renderStandardBriefReadyArguments(readyPayload) : "",
-          preview && preview.gate !== "ready"
-            ? `YPmcn mandatory unresolved-Brief interaction: call native AskUserQuestion now and do not return a plain text-only clarification. Use one user-facing form with up to 5 concise single-choice questions, covering every unresolved value, and keep at least one host-provided custom-input entry available. Every question must use line breaks in its non-option prompt text; options are exempt. Options may be strings or label/description objects. Do not expose internal gate, schema, or Tool terminology. Do not call validate_requirement until every value is concrete. A denied/cancelled/closed popup does not confirm anything. After a submitted answer, continue in this same interaction without asking for “继续”.\n<YPmcnClarificationAuthority>\n${renderStandardBriefReply(preview)}\n</YPmcnClarificationAuthority>`
+          (preview && preview.gate !== "ready") || (previews.length > 1 && !splitReady)
+            ? `YPmcn mandatory unresolved-Brief interaction: call native AskUserQuestion now and do not return a plain text-only clarification. Use one user-facing form with up to 5 concise single-choice questions, covering every unresolved value, and keep at least one host-provided custom-input entry available. Every question must use line breaks in its non-option prompt text; options are exempt. Options may be strings or label/description objects. Do not expose internal gate, schema, or Tool terminology. Do not call validate_requirement until every value is concrete. A denied/cancelled/closed popup does not confirm anything. After a submitted answer, continue in this same interaction without asking for “继续”.\n<YPmcnClarificationAuthority>\n${preview ? renderStandardBriefReply(preview) : JSON.stringify({ previews })}\n</YPmcnClarificationAuthority>`
             : "",
         ].filter(Boolean).join("\n\n"),
       };

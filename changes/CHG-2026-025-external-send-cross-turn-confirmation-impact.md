@@ -4,7 +4,7 @@
 task_id: CHG-2026-025-EXTERNAL-SEND-CROSS-TURN
 status: IMPLEMENTED_LOCAL_VERIFIED
 risk_level: medium
-approved_spec_version: "mvp-v2 / Skill schemaVersion 2 / Workflow schemaVersion 1 / Local state schemaVersion 20"
+approved_spec_version: "mvp-v2 / Skill schemaVersion 2 / Workflow schemaVersion 1 / Local state schemaVersion 21"
 runtime_scope: "external-send AskUserQuestion callback lifecycle and patch release metadata"
 production_provider_in_repository: false
 ```

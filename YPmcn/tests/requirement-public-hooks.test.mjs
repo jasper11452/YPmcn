@@ -54,6 +54,28 @@ describe("requirement behavior through public plugin hooks", () => {
     ));
   });
 
+  it("publishes deterministic same-platform requirement units from one raw Brief", async () => {
+    const brief = [
+      "项目：同项目双需求",
+      "平台：小红书",
+      "单达人L1官方报价：8000元以内",
+      "数量：2位达人",
+      "母婴类达人且粉丝2万以上",
+      "科技类达人且粉丝1万以上",
+      "提报截止：2099-07-20 11:00",
+    ].join("；");
+    const intake = await hooks.get("before_prompt_build")({ prompt: brief, messages: [] }, {});
+    const serialized = intake.prependContext.split("\n").find((line) => line.startsWith('{"payloads":'));
+    const { payloads } = JSON.parse(serialized);
+
+    assert.equal(payloads.length, 2);
+    assert.deepEqual(payloads.map(({ contentTag, followercount }) => ({ contentTag, followercount })), [
+      { contentTag: "母婴", followercount: "[20000,999999999]" },
+      { contentTag: "科技", followercount: "[10000,999999999]" },
+    ]);
+    assert.ok(payloads.every((payload) => payload.rawMessagesJson.originalBrief === brief));
+  });
+
   it("keeps ordinary tools available while enforcing Brief and primary-key preflights", async () => {
     await hooks.get("before_prompt_build")({ prompt: INCOMPLETE_BRIEF, messages: [] }, {});
     const persistedState = readFileSync(join(rootDir, "state", "confirmation_guard.json"), "utf8");

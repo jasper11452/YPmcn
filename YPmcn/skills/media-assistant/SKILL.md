@@ -11,11 +11,13 @@ description: "Use for YPmcn requirement parsing, manual creator sourcing, audita
 
 - 开始前取得完整需求和拓展达人数量 `size`；`size` 是正整数十进制字符串，缺值不猜。
 - HITL：仅 `AskUserQuestion` 收集输入；只问未决必填/歧义、证据分支、外发或安全恢复，一次问全。弹窗问题的非选项提示必须分行，禁止单行展示；选项不限。凡说明事实后仍需人决定，须同轮立即 Ask，不得以问句、选项或邀请聊天回复结尾后停下，且每个弹窗保留用户自定义输入入口。其余 `next_action` 自动续接；提交即执行，取消即停，禁索要“继续”。
+- Nonterminal output is Tool calls only; final text is allowed only at an allowed stop.
+- Allowed stops: terminal, Provider wait, terminal failure without safe recovery, or cancelled Ask. Otherwise continue; a human decision requires Ask first. After cancellation, wait for a new user message.
 - 标准检索链中，`search_creators` 成功后同轮直接调用 `rank_mcns`，中间不弹供给确认、不询问是否继续。排序成功后才弹“赛后补量”：始终展示需求人数、已选机构数、预估机构达人去重覆盖量、供需倍数、建议手动拓展人数，以及“机构承接达人:手动拓展达人”比例；手动拓展为 `0` 时也必须显示（例如 `2:0`），并且不得发起零人拓展。响应含真实累计覆盖里程碑时，同时展示前 N 家可达到的实际供需倍数，禁止虚构。
 - 字段选择网页只允许用户操作。每轮 MCN 流程最多调用一次 `select_inquiry_form_fields`，调用后等待用户在网页选择并提交；禁止代选、预选、推断或提交字段，也禁止在等待、成功、取消、超时或无效 callback 后重复打开网页。
 - `sync_mcn_inquiry_status` 只允许在本轮 `create_with_distributions` 实际成功响应逐机构返回匹配需求、项目和机构集合的 `sent` 明细后调用；状态机记录授权、阻断和完成顺序。sync 只证明询价同步，绝不证明企微已发送。
-- 每次 `create_with_distributions` 实际发送前（包括逐机构 fallback）都必须弹出原生“企微外发确认”，且仅在用户对完全相同参数明确选择“确认发送”后执行。状态机必须依次记录 `popup_required/approved/in_flight/consumed`；没有匹配的“已弹窗且已确认”回执时，即使收到 after-tool 成功结果也不得记为企微发送成功。
-- 多平台按原文顺序拆单；共用 Ask，不问先后或中途停。
+- 每次 `create_with_distributions` 实际发送前（包括逐机构 fallback）都必须弹出原生“企微外发确认”，且仅在用户对完全相同参数明确选择“确认发送”后执行。状态机必须依次记录 `popup_required/approved/in_flight/consumed`；没有匹配的“已弹窗且已确认”回执时，即使收到 after-tool 成功结果也不得记为企微发送成功。If host context disappears, create and use only a plugin-owned global no-session receipt; never reuse a session receipt.
+- 多平台按原文及差异字段拆单；共用 Ask，不问先后或中途停。
 - Endpoint schema 优先，并与根 `spec/manifest.json` 指向的正式契约核对；必需 Tool 缺失、契约冲突或证据不足即 `integration_required`，不得回退旧参数。
 - 每次调用前先读 `references/tools/<tool>.json`，只传其中字段；只有实际 MCP 成功响应才是后续证据。
 - 未启动 `search_creators` 时可直接拓展达人；一旦启动搜索，必须完整走完 `rank_mcns → 用户网页选字段 → 企微确认与发送 → sync`，不得中途跳到拓展达人。每次拓展仍先按 `requirement-intake.md` 解析并成功调用 `validate_requirement`，只把新生成的 32 位 `data.id` 用于紧邻的一次调用。

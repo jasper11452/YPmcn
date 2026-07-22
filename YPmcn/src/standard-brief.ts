@@ -591,6 +591,102 @@ export function parseStandardBrief(
   };
 }
 
+type SamePlatformVariant = {
+  sourceText: string;
+  contentTag: string;
+  followerFloor: number;
+};
+
+const FOLLOWER_RANGE_MAX = 999_999_999;
+
+function samePlatformVariants(brief: string): SamePlatformVariant[] {
+  const variants: SamePlatformVariant[] = [];
+  const pattern = /(?:^|[，,；;\n])\s*(?<tag>[\p{Script=Han}A-Za-z0-9·&+_-]{1,16}?)(?:类)?(?:达人)?(?:且)?\s*粉丝(?:数|量)?(?:要求)?\s*(?:≥|>=|不低于|至少)?\s*(?<count>\d+(?:\.\d+)?)\s*(?<unit>万|[wW]|千|[kK])?\s*(?:粉丝)?\s*(?:以上|及以上|\+)/gu;
+  for (const match of brief.matchAll(pattern)) {
+    const sourceText = match[0].replace(/^[，,；;\n]\s*/u, "").trim();
+    const contentTag = match.groups?.tag?.trim();
+    const followerFloor = amount(match.groups?.count ?? "", match.groups?.unit ?? "");
+    if (!sourceText || !contentTag || followerFloor === undefined) continue;
+    variants.push({ sourceText, contentTag, followerFloor });
+  }
+  const unique = new Map(variants.map((variant) => [
+    `${variant.contentTag}\u0000${variant.followerFloor}`,
+    variant,
+  ]));
+  return unique.size > 1 ? [...unique.values()] : [];
+}
+
+function normalizedSource(value: string | undefined): string {
+  return (value ?? "").trim().replace(/^[，,；;。.!！？?]+|[，,；;。.!！？?]+$/gu, "").trim();
+}
+
+function previewForVariant(
+  base: StandardBriefPreview,
+  variants: SamePlatformVariant[],
+  selected: SamePlatformVariant,
+): StandardBriefPreview {
+  const variantSources = new Set(variants.map((variant) => normalizedSource(variant.sourceText)));
+  const atoms = base.atoms.filter((atom) => !variantSources.has(normalizedSource(atom.sourceText)));
+  for (const variant of variants) {
+    if (variant === selected) {
+      atoms.push({
+        sourceText: variant.sourceText,
+        field: "contentTag",
+        resolution: "mapped",
+        disposition: "mapped",
+        targetField: "contentTag",
+        value: variant.contentTag,
+        confidence: 1,
+        inferred: false,
+      }, {
+        sourceText: variant.sourceText,
+        field: "followercount",
+        resolution: "mapped",
+        disposition: "mapped",
+        targetField: "followercount",
+        value: JSON.stringify([variant.followerFloor, FOLLOWER_RANGE_MAX]),
+        confidence: 1,
+        inferred: false,
+      });
+    } else {
+      atoms.push({
+        sourceText: variant.sourceText,
+        field: "rawMessagesJson",
+        resolution: "preserved",
+        disposition: "preserved",
+        preservedText: variant.sourceText,
+        confidence: 1,
+        inferred: false,
+      });
+    }
+  }
+  const mappedCount = atoms.filter((atom) => atom.resolution === "mapped").length;
+  const preservedCount = atoms.filter((atom) => atom.resolution === "preserved").length;
+  const unresolvedCount = atoms.length - mappedCount - preservedCount;
+  return {
+    ...base,
+    atoms,
+    projection: {
+      ...base.projection,
+      contentTag: selected.contentTag,
+      followercount: JSON.stringify([selected.followerFloor, FOLLOWER_RANGE_MAX]),
+    },
+    summary: { atomCount: atoms.length, mappedCount, preservedCount, unresolvedCount },
+  };
+}
+
+export function parseStandardBriefRequirements(
+  brief: string,
+  now = new Date(),
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai",
+): StandardBriefPreview[] {
+  const base = parseStandardBrief(brief, now, timeZone);
+  const variants = samePlatformVariants(extractStandardBrief(brief));
+  return variants.length > 1
+    ? variants.map((variant) => previewForVariant(base, variants, variant))
+    : [base];
+}
+
 export function renderStandardBriefPreview(preview: StandardBriefPreview): string {
   return `YPmcn internal requirement-analysis guide for clarification only. This Preview is not a validate_requirement argument or a rawMessagesJson atom example. Keys such as field, resolution, value, candidates, and reason describe parser reasoning; use them to understand confirmed and unresolved facts, but use the final transport examples when assembling payload atoms.\n<YPmcnInternalRequirementPreview>\n${JSON.stringify(preview)}\n</YPmcnInternalRequirementPreview>`;
 }

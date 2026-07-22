@@ -125,9 +125,24 @@ describe("Spec governance", () => {
       ],
       batchRequirementQuestions: true,
       multilineNonOptionPromptRequired: true,
+      postRankMaxUnicodeCharactersPerLine: 40,
+      nonterminalOutputMode: "tool-calls-only",
+      finalTextPolicy: "concise declarative result only at an allowed stop; no questions, offers, or invitations to continue",
+      allowedStops: [
+        "next_action_null_terminal",
+        "waiting_for_provider",
+        "terminal_failure_without_safe_recovery",
+        "ask_cancelled_denied_closed_or_timed_out",
+      ],
+      forbiddenStops: [
+        "non_null_next_action_with_waiting_for_null_or_assistant",
+        "waiting_for_user_before_AskUserQuestion",
+        "submitted_answer_before_selected_action_executes",
+        "unfinished_explicit_platform_or_requirement_unit",
+      ],
       submittedAnswer: "execute_the_selected_safe_action_in_the_same_assistant_turn",
       externalSendContinuation: "persist_one_time_local_receipt_across_the_AskUserQuestion_turn_boundary_then_execute_once_with_the_same_parameters",
-      cancelBehavior: "stop_without_a_following_business_write",
+      cancelBehavior: "stop_without_a_following_business_write_and_wait_for_a_new_user_message_before_deciding_whether_to_reopen_AskUserQuestion",
       continueMessageRequired: false,
     });
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.multiPlatform, {
@@ -135,6 +150,8 @@ describe("Spec governance", () => {
       defaultExecutionOrder: "first appearance in the exact original Brief",
       clarification: "collect all unresolved values in one AskUserQuestion popup and ask one question per shared value instead of duplicating it per platform",
       completion: "process every explicit platform without asking whether to continue the remaining platform",
+      samePlatformSplit: "inherit shared fields into each independent requirement and split only on differing field combinations",
+      localUnitLifecycle: "active -> suspended -> resumed or completed, with per-unit next_action and event history independent of Provider workflow state",
     });
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.manualSourcingResultTable, {
       format: "markdown-table",
