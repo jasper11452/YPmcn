@@ -9,7 +9,7 @@ export type Json = Record<string, any>;
 export type ConfirmationStatus = "pending" | "approved" | "in_flight" | "consumed" | "unknown" | "denied";
 export type GuardStore = { path: string; data: Json };
 const STATE_SCOPE = new AsyncLocalStorage<string>();
-const STATE_SCHEMA_VERSION = 19;
+const STATE_SCHEMA_VERSION = 20;
 
 export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 
@@ -132,6 +132,10 @@ function storeAtPath(path: string): GuardStore {
     if (data.workflow.next_action === "manual_source_creators") {
       data.workflow.next_action = "validate_requirement";
       data.workflow.waiting_for = null;
+    }
+    if (["rank_creators", "create_submission_batch"].includes(data.workflow.next_action)) {
+      data.workflow.next_action = "recover_direct_flow_contract_upgrade";
+      data.workflow.waiting_for = "user";
     }
     changed = true;
   }

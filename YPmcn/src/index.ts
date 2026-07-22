@@ -46,6 +46,7 @@ function hookStateScope(event: any, ctx?: any): string | undefined {
   return [
     ctx?.sessionKey, event?.sessionKey,
     ctx?.sessionId, event?.sessionId,
+    ctx?.sessionID, event?.sessionID,
     ctx?.conversationId, event?.conversationId,
     ctx?.threadId, event?.threadId,
     ctx?.channelId, event?.channelId,
