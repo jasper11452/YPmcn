@@ -126,6 +126,7 @@ describe("Spec governance", () => {
       batchRequirementQuestions: true,
       multilineNonOptionPromptRequired: true,
       submittedAnswer: "execute_the_selected_safe_action_in_the_same_assistant_turn",
+      externalSendContinuation: "persist_one_time_local_receipt_across_the_AskUserQuestion_turn_boundary_then_execute_once_with_the_same_parameters",
       cancelBehavior: "stop_without_a_following_business_write",
       continueMessageRequired: false,
     });

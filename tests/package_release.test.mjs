@@ -14,7 +14,7 @@ const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.u
 const stagedPluginRoot = fileURLToPath(
   new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
 );
-const VERSION = "3.4.21";
+const VERSION = "3.4.22";
 let archiveTempRoot;
 
 function json(relativePath) {
@@ -56,7 +56,7 @@ after(() => {
   if (archiveTempRoot) rmSync(archiveTempRoot, { recursive: true, force: true });
 });
 
-describe("3.4.21 release metadata", () => {
+describe("3.4.22 release metadata", () => {
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
     const rootPackage = json("package.json");
     const rootLock = json("package-lock.json");

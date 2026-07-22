@@ -22,6 +22,7 @@ const EXTERNAL_SEND_HEADER = "企微外发确认";
 const EXTERNAL_SEND_CONFIRM_LABEL = "确认发送";
 const EXTERNAL_SEND_CANCEL_LABEL = "取消发送";
 const EXTERNAL_SEND_CONFIRMATION_MARKER = "EXTERNAL_SEND_CONFIRMATION_REQUIRED";
+const EXTERNAL_SEND_RECEIPT_WINDOW = `${Math.ceil(CONFIRMATION_TTL_MS / 60_000)} 分钟`;
 const POST_RACE_MANUAL_CONFIRMATION_HEADER = "赛后补量";
 const MCN_CONFIRMATION_HEADER = "MCN确认";
 const FIELD_CONFIRMATION_HEADER = "字段确认";
@@ -2110,6 +2111,7 @@ export function renderLocalWorkflowContext(rootDir: string): string {
     JSON.stringify(workflow),
     "Use this local phase/next_action instead of Provider workflow_state/allowed_actions for orchestration. Actual Tool results remain the authority for business facts and identifiers.",
     "Human-in-the-loop rule: waiting_for=user requires an immediate native AskUserQuestion gate (or reflects an explicit user-selected pause), never a prose question. A deterministic next_action with no Ask gate continues in the same assistant turn without asking for 继续.",
+    "External-send exception: a confirmed 企微外发 AskUserQuestion callback may arrive in a later assistant turn. When the local receipt is approved and unexpired, call create_with_distributions once with the exact same parameters; do not reopen the popup because the turn changed.",
   ].join("\n");
 }
 
@@ -2229,7 +2231,8 @@ function confirmationRequiredResult(askInput: Json): Json {
       "<AskUserQuestionInput>",
       JSON.stringify(askInput),
       "</AskUserQuestionInput>",
-      `仅当结果为“${EXTERNAL_SEND_CONFIRM_LABEL}”时，立即用完全相同的 create_with_distributions 参数再调用一次；其他结果停止且不发送。`,
+      `AskUserQuestion 的提交回调可在后续 assistant turn 到达；本地一次性确认回执会在 ${EXTERNAL_SEND_RECEIPT_WINDOW} 内保持有效，切勿因回合切换重新生成确认。`,
+      `仅当回调结果为“${EXTERNAL_SEND_CONFIRM_LABEL}”时，立即用完全相同的 create_with_distributions 参数再调用一次；其他结果停止且不发送。`,
     ].join("\n"),
   };
 }
@@ -2580,6 +2583,7 @@ function recordExternalSendDecisionInStore(event: Json, input: Json, current: Gu
   if (!matched) return;
 
   const { pending: [id, receipt], answer } = matched;
+  const now = Date.now();
   receipt.user_prompted = true;
   receipt.user_confirmed = !event.error && event.result?.isError !== true &&
     answer === EXTERNAL_SEND_CONFIRM_LABEL;
@@ -2587,7 +2591,10 @@ function recordExternalSendDecisionInStore(event: Json, input: Json, current: Gu
     ? "approved" satisfies ConfirmationStatus
     : "denied" satisfies ConfirmationStatus;
   receipt.resolution = answer ?? "denied";
-  receipt.updated_at_ms = Date.now();
+  receipt.callback_received_at_ms = now;
+  if (receipt.status === "approved") receipt.approved_at_ms = now;
+  else delete receipt.approved_at_ms;
+  receipt.updated_at_ms = now;
   current.data.confirmations[id] = receipt;
   projectExternalConfirmation(current, id, receipt, receipt.status);
   save(current.path, current.data);

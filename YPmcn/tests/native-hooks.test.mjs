@@ -648,6 +648,51 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.distribution_sent_detail_count, 2);
   });
 
+  it("keeps one external-send receipt valid across the AskUserQuestion turn boundary", async () => {
+    const prepared = await requestConfirmation(
+      distributionParams({ requirement_id: requirementId(92) }),
+      DEFAULT_CONTEXT,
+      "call-cross-turn-popup",
+    );
+    assert.match(prepared.result.blockReason, /后续 assistant turn/);
+
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    const confirmationId = state.latest_external_confirmation_id;
+    const expiresAt = state.confirmations[confirmationId].expires_at_ms;
+
+    // The popup result is delivered with the user's next interaction, not while
+    // the initial create_with_distributions call is still running.
+    await hooks.get("before_prompt_build")({
+      prompt: "确认发送",
+      messages: [{ role: "user", content: "确认发送" }],
+    }, prepared.context);
+    const repeated = await guard(
+      "mcp__ypmcn__create_with_distributions",
+      prepared.params,
+      "call-cross-turn-pending",
+      prepared.context,
+    );
+    assert.deepEqual(askInputFrom(repeated), prepared.askInput);
+
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.latest_external_confirmation_id, confirmationId);
+    assert.equal(state.confirmations[confirmationId].expires_at_ms, expiresAt);
+    assert.equal(state.confirmations[confirmationId].status, "pending");
+
+    await answerExternalConfirmation(prepared);
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    const receipt = state.confirmations[confirmationId];
+    assert.equal(receipt.status, "approved");
+    assert.equal(typeof receipt.callback_received_at_ms, "number");
+    assert.equal(typeof receipt.approved_at_ms, "number");
+    assert.equal(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      prepared.params,
+      "call-cross-turn-execute",
+      prepared.context,
+    ), undefined);
+  });
+
   it("refuses to record a successful send result without a matching final popup confirmation", async () => {
     const params = distributionParams({ requirement_id: requirementId(91) });
     await recordTool(

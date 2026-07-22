@@ -48,7 +48,7 @@
 
 这些命令在当前 SHA 通过时，只能同时证明：
 
-- `create_with_distributions` 首次调用只生成绑定完整参数指纹的多行 AskUserQuestion；只有“确认发送”才允许同轮以完全相同参数执行一次，其他结果不发送。
+- `create_with_distributions` 首次调用只生成绑定完整参数指纹的多行 AskUserQuestion；“确认发送”回调可在后续 assistant turn 到达，但只允许在同一未过期本地回执下以完全相同参数执行一次，其他结果不发送。
 - 禁止 shell/curl 绕过企微外发 Tool；普通读写 Tool 不进入本地权限门禁。
 - Native Node Hook 的本地 phase/next_action 只是 Agent 编排权威；它不能伪造 Provider 成功、授予服务端动作或替代写幂等账本。
 - 目标恢复顺序仍为 `sync → ingest → sync`；独立后端工作树已覆盖真实表查询、同一推荐项 inquiry upsert 与 `returned_not_ingested` 单测，只有部署后再通过新 session 聚合 Live E2E 才算真正恢复。

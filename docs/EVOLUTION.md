@@ -19,11 +19,12 @@
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:0527265084fd64f7d053eecdb17d2218d439ca781b9957b4a23f1c747a731d6b`
-变更记录摘要：`sha256:42d370419b1ed6d0e087f608f699dc310a03ebc719fe4bd18393d7bd23762b75`
+当前 Spec：`mvp-v2` · `sha256:8ac6d116c3c6002c6d781d71e9a7880785c9f6b2a6d9c395c3559bdf51b163c2`
+变更记录摘要：`sha256:d3e67ff8ee19a8371018fd49bb3c952045d39425f765987d28fb00195207ab65`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-025 | `IMPLEMENTED_LOCAL_VERIFIED` | [企微外发确认跨轮回执](../changes/CHG-2026-025-external-send-cross-turn-confirmation.md) |
 | CHG-2026-024 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.13 手动拓展证据链修正版](../changes/CHG-2026-024-release-3.4.13.md) |
 | CHG-2026-023 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.12 工具链路与状态机加固包](../changes/CHG-2026-023-release-3.4.12.md) |
 | CHG-2026-022 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.11 宿主无关手扒回执修复包](../changes/CHG-2026-022-release-3.4.11.md) |
