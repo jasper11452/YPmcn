@@ -475,8 +475,8 @@
         "xhs_creator_accounts",
         "dy_creator_accounts"
       ],
-      "targetWriteBoundary": "Resolve the fresh requirement_id created by the immediately preceding requirement validation, execute the requested positive size without depending on historical search or other workflow completion, persist only matching sourced creators and offers, and return the actual inquiry_ids that own those results. The same request must be safe against blind duplication.",
-      "currentLimitation": "The live input accepts requirement_id and size, but per-call requirement ID freshness, outputSchema, and server-side idempotency evidence are not advertised; the local one-time receipt cannot substitute for Provider uniqueness or returned inquiry_ids."
+      "targetWriteBoundary": "Resolve the fresh requirement_id created by the immediately preceding requirement validation, execute the requested positive size without depending on historical search or other workflow completion, persist only matching sourced creators and offers, and return one actual excel_file_path for the generated spreadsheet. The same request must be safe against blind duplication.",
+      "currentLimitation": "The live input accepts requirement_id and size and has been observed returning excel_file_path, but per-call requirement ID freshness, outputSchema, and server-side idempotency evidence are not advertised; the local one-time receipt cannot substitute for Provider uniqueness."
     },
     "rank_creators": {
       "reads": [
@@ -491,7 +491,7 @@
         "recommendation_runs",
         "creator_recommendation_items"
       ],
-      "targetReadBoundary": "Read only the inquiry_ids returned by the immediately preceding manual_source_creators call, enforce one requirement, hard-filter and deduplicate before persisting ranked rows."
+      "targetReadBoundary": "Read only the inquiry_ids returned by sync_mcn_inquiry_status for the current MCN recovery chain, enforce one requirement, hard-filter and deduplicate before persisting ranked rows."
     },
     "create_submission_batch": {
       "reads": [
@@ -598,7 +598,7 @@
     {
       "id": "manual-sourcing-output-idempotency-unverified",
       "severity": "high",
-      "effect": "manual_source_creators has live requirement_id and size inputs but no advertised output schema or verified idempotency record; the direct flow requires actual inquiry_ids before ranking."
+      "effect": "manual_source_creators has live requirement_id and size inputs and an observed excel_file_path result, but no advertised output schema or verified idempotency record; the direct flow terminates at that spreadsheet and does not rank."
     },
     {
       "id": "selected-mcn-coverage-union-unverified",

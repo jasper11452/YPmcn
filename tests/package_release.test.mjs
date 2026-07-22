@@ -14,7 +14,7 @@ const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.u
 const stagedPluginRoot = fileURLToPath(
   new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
 );
-const VERSION = "3.4.11";
+const VERSION = "3.4.13";
 let archiveTempRoot;
 
 function json(relativePath) {
@@ -55,7 +55,7 @@ after(() => {
   if (archiveTempRoot) rmSync(archiveTempRoot, { recursive: true, force: true });
 });
 
-describe("3.4.11 release metadata", () => {
+describe("3.4.13 release metadata", () => {
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
     const rootPackage = json("package.json");
     const rootLock = json("package-lock.json");
@@ -111,6 +111,26 @@ describe("3.4.11 release metadata", () => {
     assert.equal("command" in active.mcpServers["ypmcn-mcp"], false);
   });
 
+  it("publishes a Codex marketplace manifest that points at the plugin workspace", () => {
+    const marketplace = json(".agents/plugins/marketplace.json");
+    assert.equal(marketplace.name, "ypmcn-local");
+    assert.equal(marketplace.interface?.displayName, "YPmcn Local Marketplace");
+    assert.equal(Array.isArray(marketplace.plugins), true);
+    assert.equal(marketplace.plugins.length, 1);
+    assert.deepEqual(marketplace.plugins[0], {
+      name: "ypmcn-media-assistant",
+      source: {
+        source: "local",
+        path: "./YPmcn",
+      },
+      policy: {
+        installation: "AVAILABLE",
+        authentication: "ON_INSTALL",
+      },
+      category: "Productivity",
+    });
+  });
+
   it("keeps dependencies owned and exactly pinned", () => {
     const rootPackage = json("package.json");
     const pluginPackage = json("YPmcn/package.json");
@@ -159,11 +179,13 @@ describe("reproducible plugin package", () => {
 
     const manifest = JSON.parse(readArchiveFile(archive, ".codex-plugin/plugin.json"));
     const mcp = JSON.parse(readArchiveFile(archive, ".mcp.json"));
+    const state = JSON.parse(readArchiveFile(archive, "state/confirmation_guard.json"));
     assert.equal(manifest.name, "ypmcn-media-assistant");
     assert.equal(manifest.skills, "./skills/");
     assert.equal(manifest.mcpServers, "./.mcp.json");
     assert.equal(mcp.mcpServers["ypmcn-mcp"].url, "https://mcp.eshypdata.com/sse");
     assert.equal("command" in mcp.mcpServers["ypmcn-mcp"], false);
+    assert.equal(state.schema_version, 20);
   });
 
   it("does not trigger npm install in the OpenClaw plugin installer", () => {

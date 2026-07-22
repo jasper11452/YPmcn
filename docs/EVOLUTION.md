@@ -19,11 +19,13 @@
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:656bd340b0df5d2f3a581ca9cc0b81f77a180ab5f49483073443ad3d169d8b37`
-变更记录摘要：`sha256:b9351ee8701e04aaff305cde10a371ebc4230ba6867e55bceb18be130e75963a`
+当前 Spec：`mvp-v2` · `sha256:be63fe1f7e4397e81f30ad9d579320f58625f0d04dc801a064939baf978e1516`
+变更记录摘要：`sha256:42d370419b1ed6d0e087f608f699dc310a03ebc719fe4bd18393d7bd23762b75`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-024 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.13 手动拓展证据链修正版](../changes/CHG-2026-024-release-3.4.13.md) |
+| CHG-2026-023 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.12 工具链路与状态机加固包](../changes/CHG-2026-023-release-3.4.12.md) |
 | CHG-2026-022 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.11 宿主无关手扒回执修复包](../changes/CHG-2026-022-release-3.4.11.md) |
 | CHG-2026-021 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.10 Human-in-the-loop 修复包](../changes/CHG-2026-021-release-3.4.10.md) |
 | CHG-2026-020 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [统一 Human-in-the-loop 与自动续接](../changes/CHG-2026-020-human-in-the-loop.md) |
