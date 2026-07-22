@@ -475,7 +475,7 @@
         "xhs_creator_accounts",
         "dy_creator_accounts"
       ],
-      "targetWriteBoundary": "Resolve the fresh requirement_id created by the immediately preceding requirement validation, execute the requested positive size without depending on historical search or other workflow completion, persist only matching sourced creators and offers, and return one actual excel_file_path for the generated spreadsheet. The same request must be safe against blind duplication.",
+      "targetWriteBoundary": "Resolve the fresh requirement_id and requested size created by the immediately preceding validation, enforce completion of any already-started MCN flow, persist only matching sourced creators and offers, and return optional excel_file_path plus fixed-field creator rows for immediate display and downstream ranking. The same request must be safe against blind duplication.",
       "currentLimitation": "The live input accepts requirement_id and size and has been observed returning excel_file_path, but per-call requirement ID freshness, outputSchema, and server-side idempotency evidence are not advertised; the local one-time receipt cannot substitute for Provider uniqueness."
     },
     "rank_creators": {
@@ -598,7 +598,7 @@
     {
       "id": "manual-sourcing-output-idempotency-unverified",
       "severity": "high",
-      "effect": "manual_source_creators has live requirement_id and size inputs and an observed excel_file_path result, but no advertised output schema or verified idempotency record; the direct flow terminates at that spreadsheet and does not rank."
+      "effect": "manual_source_creators has live requirement_id and size inputs but no advertised output schema or verified idempotency record; when fixed-field creator rows are returned, the local workflow audits receipt/display and continues to ranking and export."
     },
     {
       "id": "selected-mcn-coverage-union-unverified",

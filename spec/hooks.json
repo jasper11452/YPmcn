@@ -6,7 +6,7 @@
   "executionSurface": "YP Action/OpenClaw Node plugin",
   "events": {
     "before_prompt_build": {
-      "responsibility": "extract_real_client_brief_across_host_wrapping_and_clarification_then_inject_human_in_the_loop_multi_platform_guidance_and_local_json_orchestration_state",
+      "responsibility": "extract_real_client_brief_and_observe_audited_manual_creator_markdown_display_then_inject_human_in_the_loop_multi_platform_guidance_and_local_json_orchestration_state",
       "mayBlock": false,
       "script": "YPmcn/src/index.ts"
     },
@@ -50,7 +50,9 @@
       "one_time_manual_requirement_consumption",
       "non_blocking_repeated_rank_requirement_notice",
       "callback_returned_field_selection_reuse_without_browser_reopen",
-      "local_workflow_phase_and_next_action_recording"
+      "local_workflow_phase_and_next_action_recording",
+      "manual_creator_data_receipt_and_list_display_audit",
+      "sync_after_wecom_order_audit"
     ],
     "doesNotOwn": [
       "general_tool_permissions",

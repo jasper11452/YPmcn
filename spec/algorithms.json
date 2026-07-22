@@ -15,7 +15,8 @@
       "postRace": {
         "coverageSource": "deduplicated union of creators covered by the actually selected inquiry suppliers",
         "multiplier": "selected_mcn_covered_creator_count / demand_count",
-        "exactManualTarget": "selected multiplier < 20 ? demand_count * 20 - selected_mcn_covered_creator_count : null"
+        "exactManualTarget": "max(demand_count * 20 - selected_mcn_covered_creator_count, 0)",
+        "institutionManualCreatorRatio": "demand_count:exact_manual_target; always render, including N:0"
       },
       "riskBands": [
         {"risk": "high_risk", "condition": "coverage_count < demand_count * 20"},
@@ -25,8 +26,8 @@
       "comparisonRule": "compare integer coverage_count with integer demand_count multiples; rounded display multipliers never determine risk",
       "actions": {
         "high_risk": "strongly recommend expanding suppliers or pre-sourcing before the race; after the race offer the exact gap as one-click manual sourcing",
-        "medium_risk": "inquiry may continue, but recommend adding suppliers or manual sourcing without inventing an exact target",
-        "safe": "no manual sourcing recommendation"
+        "medium_risk": "show exact manual target 0 and continue only after the post-race popup decision",
+        "safe": "show exact manual target 0 and continue only after the post-race popup decision"
       }
     }
   },

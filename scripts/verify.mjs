@@ -11,6 +11,7 @@ function runStage({ name, command, args, cwd = repoRoot, env }) {
   const result = spawnSync(command, args, {
     cwd,
     env: env ? { ...process.env, ...env } : process.env,
+    shell: process.platform === "win32" && command === "npm",
     stdio: "inherit",
   });
   if (result.error) throw result.error;

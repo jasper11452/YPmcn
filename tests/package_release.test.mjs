@@ -14,7 +14,7 @@ const stagingBase = fileURLToPath(new URL("../packages/.staging/", import.meta.u
 const stagedPluginRoot = fileURLToPath(
   new URL("../packages/.staging/ypmcn-media-assistant/", import.meta.url),
 );
-const VERSION = "3.4.13";
+const VERSION = "3.4.16";
 let archiveTempRoot;
 
 function json(relativePath) {
@@ -35,6 +35,7 @@ function dryRunFiles() {
   const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
     cwd: stagedPluginRoot,
     encoding: "utf8",
+    shell: process.platform === "win32",
   });
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout)[0].files.map(({ path }) => path);
@@ -55,7 +56,7 @@ after(() => {
   if (archiveTempRoot) rmSync(archiveTempRoot, { recursive: true, force: true });
 });
 
-describe("3.4.13 release metadata", () => {
+describe("3.4.16 release metadata", () => {
   it("uses one version across root, plugin, lockfiles, and manifests", () => {
     const rootPackage = json("package.json");
     const rootLock = json("package-lock.json");
@@ -185,7 +186,7 @@ describe("reproducible plugin package", () => {
     assert.equal(manifest.mcpServers, "./.mcp.json");
     assert.equal(mcp.mcpServers["ypmcn-mcp"].url, "https://mcp.eshypdata.com/sse");
     assert.equal("command" in mcp.mcpServers["ypmcn-mcp"], false);
-    assert.equal(state.schema_version, 20);
+    assert.equal(state.schema_version, 21);
   });
 
   it("does not trigger npm install in the OpenClaw plugin installer", () => {

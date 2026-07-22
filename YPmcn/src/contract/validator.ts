@@ -299,17 +299,11 @@ function validateSemanticRequirements(
     }
   }
   if (tool === "rank_creators") {
-    if (!Array.isArray(params.inquiry_ids) || params.inquiry_ids.length === 0) {
-      return [issue("INVALID_INPUT", "$.inquiry_ids", "inquiry_ids must contain at least one ID.")];
-    }
-    const inquiryIds = params.inquiry_ids;
-    for (let index = 0; index < inquiryIds.length; index += 1) {
-      if (typeof inquiryIds[index] !== "string" || inquiryIds[index].trim().length === 0) {
-        return [issue("INVALID_INPUT", `$.inquiry_ids[${index}]`, "inquiry_ids must contain non-empty strings.")];
-      }
-      if (inquiryIds.slice(0, index).includes(inquiryIds[index])) {
-        return [issue("INVALID_INPUT", `$.inquiry_ids[${index}]`, "inquiry_ids must be unique.")];
-      }
+    if (
+      hasOwn(params, "inquiry_id") &&
+      (typeof params.inquiry_id !== "string" || params.inquiry_id.trim().length === 0)
+    ) {
+      return [issue("INVALID_INPUT", "$.inquiry_id", "inquiry_id must be a non-empty string when supplied.")];
     }
     if (typeof params.requirement_id !== "string" || params.requirement_id.trim().length === 0) {
       return [issue("INVALID_INPUT", "$.requirement_id", "requirement_id must be a non-empty string.")];

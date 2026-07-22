@@ -47,7 +47,7 @@ function run(command, args, cwd, options = {}) {
     encoding: options.capture ? "utf8" : undefined,
     stdio: options.capture ? ["ignore", "pipe", "inherit"] : "inherit",
     env: process.env,
-    shell: process.platform === "win32",
+    shell: process.platform === "win32" && command === npm,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {

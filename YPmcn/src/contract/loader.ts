@@ -479,7 +479,7 @@ function validateMvpProfile(value: unknown): MvpContractProfile {
   );
   requireExactStrings(
     tools.rank_creators?.required,
-    ["inquiry_ids"],
+    [],
     "mvp-v2.tools.rank_creators.required",
   );
   requireExactStrings(

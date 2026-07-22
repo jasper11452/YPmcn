@@ -170,7 +170,7 @@
     },
     "rank_mcns": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "Provider tools/list does not advertise outputSchema. After the media operator selects the actual inquiry suppliers, one successful response must bind inquiry_id to that exact supplier set and return its (platform, kwUid)-deduplicated coverage union, multiplier, risk band, and a conditional exact manual gap.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. One successful response must bind inquiry_id to the selected supplier set and return its (platform, kwUid)-deduplicated coverage union, multiplier, risk band, and manual gap; legacy null gaps for sufficient supply are normalized locally to explicit zero for the mandatory post-race popup.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -244,7 +244,7 @@
               },
               "manual_sourcing_gap_count": {
                 "anyOf": [
-                  {"type": "integer", "minimum": 1},
+                  {"type": "integer", "minimum": 0},
                   {"type": "null"}
                 ]
               }
@@ -272,7 +272,7 @@
     },
     "create_with_distributions": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "No provider outputSchema is advertised; retain the actual response as evidence before deriving downstream identifiers.",
+      "evidenceBasis": "No provider outputSchema is advertised. WeCom send success requires the actual successful response to contain explicit per-supplier sent status details for the exact request; generic success, requested IDs, or aggregate sent lists are not send evidence.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -283,7 +283,7 @@
     },
     "sync_mcn_inquiry_status": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "No provider outputSchema is advertised; retain the actual response as evidence before deriving downstream identifiers.",
+      "evidenceBasis": "No provider outputSchema is advertised. The response may prove synchronization facts and inquiry IDs only; it never proves or mutates WeCom send success, which remains exclusively derived from prior create_with_distributions per-supplier details.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -305,7 +305,7 @@
     },
     "manual_source_creators": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "Provider tools/list does not advertise outputSchema. The request requirement_id must be the fresh ID returned by the immediately preceding successful validate_requirement call and is one-time for this invocation. Complete only when the successful response contains one actual non-empty excel_file_path for that requirement_id and size.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. The request uses the one-time fresh requirement ID. An optional excel_file_path may be retained, while downstream ranking requires an actual non-empty fixed-field creator array whose receipt and later Markdown-list display are audited separately without persisting raw rows.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -721,8 +721,8 @@
       "forbidden": [],
       "agentSemanticRequirements": {
         "requirement_id": "must be the 32-character hexadecimal data.id returned by the immediately preceding successful validate_requirement call, exactly match the plugin-owned fresh receipt, and authorize only this one manual_source_creators invocation; numeric data.demand_id is forbidden",
-        "eligibility": "independent of current workflow phase, historical creator search, and completion of other workflow steps",
-        "completion": "the actual successful response contains one unique non-empty excel_file_path; manual sourcing is terminal and does not feed rank_creators"
+        "eligibility": "direct before search_creators; after search starts, eligible only once the complete MCN field-selection, WeCom-send, and sync flow finishes",
+        "completion": "the actual successful response contains a non-empty fixed-field creator array, which is immediately listed and then feeds rank_creators"
       },
       "sideEffects": "business-write",
       "writers": {
@@ -737,15 +737,13 @@
       },
       "outputEnvelope": "observed-runtime",
       "successEvidence": [
-        "the successful response contains one actual non-empty excel_file_path produced for the requested requirement_id and size",
+        "the successful response contains one actual non-empty creator array produced for the requested requirement_id and size",
         "retain actual returned payload as downstream evidence"
       ]
     },
     "rank_creators": {
       "name": "rank_creators",
-      "required": [
-        "inquiry_ids"
-      ],
+      "required": [],
       "properties": {
         "requirement_id": {
           "anyOf": [
@@ -753,17 +751,15 @@
             {"type": "null"}
           ]
         },
-        "inquiry_ids": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+        "inquiry_id": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "forbidden": [],
       "agentRequired": ["requirement_id"],
       "agentSemanticRequirements": {
-        "inquiry_ids": "actual unique non-empty string inquiry IDs returned by sync_mcn_inquiry_status for the current MCN inquiry-recovery chain; never source them from manual_source_creators or select_inquiry_form_fields",
+        "inquiry_id": "omit when no prior verified create_with_distributions result returned an inquiry_id; otherwise use the most recent returned inquiry_id, scanning earlier send results only when a newer result has no usable ID",
         "requirement_id": "the same non-empty requirement_id used by the current MCN inquiry-recovery chain"
       },
       "sideEffects": "business-write",

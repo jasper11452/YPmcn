@@ -91,7 +91,7 @@ describe("Spec governance", () => {
     ]);
     assert.equal(
       mediaAssistant.toolPolicy.phasePolicy.manual_source_creators,
-      "phase-independent-after-fresh-requirement-validation",
+      "direct-before-search-or-after-complete-mcn-flow-and-fresh-requirement-validation",
     );
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.fieldSelection, {
       resultSource: "actual fields returned by the select_inquiry_form_fields webpage callback",
@@ -113,6 +113,7 @@ describe("Spec governance", () => {
         "unresolved_required_or_semantically_ambiguous_business_value",
         "evidence_bound_business_branch",
         "irreversible_external_send",
+        "human_confirmation_of_mcn_return_completion",
         "non_deterministic_safe_recovery_choice",
       ],
       prohibitedPauses: [
@@ -123,8 +124,24 @@ describe("Spec governance", () => {
         "multi_platform_processing_order",
       ],
       batchRequirementQuestions: true,
+      multilineNonOptionPromptRequired: true,
+      postRankMaxUnicodeCharactersPerLine: 40,
+      nonterminalOutputMode: "tool-calls-only",
+      finalTextPolicy: "concise declarative result only at an allowed stop; no questions, offers, or invitations to continue",
+      allowedStops: [
+        "next_action_null_terminal",
+        "waiting_for_provider",
+        "terminal_failure_without_safe_recovery",
+        "ask_cancelled_denied_closed_or_timed_out",
+      ],
+      forbiddenStops: [
+        "non_null_next_action_with_waiting_for_null_or_assistant",
+        "waiting_for_user_before_AskUserQuestion",
+        "submitted_answer_before_selected_action_executes",
+        "unfinished_explicit_platform_or_requirement_unit",
+      ],
       submittedAnswer: "execute_the_selected_safe_action_in_the_same_assistant_turn",
-      cancelBehavior: "stop_without_a_following_business_write",
+      cancelBehavior: "stop_without_a_following_business_write_and_wait_for_a_new_user_message_before_deciding_whether_to_reopen_AskUserQuestion",
       continueMessageRequired: false,
     });
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.multiPlatform, {
@@ -132,6 +149,8 @@ describe("Spec governance", () => {
       defaultExecutionOrder: "first appearance in the exact original Brief",
       clarification: "collect all unresolved values in one AskUserQuestion popup and ask one question per shared value instead of duplicating it per platform",
       completion: "process every explicit platform without asking whether to continue the remaining platform",
+      samePlatformSplit: "inherit shared fields into each independent requirement and split only on differing field combinations",
+      localUnitLifecycle: "active -> suspended -> resumed or completed, with per-unit next_action and event history independent of Provider workflow state",
     });
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.manualSourcingResultTable, {
       format: "markdown-table",
@@ -162,6 +181,7 @@ describe("Spec governance", () => {
       "same_session_context_is_available_to_the_before_tool_hook",
       "fresh_requirement_id_receipt_is_consumed_by_this_call",
       "size_is_a_positive_integer_decimal_string",
+      "if_search_started_the_full_mcn_send_and_sync_flow_is_complete",
     ]);
     assert.deepEqual(mediaAssistant.toolPolicy.preconditions.search_creators, [
       "id_is_the_32_character_data_id_from_the_latest_same_session_successful_validation",
@@ -289,7 +309,11 @@ describe("Spec governance", () => {
     assert.equal(supplyDecision.preRace.exactManualTargetAllowed, false);
     assert.equal(
       supplyDecision.postRace.exactManualTarget,
-      "selected multiplier < 20 ? demand_count * 20 - selected_mcn_covered_creator_count : null",
+      "max(demand_count * 20 - selected_mcn_covered_creator_count, 0)",
+    );
+    assert.equal(
+      supplyDecision.postRace.institutionManualCreatorRatio,
+      "demand_count:exact_manual_target; always render, including N:0",
     );
     assert.deepEqual(supplyDecision.riskBands, [
       { risk: "high_risk", condition: "coverage_count < demand_count * 20" },
