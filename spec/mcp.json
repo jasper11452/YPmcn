@@ -170,7 +170,7 @@
     },
     "rank_mcns": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "Provider tools/list does not advertise outputSchema. After the media operator selects the actual inquiry suppliers, one successful response must bind inquiry_id to that exact supplier set and return its (platform, kwUid)-deduplicated coverage union, multiplier, risk band, and a conditional exact manual gap.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. One successful response must bind inquiry_id to the selected supplier set and return its (platform, kwUid)-deduplicated coverage union, multiplier, risk band, and manual gap; legacy null gaps for sufficient supply are normalized locally to explicit zero for the mandatory post-race popup.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -244,7 +244,7 @@
               },
               "manual_sourcing_gap_count": {
                 "anyOf": [
-                  {"type": "integer", "minimum": 1},
+                  {"type": "integer", "minimum": 0},
                   {"type": "null"}
                 ]
               }

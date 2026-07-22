@@ -163,7 +163,7 @@ const supplyQuestion = {
 const postRaceQuestion = {
   questions: [{
     header: "赛后补量",
-    question: "需求达人数量：5\n已选机构：测试MCN 1、测试MCN 2\n覆盖去重并集：96\n已选机构倍率：19.2 倍\n赛后风险：高危\n精确拓展达人建议数量：4\n\n请选择执行方案。",
+    question: "需求达人数量：5\n已选机构数量：2\n已选机构：测试MCN 1、测试MCN 2\n预估机构达人覆盖量：96\n供需倍数：19.2 倍\n赛后风险：高危\n建议手动拓展达人数量：4\n机构承接达人与手动拓展达人比例：5:4\n\n请选择执行方案。",
     options: ["一键发起拓展达人补量", "追加机构后重新计算", "暂不补量，继续询价"],
   }],
 };
@@ -253,10 +253,14 @@ describe("YP Action native hooks", () => {
     assert.match(YPMCN_FAST_PATH, /Before any nonterminal workflow stop or pause that still requires a human decision/);
     assert.match(YPMCN_FAST_PATH, /host-provided custom-input entry/);
     assert.match(YPMCN_FAST_PATH, /waiting_for="user" means invoke the named native AskUserQuestion gate immediately/);
-    assert.match(YPMCN_FAST_PATH, /confirm_pre_race_supply -> header “供给确认”/);
+    assert.match(YPMCN_FAST_PATH, /valid search_creators result continues immediately to rank_mcns/);
+    assert.match(YPMCN_FAST_PATH, /manual count and ratio even when the manual count is 0/);
+    assert.match(YPMCN_FAST_PATH, /webpage is exclusively user-operated/);
+    assert.match(YPMCN_FAST_PATH, /never click, infer, preselect, or submit fields on the user's behalf/);
+    assert.match(YPMCN_FAST_PATH, /Do not open another selector while waiting or after success, cancellation, timeout, or invalid callback/);
     assert.match(YPMCN_FAST_PATH, /confirm_mcn_selection -> header “MCN确认”/);
     assert.match(YPMCN_FAST_PATH, /never print these as a prose menu/);
-    assert.match(YPMCN_FAST_PATH, /including “启动拓展”[^]*do not reopen a stale confirm_pre_race_supply popup/);
+    assert.match(YPMCN_FAST_PATH, /including “启动拓展”[^]*manual_source_creators path/);
     assert.match(YPMCN_FAST_PATH, /Brief with both supported platforms is not a platform ambiguity/);
     assert.doesNotMatch(YPMCN_FAST_PATH, /schema\/CSV|customer_demands (?:reference )?CSV/);
     assert.doesNotMatch(YPMCN_FAST_PATH, /max\(quantityTotal-actual count,0\)/);
@@ -987,8 +991,8 @@ describe("YP Action native hooks", () => {
       { success: true, data: preRaceSupply(), error: null },
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.workflow.next_action, "confirm_pre_race_supply");
-    assert.equal(state.workflow.waiting_for, "user");
+    assert.equal(state.workflow.next_action, "rank_mcns");
+    assert.equal(state.workflow.waiting_for, null);
     assert.equal(state.workflow.pre_race_rate_card_creator_count, 6);
     assert.equal(state.workflow.pre_race_rate_card_multiplier, 1.2);
     assert.equal(state.workflow.pre_race_risk_level, "high_risk");
@@ -1012,6 +1016,7 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.post_race_selected_mcn_coverage_multiplier, 19.2);
     assert.equal(state.workflow.post_race_risk_level, "high_risk");
     assert.equal(state.workflow.post_race_manual_sourcing_gap_count, 4);
+    assert.equal(state.workflow.post_race_institution_manual_creator_ratio, "5:4");
     assert.equal(state.workflow.next_action, "confirm_post_race_manual_sourcing");
     assert.equal(state.workflow.pending_manual_target_count, undefined);
     assert.equal(state.workflow.waiting_for, "user");
@@ -1135,8 +1140,8 @@ describe("YP Action native hooks", () => {
   it("treats start-expansion chat wording as an executable manual-sourcing command", async () => {
     await recordHighRiskSupply();
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.workflow.next_action, "confirm_pre_race_supply");
-    assert.equal(state.workflow.waiting_for, "user");
+    assert.equal(state.workflow.next_action, "rank_mcns");
+    assert.equal(state.workflow.waiting_for, null);
 
     await hooks.get("before_prompt_build")({
       prompt: "启动拓展",
@@ -1237,12 +1242,12 @@ describe("YP Action native hooks", () => {
     }
   });
 
-  it("classifies post-race boundaries and emits an exact gap only below 20x", async () => {
+  it("classifies post-race boundaries and always emits an explicit manual count and ratio", async () => {
     for (const [coverage, expectedRisk, expectedGap, expectedAction] of [
       [99, "high_risk", 1, "confirm_post_race_manual_sourcing"],
-      [100, "medium_risk", undefined, "confirm_mcn_selection"],
-      [149, "medium_risk", undefined, "confirm_mcn_selection"],
-      [150, "safe", undefined, "confirm_mcn_selection"],
+      [100, "medium_risk", 0, "confirm_post_race_manual_sourcing"],
+      [149, "medium_risk", 0, "confirm_post_race_manual_sourcing"],
+      [150, "safe", 0, "confirm_post_race_manual_sourcing"],
     ]) {
       rmSync(join(tempDir, "state"), { recursive: true, force: true });
       await recordHighRiskSupply();
@@ -1251,11 +1256,16 @@ describe("YP Action native hooks", () => {
         selected_mcn_covered_creator_count: coverage,
         selected_mcn_coverage_multiplier: coverage / 5,
         selected_mcn_risk_level: expectedRisk,
-        manual_sourcing_gap_count: expectedGap ?? null,
+        manual_sourcing_gap_count: expectedGap,
       });
       const state = JSON.parse(readFileSync(stateFile, "utf8"));
       assert.equal(state.workflow.post_race_risk_level, expectedRisk, String(coverage));
       assert.equal(state.workflow.post_race_manual_sourcing_gap_count, expectedGap, String(coverage));
+      assert.equal(
+        state.workflow.post_race_institution_manual_creator_ratio,
+        `5:${expectedGap}`,
+        String(coverage),
+      );
       assert.equal(state.workflow.next_action, expectedAction, String(coverage));
       assert.equal(state.workflow.pending_manual_target_count, undefined, String(coverage));
     }
@@ -1322,11 +1332,11 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.pending_manual_target_count, 4);
   });
 
-  it("maps pre-race pause and post-race recalculate or skip without guessing a target", async () => {
+  it("skips pre-race confirmation and maps post-race recalculate, skip, or zero-manual confirmation", async () => {
     await recordHighRiskSupply();
-    await answerSupply("先扩充机构或预拓展达人");
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.workflow.next_action, "await_pre_race_supply_expansion");
+    assert.equal(state.workflow.next_action, "rank_mcns");
+    assert.equal(state.workflow.waiting_for, null);
     assert.equal(state.workflow.pending_manual_target_count, undefined);
 
     rmSync(join(tempDir, "state"), { recursive: true, force: true });
@@ -1345,6 +1355,44 @@ describe("YP Action native hooks", () => {
     await recordRankForManual();
     await answerPostRace("暂不补量，继续询价");
     state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "confirm_mcn_selection");
+    assert.equal(state.workflow.pending_manual_target_count, undefined);
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    await recordHighRiskSupply();
+    await recordRankForManual("inquiry-safe", {
+      selected_mcn_covered_creator_count: 150,
+      selected_mcn_coverage_multiplier: 30,
+      selected_mcn_risk_level: "safe",
+      manual_sourcing_gap_count: null,
+    });
+    await recordTool("AskUserQuestion", {
+      questions: [{
+        header: "赛后补量",
+        question: "机构供给充足，是否继续？",
+        options: ["确认机构方案，继续询价", "追加机构后重新计算"],
+      }],
+    }, {
+      status: "submitted",
+      answers: [{ selected_labels: ["确认机构方案，继续询价"] }],
+    });
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "confirm_post_race_manual_sourcing");
+    assert.equal(state.workflow.post_race_confirmation_error, "missing_required_summary_metrics");
+
+    await recordTool("AskUserQuestion", {
+      questions: [{
+        header: "赛后补量",
+        question: "需求达人数量：5\n已选机构数量：2\n预估机构达人覆盖量：150\n供需倍数：30 倍\n建议手动拓展达人数量：0\n机构承接达人与手动拓展达人比例：5:0\n\n请选择执行方案。",
+        options: ["确认机构方案，继续询价", "追加机构后重新计算"],
+      }],
+    }, {
+      status: "submitted",
+      answers: [{ selected_labels: ["确认机构方案，继续询价"] }],
+    });
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.post_race_manual_sourcing_gap_count, 0);
+    assert.equal(state.workflow.post_race_institution_manual_creator_ratio, "5:0");
     assert.equal(state.workflow.next_action, "confirm_mcn_selection");
     assert.equal(state.workflow.pending_manual_target_count, undefined);
   });
@@ -1462,6 +1510,12 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.phase, "requirement_draft");
     assert.equal(state.workflow.field_selection_evidence_status, "invalid");
     assert.equal(state.workflow.transition_seq, 1);
+    assert.equal(state.workflow.field_selection_attempted, true);
+    const repeatedSelector = await guard("mcp__ypmcn__select_inquiry_form_fields", {
+      platform: "xiaohongshu",
+    }, "call-repeat-invalid-selector");
+    assert.equal(repeatedSelector.errorCode, "INVALID_PHASE");
+    assert.match(repeatedSelector.blockReason, /already opened[^]*never select fields for the user or reopen/);
 
     rmSync(join(tempDir, "state"), { recursive: true, force: true });
     const activeRequirement = requirementId(62);
@@ -1524,6 +1578,11 @@ describe("YP Action native hooks", () => {
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.phase, "inquiry_fields_ready");
     assert.equal(state.workflow.next_action, "validate_requirement");
+    assert.equal(state.workflow.field_selection_attempted, true);
+    const repeatedSelector = await guard("mcp__ypmcn__select_inquiry_form_fields", {
+      platform: "xiaohongshu",
+    }, "call-repeat-success-selector");
+    assert.equal(repeatedSelector.errorCode, "INVALID_PHASE");
   });
 
   it("isolates workflow and AskUserQuestion confirmation state by host session", async () => {

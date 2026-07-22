@@ -289,7 +289,11 @@ describe("Spec governance", () => {
     assert.equal(supplyDecision.preRace.exactManualTargetAllowed, false);
     assert.equal(
       supplyDecision.postRace.exactManualTarget,
-      "selected multiplier < 20 ? demand_count * 20 - selected_mcn_covered_creator_count : null",
+      "max(demand_count * 20 - selected_mcn_covered_creator_count, 0)",
+    );
+    assert.equal(
+      supplyDecision.postRace.institutionManualCreatorRatio,
+      "demand_count:exact_manual_target; always render, including N:0",
     );
     assert.deepEqual(supplyDecision.riskBands, [
       { risk: "high_risk", condition: "coverage_count < demand_count * 20" },

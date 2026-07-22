@@ -21,16 +21,13 @@ const EXTERNAL_SEND_HEADER = "企微外发确认";
 const EXTERNAL_SEND_CONFIRM_LABEL = "确认发送";
 const EXTERNAL_SEND_CANCEL_LABEL = "取消发送";
 const EXTERNAL_SEND_CONFIRMATION_MARKER = "EXTERNAL_SEND_CONFIRMATION_REQUIRED";
-const SEARCH_CONFIRMATION_HEADER = "供给确认";
 const POST_RACE_MANUAL_CONFIRMATION_HEADER = "赛后补量";
 const MCN_CONFIRMATION_HEADER = "MCN确认";
 const FIELD_CONFIRMATION_HEADER = "字段确认";
-const START_MCN_RACE_LABEL = "开始MCN赛马";
-const CONTINUE_MCN_RACE_LABEL = "仍继续MCN赛马";
-const PAUSE_FOR_SUPPLY_LABEL = "先扩充机构或预拓展达人";
 const START_POST_RACE_MANUAL_LABEL = "一键发起拓展达人补量";
 const REVISE_MCN_SELECTION_LABEL = "追加机构后重新计算";
 const SKIP_POST_RACE_MANUAL_LABEL = "暂不补量，继续询价";
+const CONFIRM_NO_MANUAL_LABEL = "确认机构方案，继续询价";
 const MANUAL_TASK_STATUSES = new Set(["started", "running", "completed"]);
 const MANUAL_TASK_OPERATIONS = new Set(["created", "reused"]);
 const DISTRIBUTION_SENT_STATUSES = new Set(["sent", "delivered"]);
@@ -473,7 +470,8 @@ type RankMcnCoverageEvidence = {
   coveredCreatorCount: number;
   coverageMultiplier: number;
   riskLevel: SupplyRiskLevel;
-  manualSourcingGapCount: number | null;
+  manualSourcingGapCount: number;
+  institutionManualCreatorRatio: string;
 };
 
 type ManualSourcingEvidence = {
@@ -647,10 +645,10 @@ function authorizeFieldSelection(event: Json, input: Json, current: GuardStore):
     );
   }
   const workflow = current.data.workflow as Json;
-  if (workflow.field_selection_evidence_status === "valid" && workflow.next_action !== null) {
+  if (workflow.field_selection_attempted === true) {
     return denyPreflight(
       event, "select_inquiry_form_fields", input, "workflow_order", "INVALID_PHASE",
-      "select_inquiry_form_fields already succeeded for the active export flow; do not reopen the selector.",
+      "select_inquiry_form_fields was already opened for the active MCN flow. Wait for and use only the user's webpage callback; never select fields for the user or reopen the selector after success, cancellation, timeout, or an invalid callback.",
     );
   }
   return undefined;
@@ -756,10 +754,13 @@ function rankMcnCoverageEvidence(
     if (Number.isInteger(workflow.quantity_total) && workflow.quantity_total !== demandCount) continue;
     const expectedRisk = supplyRiskLevel(coveredCreatorCount, demandCount);
     if (riskLevel !== expectedRisk) continue;
-    const expectedGap = expectedRisk === "high_risk"
-      ? demandCount * 20 - coveredCreatorCount
-      : null;
-    if (manualSourcingGapCount !== expectedGap) continue;
+    const expectedGap = Math.max(demandCount * 20 - coveredCreatorCount, 0);
+    // Older Provider revisions returned null once the selected institutions
+    // already reached 20x. Normalize that legacy success shape to the explicit
+    // zero the confirmation UI now requires.
+    if (manualSourcingGapCount !== expectedGap && !(expectedGap === 0 && manualSourcingGapCount === null)) {
+      continue;
+    }
     matches.push({
       inquiryId,
       demandCount,
@@ -769,6 +770,7 @@ function rankMcnCoverageEvidence(
       coverageMultiplier,
       riskLevel: expectedRisk,
       manualSourcingGapCount: expectedGap,
+      institutionManualCreatorRatio: `${demandCount}:${expectedGap}`,
     });
   }
   return matches.length === 1 ? matches[0] : undefined;
@@ -1237,11 +1239,34 @@ function appendWorkflowEvent(data: Json, event: Json): void {
   data.workflow_events = events.slice(-50);
 }
 
+function postRaceQuestionMatchesEvidence(input: Json, workflow: Json): boolean {
+  const question = firstQuestion(input);
+  const body = text(question?.question) ? question.question.replace(/\s+/gu, "") : "";
+  const demandCount = workflow.demand_count;
+  const selectedMcnCount = workflow.post_race_selected_mcn_count;
+  const coverageCount = workflow.post_race_selected_mcn_covered_creator_count;
+  const multiplier = workflow.post_race_selected_mcn_coverage_multiplier;
+  const manualCount = workflow.post_race_manual_sourcing_gap_count;
+  const ratio = workflow.post_race_institution_manual_creator_ratio;
+  if (
+    !body || !Number.isInteger(demandCount) || !Number.isInteger(selectedMcnCount) ||
+    !Number.isInteger(coverageCount) || typeof multiplier !== "number" ||
+    !Number.isInteger(manualCount) || !text(ratio)
+  ) return false;
+  return [
+    `需求达人数量：${demandCount}`,
+    `已选机构数量：${selectedMcnCount}`,
+    `预估机构达人覆盖量：${coverageCount}`,
+    `供需倍数：${multiplier}`,
+    `建议手动拓展达人数量：${manualCount}`,
+    `机构承接达人与手动拓展达人比例：${ratio}`,
+  ].every((metric) => body.includes(metric));
+}
+
 function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): void {
   if (event.error) return;
   const header = firstQuestionHeader(input);
   if (![
-    SEARCH_CONFIRMATION_HEADER,
     POST_RACE_MANUAL_CONFIRMATION_HEADER,
     MCN_CONFIRMATION_HEADER,
     FIELD_CONFIRMATION_HEADER,
@@ -1254,21 +1279,15 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
   workflow.last_user_command = answer;
   workflow.updated_at_ms = Date.now();
 
-  if (header === SEARCH_CONFIRMATION_HEADER) {
-    const validPlan = workflow.pre_race_supply_status === "valid";
-    if ([START_MCN_RACE_LABEL, CONTINUE_MCN_RACE_LABEL].includes(answer) && validPlan) {
-      delete workflow.pending_manual_target_count;
-      workflow.next_action = "rank_mcns";
-      workflow.waiting_for = null;
-    } else if (answer === PAUSE_FOR_SUPPLY_LABEL && validPlan) {
-      delete workflow.pending_manual_target_count;
-      workflow.next_action = "await_pre_race_supply_expansion";
+  if (header === POST_RACE_MANUAL_CONFIRMATION_HEADER) {
+    if (!postRaceQuestionMatchesEvidence(input, workflow)) {
+      workflow.next_action = "confirm_post_race_manual_sourcing";
       workflow.waiting_for = "user";
-    } else {
-      workflow.next_action = validPlan ? "confirm_pre_race_supply" : "recover_search_supply_plan";
-      workflow.waiting_for = "user";
+      workflow.post_race_confirmation_error = "missing_required_summary_metrics";
+      save(current.path, current.data);
+      return;
     }
-  } else if (header === POST_RACE_MANUAL_CONFIRMATION_HEADER) {
+    delete workflow.post_race_confirmation_error;
     const gap = workflow.post_race_manual_sourcing_gap_count;
     if (
       answer === START_POST_RACE_MANUAL_LABEL && workflow.post_race_evidence_status === "valid" &&
@@ -1281,7 +1300,10 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
       delete workflow.pending_manual_target_count;
       workflow.next_action = "revise_mcn_selection";
       workflow.waiting_for = "user";
-    } else if (answer === SKIP_POST_RACE_MANUAL_LABEL && workflow.post_race_evidence_status === "valid") {
+    } else if (
+      [SKIP_POST_RACE_MANUAL_LABEL, CONFIRM_NO_MANUAL_LABEL].includes(answer) &&
+      workflow.post_race_evidence_status === "valid"
+    ) {
       delete workflow.pending_manual_target_count;
       workflow.next_action = "confirm_mcn_selection";
       workflow.waiting_for = "user";
@@ -1432,8 +1454,10 @@ function updateLocalWorkflow(
       "rank_mcn_inquiry_id", "rank_mcn_inquiry_evidence_status", "rank_mcn_inquiry_evidence_error",
       "post_race_evidence_status", "post_race_risk_level", "post_race_selected_mcn_count",
       "post_race_selected_mcn_covered_creator_count", "post_race_selected_mcn_coverage_multiplier",
-      "post_race_manual_sourcing_gap_count", "pending_manual_target_count",
+      "post_race_manual_sourcing_gap_count", "post_race_institution_manual_creator_ratio",
+      "pending_manual_target_count",
     ]) delete workflow[key];
+    delete workflow.field_selection_attempted;
   }
 
   if (tool === "select_inquiry_form_fields" && ok) {
@@ -1444,6 +1468,7 @@ function updateLocalWorkflow(
     workflow.waiting_for = null;
     if (text(input.platform)) workflow.platform = input.platform.trim();
     workflow.field_selection_evidence_status = "valid";
+    workflow.field_selection_attempted = true;
     workflow.field_selection_columns = fieldEvidence;
     workflow.field_selection_columns_sha256 = sha256Text(canonical(fieldEvidence));
     delete workflow.field_selection_evidence_error;
@@ -1532,6 +1557,7 @@ function updateLocalWorkflow(
     }
   } else if (!ok) {
     if (tool === "select_inquiry_form_fields") {
+      workflow.field_selection_attempted = true;
       workflow.field_selection_evidence_status = envelopeOk ? "invalid" : "unavailable";
       workflow.field_selection_evidence_error = envelopeOk
         ? "missing_or_conflicting_callback_columns"
@@ -1600,7 +1626,7 @@ function updateLocalWorkflow(
       }
       case "search_creators": {
         workflow.phase = "candidate_pool_ready";
-        workflow.waiting_for = "user";
+        workflow.waiting_for = null;
         for (const key of [
           "supply_plan_status", "supply_plan_error", "matched_creator_count", "supply_ratio",
           "hard_shortfall_count", "buffer_shortfall_count", "supply_risk_level",
@@ -1628,7 +1654,7 @@ function updateLocalWorkflow(
         workflow.pre_race_supply_contract = supply.contract;
         if (supply.recommendedAction) workflow.pre_race_recommended_action = supply.recommendedAction;
         else delete workflow.pre_race_recommended_action;
-        workflow.next_action = "confirm_pre_race_supply";
+        workflow.next_action = "rank_mcns";
         break;
       }
       case "rank_mcns": {
@@ -1642,18 +1668,14 @@ function updateLocalWorkflow(
         workflow.post_race_selected_mcn_covered_creator_count = rankEvidence.coveredCreatorCount;
         workflow.post_race_selected_mcn_coverage_multiplier = rankEvidence.coverageMultiplier;
         workflow.post_race_risk_level = rankEvidence.riskLevel;
-        if (rankEvidence.manualSourcingGapCount === null) {
-          delete workflow.post_race_manual_sourcing_gap_count;
-        } else {
-          workflow.post_race_manual_sourcing_gap_count = rankEvidence.manualSourcingGapCount;
-        }
+        workflow.post_race_manual_sourcing_gap_count = rankEvidence.manualSourcingGapCount;
+        workflow.post_race_institution_manual_creator_ratio =
+          rankEvidence.institutionManualCreatorRatio;
         delete workflow.pending_manual_target_count;
         workflow.selected_supplier_id_hashes = rankEvidence.selectedSupplierIds
           .map((supplierId) => sha256Text(supplierId))
           .sort();
-        workflow.next_action = rankEvidence.riskLevel === "high_risk"
-          ? "confirm_post_race_manual_sourcing"
-          : "confirm_mcn_selection";
+        workflow.next_action = "confirm_post_race_manual_sourcing";
         workflow.waiting_for = "user";
         if (Number.isInteger(input.minimum_mcn_count)) workflow.mcn_race_size = input.minimum_mcn_count;
         const selectedHashes = new Set(workflow.selected_supplier_id_hashes);
