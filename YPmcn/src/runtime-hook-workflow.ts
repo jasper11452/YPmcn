@@ -24,6 +24,9 @@ const EXTERNAL_SEND_CONFIRMATION_MARKER = "EXTERNAL_SEND_CONFIRMATION_REQUIRED";
 const POST_RACE_MANUAL_CONFIRMATION_HEADER = "赛后补量";
 const MCN_CONFIRMATION_HEADER = "MCN确认";
 const FIELD_CONFIRMATION_HEADER = "字段确认";
+const MCN_RETURN_CONFIRMATION_HEADER = "机构回填确认";
+const CONFIRM_MCN_RETURN_LABEL = "确认已完成回填";
+const WAIT_MCN_RETURN_LABEL = "尚未完成，继续等待";
 const START_POST_RACE_MANUAL_LABEL = "一键发起拓展达人补量";
 const REVISE_MCN_SELECTION_LABEL = "追加机构后重新计算";
 const SKIP_POST_RACE_MANUAL_LABEL = "暂不补量，继续询价";
@@ -134,6 +137,32 @@ export function recordPostValidationIntent(intent: "manual" | "search", rootDir:
   workflow.next_action = "validate_requirement";
   workflow.waiting_for = null;
   workflow.updated_at_ms = Date.now();
+  save(current.path, current.data);
+}
+
+export function recordManualCreatorListDisplay(messages: unknown, rootDir: string): void {
+  if (!Array.isArray(messages)) return;
+  const current = store(rootDir);
+  const workflow = current.data.workflow as Json;
+  if (
+    workflow.manual_sourcing_creator_list_display_status !== "required" ||
+    !text(workflow.manual_sourcing_display_marker)
+  ) return;
+  const marker = workflow.manual_sourcing_display_marker.trim();
+  const observed = messages.some((message) => {
+    if (!message || typeof message !== "object" || (message as Json).role !== "assistant") return false;
+    const values: unknown[] = [(message as Json).content, (message as Json).text, (message as Json).message];
+    const serialized = values.map((value) => typeof value === "string" ? value : JSON.stringify(value ?? "")).join("\n");
+    return serialized.includes(`<!-- ${marker} -->`) &&
+      serialized.includes("| 平台 |") && serialized.includes("| 达人ID |") &&
+      serialized.includes("| 达人昵称 |") && serialized.includes("| 内容标签 |") &&
+      serialized.includes("| 主页链接 |");
+  });
+  if (!observed) return;
+  workflow.manual_sourcing_creator_list_displayed = true;
+  workflow.manual_sourcing_creator_list_display_status = "displayed";
+  workflow.manual_sourcing_creator_list_displayed_at_ms = Date.now();
+  workflow.updated_at_ms = workflow.manual_sourcing_creator_list_displayed_at_ms;
   save(current.path, current.data);
 }
 
@@ -487,7 +516,10 @@ type ManualSourcingEvidence = {
 type DirectManualSourcingEvidence = {
   requirementId: string;
   size: string;
-  excelFilePath: string;
+  excelFilePath?: string;
+  creatorCount: number;
+  creatorRowsSha256: string;
+  creatorFields: string[];
 };
 
 const MANUAL_REQUIREMENT_RECEIPT_KEY = "manual_sourcing_requirement_receipt";
@@ -562,6 +594,13 @@ function authorizeFreshManualRequirement(
   current: GuardStore,
   rootDir: string,
 ): Json | undefined {
+  const workflow = current.data.workflow as Json;
+  if (workflow.search_flow_started === true && workflow.mcn_flow_completed !== true) {
+    return denyPreflight(
+      event, "manual_source_creators", input, "workflow_order", "INVALID_PHASE",
+      "search_creators started the mandatory MCN flow. Complete rank_mcns, user-operated field selection, confirmed WeCom distribution, and its required sync step before manual sourcing.",
+    );
+  }
   const receipt = current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
   if (receipt?.status !== "fresh" || !text(receipt.requirement_id_sha256)) {
     return denyPreflight(
@@ -656,22 +695,26 @@ function authorizeFieldSelection(event: Json, input: Json, current: GuardStore):
 
 function authorizeRankCreators(event: Json, input: Json, current: GuardStore): Json | undefined {
   const workflow = current.data.workflow as Json;
-  if (workflow.phase !== "candidate_pool_enriched" || workflow.next_action !== "rank_creators") {
+  if (
+    workflow.phase !== "candidate_pool_enriched" || workflow.next_action !== "rank_creators" ||
+    (workflow.manual_sourcing_creator_data_received !== true && workflow.mcn_submissions_ingested !== true)
+  ) {
     return denyPreflight(
       event, "rank_creators", input, "workflow_order", "INVALID_PHASE",
-      "rank_creators requires the current successful MCN inquiry recovery result.",
+      "rank_creators requires either the current manual creator-data receipt or the current successfully ingested MCN submissions.",
     );
   }
-  const inquiryIds = Array.isArray(workflow.sync_inquiry_ids)
+  const inquiryIds = (workflow.manual_sourcing_has_prior_wecom_send === true || workflow.mcn_submissions_ingested === true) &&
+    Array.isArray(workflow.sync_inquiry_ids)
     ? workflow.sync_inquiry_ids
-    : undefined;
+    : [];
   if (
     !text(workflow.requirement_id) || input.requirement_id !== workflow.requirement_id ||
-    !inquiryIds || canonical(input.inquiry_ids) !== canonical(inquiryIds)
+    canonical(input.inquiry_ids) !== canonical(inquiryIds)
   ) {
     return denyPreflight(
       event, "rank_creators", input, "workflow_lineage", "INVALID_INPUT",
-      "rank_creators must use the exact requirement_id and inquiry_ids returned by sync_mcn_inquiry_status for this MCN recovery flow.",
+      "rank_creators must use the current manual-sourcing requirement_id; use the exact sync inquiry_ids after a verified WeCom flow, otherwise use an empty inquiry_ids array.",
     );
   }
   return undefined;
@@ -844,12 +887,33 @@ function directManualSourcingEvidence(
     .filter(text)
     .map((value) => value.trim());
   const unique = new Set(candidates);
-  if (unique.size !== 1) return undefined;
+  if (unique.size > 1) return undefined;
+
+  const fixedFields = ["platform", "douyinId", "xiaohongshuId", "nickname", "contentTag", "kwUserUrl"];
+  const creatorArrays: Json[][] = [];
+  for (const record of objectRecords(envelope.data)) {
+    for (const key of ["creators", "creator_list", "manual_sourced_creators"]) {
+      if (!Array.isArray(record[key]) || record[key].length === 0) continue;
+      const rows = record[key].filter((item: unknown): item is Json =>
+        Boolean(item && typeof item === "object" && !Array.isArray(item))
+      );
+      if (rows.length === record[key].length && rows.every((row) => fixedFields.some((field) => row[field] !== undefined))) {
+        creatorArrays.push(rows);
+      }
+    }
+  }
+  const creatorSets = new Map(creatorArrays.map((rows) => [canonical(rows), rows]));
+  if (creatorSets.size !== 1) return undefined;
+  const creatorRows = [...creatorSets.values()][0];
+  const creatorFields = fixedFields.filter((field) => creatorRows.some((row) => row[field] !== undefined));
 
   return {
     requirementId: input.requirement_id.trim(),
     size: input.size.trim(),
-    excelFilePath: [...unique][0],
+    ...(unique.size === 1 ? { excelFilePath: [...unique][0] } : {}),
+    creatorCount: creatorRows.length,
+    creatorRowsSha256: sha256Text(canonical(creatorRows)),
+    creatorFields,
   };
 }
 
@@ -1236,7 +1300,19 @@ function appendWorkflowEvent(data: Json, event: Json): void {
 }
 
 function authorizeInquirySync(event: Json, input: Json, current: GuardStore): Json | undefined {
-  if (syncInputBoundToSendEvidence(input, current.data.workflow as Json)) return undefined;
+  if (syncInputBoundToSendEvidence(input, current.data.workflow as Json)) {
+    const workflow = current.data.workflow as Json;
+    workflow.sync_call_order_status = "authorized_after_wecom_send";
+    workflow.sync_after_wecom_send = true;
+    workflow.sync_order_checked_at_ms = Date.now();
+    save(current.path, current.data);
+    return undefined;
+  }
+  const workflow = current.data.workflow as Json;
+  workflow.sync_call_order_status = "blocked_missing_matching_wecom_send";
+  workflow.sync_after_wecom_send = false;
+  workflow.sync_order_checked_at_ms = Date.now();
+  save(current.path, current.data);
   return denyPreflight(
     event, "sync_mcn_inquiry_status", input, "workflow_lineage", "INVALID_PHASE",
     "sync_mcn_inquiry_status requires a prior successful create_with_distributions response with explicit per-supplier sent details matching this exact requirement, project, and supplier set. Sync output is never WeCom send evidence.",
@@ -1250,6 +1326,7 @@ function clearDistributionSendEvidence(workflow: Json): void {
     "distribution_outcome_status", "distribution_outcome_error", "distribution_send_evidence_status",
     "distribution_send_evidence_tool", "distribution_sent_detail_count", "sync_inquiry_ids",
     "inquiry_sync_evidence_status", "inquiry_sync_evidence_error",
+    "distribution_source_brief_sha256",
     "wecom_confirmation_id", "wecom_confirmation_status", "wecom_confirmation_mode",
     "wecom_confirmation_request_sha256", "wecom_confirmation_user_prompted",
     "wecom_confirmation_user_approved", "wecom_confirmation_updated_at_ms",
@@ -1311,6 +1388,7 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
     POST_RACE_MANUAL_CONFIRMATION_HEADER,
     MCN_CONFIRMATION_HEADER,
     FIELD_CONFIRMATION_HEADER,
+    MCN_RETURN_CONFIRMATION_HEADER,
   ].includes(header ?? "")) return;
   const answer = answerForQuestion(event, input);
   if (!answer) return;
@@ -1335,8 +1413,9 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
       workflow.post_race_risk_level === "high_risk" && Number.isInteger(gap) && gap > 0
     ) {
       workflow.pending_manual_target_count = gap;
-      workflow.next_action = "manual_source_creators";
-      workflow.waiting_for = null;
+      workflow.manual_sourcing_after_mcn_flow = true;
+      workflow.next_action = "confirm_mcn_selection";
+      workflow.waiting_for = "user";
     } else if (answer === REVISE_MCN_SELECTION_LABEL) {
       delete workflow.pending_manual_target_count;
       workflow.next_action = "revise_mcn_selection";
@@ -1357,9 +1436,18 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
     const approved = ["确认MCN方案", "确认继续"].includes(answer);
     workflow.next_action = approved ? "select_inquiry_form_fields" : "confirm_mcn_selection";
     workflow.waiting_for = approved ? null : "user";
-  } else {
+  } else if (header === FIELD_CONFIRMATION_HEADER) {
     const approved = ["确认字段", "确认继续"].includes(answer);
     workflow.next_action = approved ? "create_with_distributions" : "confirm_inquiry_fields";
+    workflow.waiting_for = approved ? null : "user";
+  } else {
+    const approved = answer === CONFIRM_MCN_RETURN_LABEL &&
+      workflow.manual_sourcing_creator_data_received === true &&
+      workflow.manual_sourcing_has_prior_wecom_send === true;
+    workflow.manual_sourcing_mcn_return_confirmation_status = approved ? "confirmed" : "waiting";
+    workflow.manual_sourcing_mcn_return_confirmed_at_ms = approved ? Date.now() : undefined;
+    workflow.phase = approved ? "candidate_pool_enriched" : "waiting_mcn_return";
+    workflow.next_action = approved ? "rank_creators" : "confirm_mcn_return_completed";
     workflow.waiting_for = approved ? null : "user";
   }
 
@@ -1400,6 +1488,11 @@ function updateLocalWorkflow(
     workflow.preflight_error = preflightDenial;
     workflow.transition_seq = Number(workflow.transition_seq ?? 0) + 1;
     workflow.updated_at_ms = now;
+    if (tool === "sync_mcn_inquiry_status") {
+      workflow.sync_call_order_status = "blocked_missing_matching_wecom_send";
+      workflow.sync_after_wecom_send = false;
+      workflow.sync_order_checked_at_ms = now;
+    }
     if (preflightDenial === "missing_session_context") {
       workflow.phase = "blocked";
       workflow.next_action = "await_host_upgrade";
@@ -1548,7 +1641,13 @@ function updateLocalWorkflow(
     workflow.distribution_sent_detail_count = 0;
     workflow.next_action = distributionUnboundRejection.remainingSupplierIds.length > 0
       ? "fallback_send_next_individual_mcn"
-      : "report_distribution_result";
+      : workflow.manual_sourcing_after_mcn_flow === true
+        ? "validate_requirement"
+        : "report_distribution_result";
+    if (distributionUnboundRejection.remainingSupplierIds.length === 0) {
+      workflow.mcn_flow_completed = true;
+      if (workflow.manual_sourcing_after_mcn_flow === true) workflow.post_validation_intent = "manual";
+    }
     workflow.waiting_for = null;
   } else if (tool === "create_with_distributions" && distributionBatchFallback) {
     workflow.phase = "inquiry_sending";
@@ -1594,6 +1693,9 @@ function updateLocalWorkflow(
     workflow.distribution_send_evidence_status = workflow.sent_supplier_count > 0 ? "valid" : "none_sent";
     workflow.distribution_send_evidence_tool = "create_with_distributions";
     workflow.distribution_sent_detail_count = workflow.sent_supplier_count;
+    if (workflow.sent_supplier_count > 0 && text(current.data.source_brief_sha256)) {
+      workflow.distribution_source_brief_sha256 = current.data.source_brief_sha256.trim();
+    }
     delete workflow.distribution_outcome_error;
     if (pendingCount > 0) {
       workflow.phase = "inquiry_sending";
@@ -1610,7 +1712,11 @@ function updateLocalWorkflow(
     } else {
       workflow.phase = "inquiry_fields_ready";
       workflow.distribution_outcome_status = "none_sent";
-      workflow.next_action = "report_distribution_result";
+      workflow.mcn_flow_completed = true;
+      workflow.next_action = workflow.manual_sourcing_after_mcn_flow === true
+        ? "validate_requirement"
+        : "report_distribution_result";
+      if (workflow.manual_sourcing_after_mcn_flow === true) workflow.post_validation_intent = "manual";
       workflow.waiting_for = null;
     }
   } else if (!ok) {
@@ -1634,7 +1740,7 @@ function updateLocalWorkflow(
       workflow.manual_sourcing_evidence_status = envelopeOk ? "invalid" : "unavailable";
       workflow.manual_sourcing_evidence_error = envelopeOk
         ? text(input.size)
-          ? "missing_or_conflicting_excel_file_path"
+          ? "missing_or_conflicting_creator_rows"
           : "missing_or_conflicting_task_evidence"
         : "provider_call_failed_or_unknown";
     }
@@ -1699,6 +1805,9 @@ function updateLocalWorkflow(
       }
       case "search_creators": {
         workflow.phase = "candidate_pool_ready";
+        workflow.search_flow_started = true;
+        workflow.mcn_flow_completed = false;
+        workflow.mcn_flow_started_at_ms = now;
         workflow.waiting_for = null;
         for (const key of [
           "supply_plan_status", "supply_plan_error", "matched_creator_count", "supply_ratio",
@@ -1791,9 +1900,17 @@ function updateLocalWorkflow(
         workflow.distribution_send_evidence_status = distributionEvidence.sentCount > 0 ? "valid" : "none_sent";
         workflow.distribution_send_evidence_tool = "create_with_distributions";
         workflow.distribution_sent_detail_count = distributionEvidence.sentCount;
+        if (distributionEvidence.sentCount > 0 && text(current.data.source_brief_sha256)) {
+          workflow.distribution_source_brief_sha256 = current.data.source_brief_sha256.trim();
+        }
+        workflow.wecom_send_completed_transition_seq = workflow.transition_seq;
         if (distributionEvidence.sentCount === 0) {
+          workflow.mcn_flow_completed = true;
           workflow.phase = "inquiry_fields_ready";
-          workflow.next_action = "report_distribution_result";
+          workflow.next_action = workflow.manual_sourcing_after_mcn_flow === true
+            ? "validate_requirement"
+            : "report_distribution_result";
+          if (workflow.manual_sourcing_after_mcn_flow === true) workflow.post_validation_intent = "manual";
           workflow.waiting_for = null;
           workflow.distribution_outcome_status = "none_sent";
         } else {
@@ -1805,6 +1922,7 @@ function updateLocalWorkflow(
         break;
       case "ingest_mcn_submissions":
         workflow.phase = "candidate_pool_enriched";
+        workflow.mcn_submissions_ingested = true;
         workflow.next_action = "rank_creators";
         workflow.waiting_for = null;
         break;
@@ -1834,29 +1952,75 @@ function updateLocalWorkflow(
         workflow.waiting_for = null;
         break;
       case "sync_mcn_inquiry_status":
+        workflow.sync_call_order_status = "completed_after_wecom_send";
+        workflow.sync_after_wecom_send = true;
+        workflow.sync_completed_at_ms = now;
+        workflow.mcn_flow_completed = true;
         workflow.inquiry_sync_evidence_status = syncInquiryIds ? "valid_with_inquiries" : "valid_no_inquiries";
         delete workflow.inquiry_sync_evidence_error;
         if (syncInquiryIds) {
           workflow.sync_inquiry_ids = syncInquiryIds;
-          workflow.next_action = "ingest_mcn_submissions";
-          workflow.waiting_for = null;
         } else {
-          workflow.next_action = "await_or_ingest_mcn_submissions";
-          workflow.waiting_for = "provider";
+          delete workflow.sync_inquiry_ids;
+        }
+        if (workflow.manual_sourcing_creator_data_received === true) {
+          workflow.phase = "waiting_mcn_return";
+          workflow.next_action = "confirm_mcn_return_completed";
+          workflow.waiting_for = "user";
+          workflow.manual_sourcing_mcn_return_confirmation_status = "required";
+        } else if (workflow.manual_sourcing_after_mcn_flow === true) {
+          workflow.next_action = "validate_requirement";
+          workflow.waiting_for = null;
+          workflow.post_validation_intent = "manual";
+        } else {
+          workflow.next_action = syncInquiryIds ? "ingest_mcn_submissions" : "await_or_ingest_mcn_submissions";
+          workflow.waiting_for = syncInquiryIds ? null : "provider";
         }
         break;
       case "manual_source_creators":
         if (!manualEvidence) break;
-        if ("excelFilePath" in manualEvidence) {
-          workflow.phase = "candidate_pool_enriched";
+        if ("creatorCount" in manualEvidence) {
+          const sameBriefAsDistribution = text(workflow.distribution_source_brief_sha256) &&
+            text(current.data.source_brief_sha256) &&
+            workflow.distribution_source_brief_sha256.trim() === current.data.source_brief_sha256.trim();
+          const hasPriorWecomSend = (workflow.manual_sourcing_after_mcn_flow === true || sameBriefAsDistribution) &&
+            workflow.distribution_send_evidence_status === "valid" &&
+            workflow.distribution_send_evidence_tool === "create_with_distributions" &&
+            workflow.sync_after_wecom_send === true;
+          workflow.phase = hasPriorWecomSend ? "waiting_mcn_return" : "candidate_pool_enriched";
           workflow.requirement_id = manualEvidence.requirementId;
           workflow.manual_sourcing_size = manualEvidence.size;
-          workflow.manual_sourcing_excel_file_sha256 = sha256Text(manualEvidence.excelFilePath);
+          if (manualEvidence.excelFilePath) {
+            workflow.manual_sourcing_excel_file_sha256 = sha256Text(manualEvidence.excelFilePath);
+          } else {
+            delete workflow.manual_sourcing_excel_file_sha256;
+          }
+          const batchFingerprint = sha256Text(canonical({
+            requirement_id: manualEvidence.requirementId,
+            size: manualEvidence.size,
+            creator_rows_sha256: manualEvidence.creatorRowsSha256,
+          }));
+          workflow.manual_sourcing_batch_id_sha256 = batchFingerprint;
+          workflow.manual_sourcing_creator_rows_sha256 = manualEvidence.creatorRowsSha256;
+          workflow.manual_sourcing_creator_count = manualEvidence.creatorCount;
+          workflow.manual_sourcing_creator_fields = manualEvidence.creatorFields;
+          workflow.manual_sourcing_creator_data_received = true;
+          workflow.manual_sourcing_creator_data_status = "received";
+          workflow.manual_sourcing_creator_data_received_at_ms = now;
+          workflow.manual_sourcing_creator_list_displayed = false;
+          workflow.manual_sourcing_creator_list_display_status = "required";
+          delete workflow.manual_sourcing_creator_list_displayed_at_ms;
+          workflow.manual_sourcing_display_marker = `YPmcnManualCreatorsDisplayed:${batchFingerprint}`;
+          workflow.manual_sourcing_has_prior_wecom_send = hasPriorWecomSend;
+          delete workflow.manual_sourcing_after_mcn_flow;
+          delete workflow.pending_manual_target_count;
           workflow.manual_sourcing_evidence_status = "valid";
           delete workflow.manual_sourcing_evidence_error;
           delete workflow.manual_sourcing_inquiry_ids;
-          workflow.next_action = null;
-          workflow.waiting_for = null;
+          workflow.next_action = hasPriorWecomSend ? "confirm_mcn_return_completed" : "rank_creators";
+          workflow.waiting_for = hasPriorWecomSend ? "user" : null;
+          workflow.manual_sourcing_mcn_return_confirmation_status = hasPriorWecomSend ? "required" : "not_required";
+          if (hasPriorWecomSend) delete workflow.manual_sourcing_mcn_return_confirmed_at_ms;
         } else {
           workflow.manual_sourcing_task_id = manualEvidence.taskId;
           workflow.manual_sourcing_inquiry_id = manualEvidence.inquiryId;

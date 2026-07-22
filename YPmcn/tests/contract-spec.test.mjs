@@ -144,9 +144,9 @@ describe("current Endpoint MCP contract", () => {
     assert.match(profile.tools.search_creators.agentSemanticRequirements.id, /data\.id.*data\.demand_id/);
     assert.match(
       profile.tools.manual_source_creators.agentSemanticRequirements.eligibility,
-      /independent of current workflow phase, historical creator search, and completion of other workflow steps/,
+      /direct before search_creators.*complete MCN.*sync flow finishes/,
     );
-    assert.match(profile.tools.manual_source_creators.agentSemanticRequirements.completion, /excel_file_path/);
+    assert.match(profile.tools.manual_source_creators.agentSemanticRequirements.completion, /fixed-field creator array.*rank_creators/);
   });
 
   it("adds the Agent-required plain-text message without misreporting the live Provider required list", () => {

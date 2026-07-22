@@ -35,7 +35,7 @@
           "create_submission_batch"
         ],
         "phasePolicy": {
-          "manual_source_creators": "phase-independent-after-fresh-requirement-validation"
+          "manual_source_creators": "direct-before-search-or-after-complete-mcn-flow-and-fresh-requirement-validation"
         },
         "interactionPolicy": {
           "humanInTheLoop": {
@@ -45,6 +45,7 @@
               "unresolved_required_or_semantically_ambiguous_business_value",
               "evidence_bound_business_branch",
               "irreversible_external_send",
+              "human_confirmation_of_mcn_return_completion",
               "non_deterministic_safe_recovery_choice"
             ],
             "prohibitedPauses": [
@@ -113,12 +114,14 @@
             "requirement_id_equals_the_fresh_32_character_data_id_returned_by_that_validation",
             "same_session_context_is_available_to_the_before_tool_hook",
             "fresh_requirement_id_receipt_is_consumed_by_this_call",
-            "size_is_a_positive_integer_decimal_string"
+            "size_is_a_positive_integer_decimal_string",
+            "if_search_started_the_full_mcn_send_and_sync_flow_is_complete"
           ],
           "rank_creators": [
             "manual_source_creators_succeeded_for_the_same_requirement_and_size",
-            "inquiry_ids_are_copied_from_that_actual_success_response",
-            "columns_preserve_the_current_field_selection_order"
+            "manual_creator_data_receipt_is_recorded",
+            "inquiry_ids_are_empty_without_wecom_or_exactly_copied_from_sync_with_wecom",
+            "human_confirmed_mcn_return_completion_when_wecom_was_sent"
           ],
           "create_submission_batch": [
             "rank_creators_succeeded_for_the_same_manual_inquiries",

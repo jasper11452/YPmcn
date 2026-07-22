@@ -82,9 +82,9 @@ class SkillPackageContractTest(unittest.TestCase):
         markdown = [SKILL, *sorted(REFERENCES.rglob("*.md"))]
         self.assertEqual(1 + len(EXPECTED_REFERENCE_FILES), len(markdown))
         # “拓展达人” is two Han characters longer than the retired term at every use site.
-        self.assertLessEqual(sum(count_han(read(path)) for path in markdown), 3400)
+        self.assertLessEqual(sum(count_han(read(path)) for path in markdown), 3800)
 
-    def test_skill_declares_phase_independent_manual_sourcing_with_a_fresh_id_gate(self):
+    def test_skill_declares_optional_search_and_manual_sourcing_with_a_fresh_id_gate(self):
         text = "\n".join((
             read(SKILL),
             read(REFERENCES / "requirement-intake.md"),
@@ -93,11 +93,11 @@ class SkillPackageContractTest(unittest.TestCase):
         for required in (
             "validate_requirement → manual_source_creators",
             "manual_source_creators({requirement_id,size})",
-            "唯一非空 `excel_file_path`",
+            "成功响应必须返回非空达人列表",
             "任一步失败都停止后续业务 Tool",
-            "拓展达人不受当前流程阶段限制",
-            "新生成的 32 位 `data.id` 用于紧邻的一次拓展达人",
-            "不检查该需求是否历史检索过或其他流程是否完成",
+            "未启动 `search_creators` 时可直接拓展达人",
+            "一旦启动搜索，必须完整走完",
+            "新生成的 32 位 `data.id` 用于紧邻的一次调用",
             "Hook 校验原始 Brief、搜索/拓展达人的 `data.id` 与企微外发",
             "preview 不限制 Skill 读取或其他 Tool",
             "本地状态只按实际成功结果推进",
@@ -121,7 +121,7 @@ class SkillPackageContractTest(unittest.TestCase):
         for mapping in (
             "validate_requirement",
             "manual_source_creators({requirement_id,size})",
-            "唯一非空 `excel_file_path`",
+            "非空达人列表",
             "禁止发送 `inquiry_id`、`target_count`",
         ):
             self.assertIn(mapping, routing)
@@ -132,28 +132,28 @@ class SkillPackageContractTest(unittest.TestCase):
         ):
             self.assertNotIn(obsolete, routing)
 
-    def test_field_callback_is_separate_from_terminal_manual_export(self):
+    def test_field_callback_is_separate_from_manual_result_display(self):
         text = "\n".join((
             read(SKILL),
             read(REFERENCES / "form-field-mapping.md"),
             read(REFERENCES / "frontend-response.md"),
         ))
         for required in (
-            "等待它通过网页 callback 直接返回本次选择",
+            "等待用户本人在网页选择、确认和提交",
             "`create_with_distributions.columns`",
-            "Tool 返回后禁止再次打开或要求用户重开字段网页",
-            "`excel_file_path`",
-            "不再调用字段选择、`rank_creators`、`create_submission_batch`",
+            "成功、取消、超时或 callback 无效后也禁止再次打开",
+            "平台、达人ID、达人昵称、内容标签、主页链接",
+            "随后按本地状态直接排序",
         ):
             self.assertIn(required, text)
 
-    def test_manual_sourcing_result_uses_the_actual_provider_spreadsheet(self):
+    def test_manual_sourcing_result_lists_actual_provider_creators(self):
         text = read(REFERENCES / "frontend-response.md")
         for required in (
-            "唯一非空 `excel_file_path`",
-            "原样提供文件入口",
-            "不得伪造文件名、路径、下载链接、达人记录或 `inquiry_id(s)`",
-            "此 Tool 已完成表格导出",
+            "立即逐行展示 Markdown 表格",
+            "达人 ID 按平台取 `douyinId/xiaohongshuId`",
+            "缺失值写 `-`，不得编造",
+            "隐藏展示标记",
         ):
             self.assertIn(required, text)
 
@@ -167,8 +167,8 @@ class SkillPackageContractTest(unittest.TestCase):
             "allowed_actions",
             "state/confirmation_guard.json",
             "每次拓展达人前都重新解析完整 Brief 并调用 `validate_requirement`",
-            "不检查历史库是否检索过该需求，也不检查其他流程是否完成",
-            "原样提供文件入口并终止本链",
+            "搜索链一旦启动必须完整经过排序、用户网页选字段、确认发送和 sync",
+            "立即展示固定五列表格",
             "禁止盲重试",
         ):
             self.assertIn(required, text)
@@ -179,9 +179,9 @@ class SkillPackageContractTest(unittest.TestCase):
         for required in (
             "写结果未知",
             "只有实际 MCP 成功响应才是后续证据",
-            "实际成功响应返回唯一非空 `excel_file_path`",
-            "不得伪造路径、达人行或询价 ID",
-            "之后不调用字段选择、`rank_creators` 或 `create_submission_batch`",
+            "成功响应必须返回非空达人列表",
+            "不保存原始达人行",
+            "直接 `rank_creators` 并生成提报表",
             "禁止盲重试",
         ):
             self.assertIn(required, joined)
@@ -299,7 +299,7 @@ class SkillPackageContractTest(unittest.TestCase):
             "说明事实后仍需人决定",
             "同轮立即 Ask",
             "不得以问句、选项或邀请聊天回复结尾后停下",
-            "不再弹旧供给确认",
+            "机构回填确认",
             "用户自定义输入入口",
         ):
             self.assertIn(required, joined)
@@ -471,15 +471,15 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertNotIn("submissionDeadlineRaw", by_field)
         self.assertIn("ypmcn-brief-v1", by_field["rawMessagesJson"]["Comment"])
 
-    def test_manual_submission_export_is_owned_by_manual_source_creators(self):
+    def test_manual_submission_export_follows_ranking(self):
         assets = PACKAGE / "skills" / "media-assistant" / "assets"
         self.assertFalse((assets / "ypmcn_submission_template.csv").exists())
         workflow_text = "\n".join((read(SKILL), read(REFERENCES / "frontend-response.md")))
         self.assertIn("`manual_source_creators({requirement_id,size})`", workflow_text)
-        self.assertIn("不再调用字段选择、`rank_creators`、`create_submission_batch` 或宿主 `export_csv`", workflow_text)
-        self.assertIn("不得伪造文件名、路径、下载链接", workflow_text)
+        self.assertIn("rank_creators → create_submission_batch", workflow_text)
+        self.assertIn("不得编造", workflow_text)
         runtime_source = read(PACKAGE / "src" / "index.ts")
-        self.assertIn("Manual sourcing already exports the Provider spreadsheet", runtime_source)
+        self.assertIn("Immediately render every returned row as one Markdown table", runtime_source)
         wecom = (assets / "wecom_inquiry_template.txt").read_text(encoding="utf-8")
         for required in (
             "【{project_name}｜达人提报】",

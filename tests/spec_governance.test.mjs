@@ -91,7 +91,7 @@ describe("Spec governance", () => {
     ]);
     assert.equal(
       mediaAssistant.toolPolicy.phasePolicy.manual_source_creators,
-      "phase-independent-after-fresh-requirement-validation",
+      "direct-before-search-or-after-complete-mcn-flow-and-fresh-requirement-validation",
     );
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.fieldSelection, {
       resultSource: "actual fields returned by the select_inquiry_form_fields webpage callback",
@@ -113,6 +113,7 @@ describe("Spec governance", () => {
         "unresolved_required_or_semantically_ambiguous_business_value",
         "evidence_bound_business_branch",
         "irreversible_external_send",
+        "human_confirmation_of_mcn_return_completion",
         "non_deterministic_safe_recovery_choice",
       ],
       prohibitedPauses: [
@@ -162,6 +163,7 @@ describe("Spec governance", () => {
       "same_session_context_is_available_to_the_before_tool_hook",
       "fresh_requirement_id_receipt_is_consumed_by_this_call",
       "size_is_a_positive_integer_decimal_string",
+      "if_search_started_the_full_mcn_send_and_sync_flow_is_complete",
     ]);
     assert.deepEqual(mediaAssistant.toolPolicy.preconditions.search_creators, [
       "id_is_the_32_character_data_id_from_the_latest_same_session_successful_validation",

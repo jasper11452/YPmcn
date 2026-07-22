@@ -68,7 +68,7 @@ describe("current Endpoint contract loader", () => {
     assert.equal(workflow.stateAuthority.ledger.status, "schema-present-not-used-by-current-tools");
     assert.match(workflow.stateAuthority.currentProviderGaps.create_submission_batch, /not yet deployed/);
     assert.deepEqual(workflow.primaryFlow.sequence, [
-      "validate_requirement", "manual_source_creators",
+      "validate_requirement", "manual_source_creators", "rank_creators", "create_submission_batch",
     ]);
     assert.match(workflow.policies.rankCreatorsPrerequisite, /inquiry_ids.*sync_mcn_inquiry_status/i);
     const distributionTransitions = workflow.transitions.filter((item) =>
@@ -86,10 +86,10 @@ describe("current Endpoint contract loader", () => {
     );
     assert.equal(manualTransitions.length, 1);
     assert.equal(manualTransitions[0].from, "requirement_ready");
-    assert.match(workflow.policies.directFlowEntry, /any existing phase/);
-    assert.match(workflow.policies.manualSourcingPlacement, /do not require historical search/);
+    assert.match(workflow.policies.directFlowEntry, /before search_creators.*once search_creators starts/);
+    assert.match(workflow.policies.manualSourcingPlacement, /already-started search flow.*complete its entire MCN branch/);
     assert.match(workflow.policies.manualRequirementIdentity, /exactly one immediately following/);
-    assert.match(workflow.policies.manualSourcingEvidence, /excel_file_path/);
+    assert.match(workflow.policies.manualSourcingEvidence, /non-empty creator array.*display status/);
     assert.equal(Object.isFrozen(workflow), true);
     assert.equal(loadDatabaseContract().profile, "mvp-v2");
     assert.equal(loadErrorCatalog().profile, "mvp-v2");

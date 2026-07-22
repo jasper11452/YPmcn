@@ -12,11 +12,13 @@
     "prohibitedSubstitutes": ["fake-qdrant", "local-json-as-production-result"]
   },
   "primaryFlow": {
-    "id": "direct-manual-sourcing-spreadsheet",
+    "id": "manual-sourcing-rank-and-submission",
     "initialAction": "validate_requirement",
     "sequence": [
       "validate_requirement",
-      "manual_source_creators"
+      "manual_source_creators",
+      "rank_creators",
+      "create_submission_batch"
     ],
     "requiredUserInputs": ["requirement_brief", "size"],
     "failurePolicy": "stop-before-next-business-tool"
@@ -119,15 +121,17 @@
     "postValidationContinuation": "a successful validate_requirement result immediately continues to manual_source_creators when the current user intent is manual sourcing, including a concise continuation reply to an assistant offer to start manual sourcing; otherwise it continues to search_creators in the same turn",
     "postSearchContinuation": "require total_matched plus supply_assessment, record the consumed response contract, then immediately continue to rank_mcns in the same turn without a supply popup or a request to continue; legacy demand_count/eligible_creator_count/supply_ratio-only responses are invalid evidence",
     "mcnRace": "rank_mcns persists the inquiry association and returns the selected supplier set plus its (platform, kwUid)-deduplicated coverage union; after every successful rank, show one native post-race popup with demand count, selected MCN count, estimated coverage, multiplier, manual expansion count, and demand:manual ratio, including an explicit 0 and N:0 when supply is sufficient; never hardcode recommendation counts, milestones, or display IDs",
-    "directFlowEntry": "manual sourcing may be initiated from any existing phase and does not require field selection because the Provider returns its spreadsheet directly",
-    "manualSourcingPlacement": "from any existing phase, run validate_requirement for this call and make manual_source_creators the next business Tool with exactly its newly returned 32-character data.id and a positive integer decimal string size; do not require historical search or another workflow completion",
+    "directFlowEntry": "manual sourcing may start directly before search_creators; once search_creators starts, rank_mcns, the user-operated field selector, confirmed WeCom distribution, and send-bound sync are mandatory before manual sourcing",
+    "manualSourcingPlacement": "run validate_requirement immediately before manual_source_creators with its fresh 32-character data.id and positive size; an already-started search flow must first complete its entire MCN branch",
     "manualRequirementIdentity": "one successful validate_requirement response binds its fresh 32-character data.id to exactly one immediately following manual_source_creators call; numeric data.demand_id and demand_version are never Tool IDs, a local format correction reuses the existing validation response, and the plugin-owned one-time handoff receipt provides the fallback when before_tool_call has no host session context",
     "searchRequirementIdentity": "search_creators.id is the 32-character data.id from the latest successful validation; numeric data.demand_id and demand_version are rejected locally and corrected from the existing response without creating another demand",
     "briefIntegrity": "validate_requirement rawMessagesJson.originalBrief equals an exact real client Brief recovered from the current conversation after host-envelope stripping; AskUserQuestion and Tool JSON do not replace it, retry markers and platform-specific reconstructions are rejected, and independently validated platform payloads retain the same complete multi-platform originalBrief",
     "selectedSupplierBinding": "create_with_distributions supplierIds must equal the supplier set bound to the latest selected-supplier coverage calculation; any set change requires recalculation",
-    "manualSourcingEvidence": "complete only when the successful manual_source_creators response supplies one actual non-empty excel_file_path for the current requirement and size",
-    "rankCreatorsPrerequisite": "the separate MCN inquiry-recovery chain succeeded and rank_creators receives the exact inquiry_ids returned by sync_mcn_inquiry_status",
-    "submissionExport": "manual_source_creators already returns the spreadsheet for direct manual sourcing; create_submission_batch is not part of that flow"
+    "manualSourcingEvidence": "a successful manual_source_creators response supplies a non-empty creator array; local state records the batch fingerprint, fixed fields, received status, and separately observed Markdown-list display status without storing raw creator rows",
+    "rankCreatorsPrerequisite": "manual creator data is received; without verified WeCom send use inquiry_ids=[], while a verified send requires its later sync_mcn_inquiry_status result plus explicit human confirmation that MCN return is complete before combined ranking",
+    "mcnReturnConfirmation": "inquiry IDs and sync success never prove return completion; a native 机构回填确认 popup and the exact 确认已完成回填 answer are required",
+    "syncCallOrder": "sync_mcn_inquiry_status is blocked unless matching create_with_distributions sent evidence exists first, and local state records blocked, authorized, and completed ordering statuses",
+    "submissionExport": "every successful manual creator flow continues through rank_creators and create_submission_batch"
   },
   "transitions": [
     {
@@ -184,8 +188,8 @@
       "id": "direct-manual-sourcing-ready",
       "from": "requirement_ready",
       "trigger": {"type": "tool", "name": "manual_source_creators"},
-      "guards": ["the immediately preceding successful validate_requirement returned this fresh 32-character data.id", "the plugin-owned one-time fresh requirement receipt is consumed by this call", "missing before_tool session context uses the plugin-owned global handoff receipt", "size is a positive integer decimal string", "no phase, historical search, or other workflow-completion gate is applied"],
-      "evidence": ["successful manual response with one actual non-empty excel_file_path"],
+      "guards": ["the immediately preceding successful validate_requirement returned this fresh 32-character data.id", "the plugin-owned one-time fresh requirement receipt is consumed by this call", "size is a positive integer decimal string", "if search_creators started, its MCN selection, user field callback, WeCom send, and sync sequence is complete"],
+      "evidence": ["successful manual response with a non-empty fixed-field creator list", "received and displayed statuses are recorded separately"],
       "nextPhase": "candidate_pool_enriched"
     },
     {
@@ -210,7 +214,7 @@
       "id": "recommendation-ready",
       "from": "candidate_pool_enriched",
       "trigger": {"type": "tool", "name": "rank_creators"},
-      "guards": ["inquiry_ids exactly match the successful sync_mcn_inquiry_status response", "requirement_id matches the current MCN inquiry-recovery flow"],
+      "guards": ["manual creator data was received", "without WeCom send inquiry_ids is empty", "with WeCom send inquiry_ids exactly match sync_mcn_inquiry_status and a human confirmed MCN return completion", "requirement_id matches the current manual flow"],
       "evidence": ["successful filtered and deduplicated persisted ranking result"],
       "nextPhase": "recommendation_ready"
     },
