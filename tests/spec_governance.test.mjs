@@ -106,6 +106,8 @@ describe("Spec governance", () => {
     });
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.humanInTheLoop, {
       conversationInputSurface: "native-AskUserQuestion-only",
+      askBeforeHumanDecisionPause: true,
+      hostProvidedCustomInputPerPopup: true,
       toolOwnedInteractiveSurface: "select_inquiry_form_fields webpage callback without a redundant chat confirmation",
       askTriggers: [
         "unresolved_required_or_semantically_ambiguous_business_value",

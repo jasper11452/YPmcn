@@ -715,12 +715,12 @@
         },
         "size": {
           "type": "string",
-          "description": "本次手扒数量，使用正整数十进制字符串"
+          "description": "本次拓展达人数量，使用正整数十进制字符串"
         }
       },
       "forbidden": [],
       "agentSemanticRequirements": {
-        "requirement_id": "must be the 32-character hexadecimal data.id returned by the immediately preceding successful validate_requirement call, exactly match its same-session receipt, and authorize only this one manual_source_creators invocation; numeric data.demand_id is forbidden",
+        "requirement_id": "must be the 32-character hexadecimal data.id returned by the immediately preceding successful validate_requirement call, exactly match the plugin-owned fresh receipt, and authorize only this one manual_source_creators invocation; numeric data.demand_id is forbidden",
         "eligibility": "independent of current workflow phase, historical creator search, and completion of other workflow steps"
       },
       "sideEffects": "business-write",
@@ -808,7 +808,7 @@
         },
         "size": {
           "type": "string",
-          "description": "导出数量，必须与本轮手扒 size 一致"
+          "description": "导出数量，必须与本轮拓展达人 size 一致"
         },
         "number": {
           "type": "string",

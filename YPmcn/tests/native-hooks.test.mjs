@@ -155,16 +155,16 @@ const preRaceSupply = (overrides = {}) => {
 const supplyQuestion = {
   questions: [{
     header: "供给确认",
-    question: "需求达人数量：5\n刊例资源达人数量：6\n刊例资源倍率：1.2 倍\n赛前风险：高危\n强烈建议先扩充机构或预手扒到至少 20 倍。\n\n请选择执行方案。",
-    options: ["先扩充机构或预手扒", "仍继续MCN赛马"],
+    question: "需求达人数量：5\n刊例资源达人数量：6\n刊例资源倍率：1.2 倍\n赛前风险：高危\n强烈建议先扩充机构或预拓展达人到至少 20 倍。\n\n请选择执行方案。",
+    options: ["先扩充机构或预拓展达人", "仍继续MCN赛马"],
   }],
 };
 
 const postRaceQuestion = {
   questions: [{
     header: "赛后补量",
-    question: "需求达人数量：5\n已选机构：测试MCN 1、测试MCN 2\n覆盖去重并集：96\n已选机构倍率：19.2 倍\n赛后风险：高危\n精确手扒建议数量：4\n\n请选择执行方案。",
-    options: ["一键发起手扒补量", "追加机构后重新计算", "暂不补量，继续询价"],
+    question: "需求达人数量：5\n已选机构：测试MCN 1、测试MCN 2\n覆盖去重并集：96\n已选机构倍率：19.2 倍\n赛后风险：高危\n精确拓展达人建议数量：4\n\n请选择执行方案。",
+    options: ["一键发起拓展达人补量", "追加机构后重新计算", "暂不补量，继续询价"],
   }],
 };
 
@@ -256,6 +256,8 @@ describe("YP Action native hooks", () => {
     assert.match(YPMCN_FAST_PATH, /Only a native AskUserQuestion call may request conversational user input/);
     assert.match(YPMCN_FAST_PATH, /must never ask “是否继续”, “要怎么推进”/);
     assert.match(YPMCN_FAST_PATH, /submitted AskUserQuestion answer is an executable command/);
+    assert.match(YPMCN_FAST_PATH, /Before any nonterminal workflow stop or pause that still requires a human decision/);
+    assert.match(YPMCN_FAST_PATH, /host-provided custom-input entry/);
     assert.match(YPMCN_FAST_PATH, /waiting_for="user" means invoke the named native AskUserQuestion gate immediately/);
     assert.match(YPMCN_FAST_PATH, /confirm_pre_race_supply -> header “供给确认”/);
     assert.match(YPMCN_FAST_PATH, /confirm_mcn_selection -> header “MCN确认”/);
@@ -438,23 +440,20 @@ describe("YP Action native hooks", () => {
     ), undefined);
   });
 
-  it("reports host integration failure for asymmetric manual hook context and stops revalidation", async () => {
-    const freshId = requirementId(42);
+  it("uses the plugin-owned one-time receipt when before_tool_call omits session context", async () => {
+    const freshId = "8cb51faafd0b4e01b54cb4dbee1aa64f";
     await recordFreshRequirement(freshId, DEFAULT_CONTEXT);
     const event = {
       toolName: "mcp__ypmcn__manual_source_creators",
-      params: { requirement_id: freshId, size: "3" },
+      params: { requirement_id: freshId, size: "10" },
       toolCallId: "call-asymmetric-manual",
     };
-    const blocked = await hooks.get("before_tool_call")(event, {});
-    assert.equal(blocked.errorCode, "INTEGRATION_REQUIRED");
-    assert.match(blocked.blockReason, /do not call validate_requirement again/);
-    await hooks.get("after_tool_call")({ ...event, error: blocked.blockReason }, DEFAULT_CONTEXT);
-    const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.workflow.phase, "blocked");
-    assert.equal(state.workflow.next_action, "await_host_upgrade");
-    assert.equal(state.workflow.waiting_for, "integration");
-    assert.equal(state.manual_sourcing_requirement_receipt.status, "expired");
+    assert.equal(await hooks.get("before_tool_call")(event, {}), undefined);
+    const replay = await hooks.get("before_tool_call")({ ...event, toolCallId: "call-asymmetric-replay" }, {});
+    assert.equal(replay.errorCode, "INVALID_PHASE");
+
+    const globalState = JSON.parse(readFileSync(join(tempDir, "state", "confirmation_guard.json"), "utf8"));
+    assert.equal(globalState.manual_sourcing_requirement_receipt.status, "consumed");
   });
 
   it("blocks only provider send bypasses through shell", async () => {
@@ -1012,7 +1011,7 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.pending_manual_target_count, undefined);
     assert.equal(state.workflow.waiting_for, "user");
 
-    await answerPostRace("一键发起手扒补量");
+    await answerPostRace("一键发起拓展达人补量");
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.next_action, "manual_source_creators");
     assert.equal(state.workflow.pending_manual_target_count, 4);
@@ -1117,7 +1116,7 @@ describe("YP Action native hooks", () => {
   it("routes an explicit continuation to manual sourcing after validation", async () => {
     await hooks.get("before_prompt_build")({
       prompt: "继续",
-      messages: [{ role: "assistant", content: "需要我继续走手扒流程吗？" }],
+      messages: [{ role: "assistant", content: "需要我继续走拓展达人流程吗？" }],
     }, DEFAULT_CONTEXT);
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.post_validation_intent, "manual");
@@ -1244,7 +1243,7 @@ describe("YP Action native hooks", () => {
     await recordHighRiskSupply();
     await answerSupply("仍继续MCN赛马");
     await recordRankForManual();
-    await answerPostRace("一键发起手扒补量");
+    await answerPostRace("一键发起拓展达人补量");
     await recordTool(
       "mcp__ypmcn__manual_source_creators",
       { requirement_id: requirementId(2), target_count: 4 },
@@ -1260,7 +1259,7 @@ describe("YP Action native hooks", () => {
     await recordHighRiskSupply();
     await answerSupply("仍继续MCN赛马");
     await recordRankForManual();
-    await answerPostRace("一键发起手扒补量");
+    await answerPostRace("一键发起拓展达人补量");
     await recordTool(
       "mcp__ypmcn__manual_source_creators",
       { requirement_id: requirementId(2), target_count: 4 },
@@ -1287,7 +1286,7 @@ describe("YP Action native hooks", () => {
     await recordHighRiskSupply();
     await answerSupply("仍继续MCN赛马");
     await recordRankForManual();
-    await answerPostRace("一键发起手扒补量");
+    await answerPostRace("一键发起拓展达人补量");
     await hooks.get("after_tool_call")({
       toolName: "mcp__ypmcn__manual_source_creators",
       params: { requirement_id: requirementId(2), target_count: 4 },
@@ -1301,7 +1300,7 @@ describe("YP Action native hooks", () => {
 
   it("maps pre-race pause and post-race recalculate or skip without guessing a target", async () => {
     await recordHighRiskSupply();
-    await answerSupply("先扩充机构或预手扒");
+    await answerSupply("先扩充机构或预拓展达人");
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.next_action, "await_pre_race_supply_expansion");
     assert.equal(state.workflow.pending_manual_target_count, undefined);
