@@ -14,6 +14,7 @@ description: "Use for YPmcn requirement parsing and phase-independent manual cre
 - 标准检索链中，`search_creators` 成功后同轮直接调用 `rank_mcns`，中间不弹供给确认、不询问是否继续。排序成功后才弹“赛后补量”：始终展示需求人数、已选机构数、预估机构达人去重覆盖量、供需倍数、建议手动拓展人数，以及“机构承接达人:手动拓展达人”比例；手动拓展为 `0` 时也必须显示（例如 `2:0`），并且不得发起零人拓展。响应含真实累计覆盖里程碑时，同时展示前 N 家可达到的实际供需倍数，禁止虚构。
 - 字段选择网页只允许用户操作。每轮 MCN 流程最多调用一次 `select_inquiry_form_fields`，调用后等待用户在网页选择并提交；禁止代选、预选、推断或提交字段，也禁止在等待、成功、取消、超时或无效 callback 后重复打开网页。
 - `sync_mcn_inquiry_status` 只证明询价同步结果，绝不证明企微已发送。只有本轮 `create_with_distributions` 实际成功响应逐机构返回明确 `sent` 明细，才可记录或报告对应机构已发送；通用成功、sync 返回值、请求名单或阶段推断均不得冒充企微发送证据。
+- 每次 `create_with_distributions` 实际发送前（包括逐机构 fallback）都必须弹出原生“企微外发确认”，且仅在用户对完全相同参数明确选择“确认发送”后执行。状态机必须依次记录 `popup_required/approved/in_flight/consumed`；没有匹配的“已弹窗且已确认”回执时，即使收到 after-tool 成功结果也不得记为企微发送成功。
 - 多平台按原文顺序拆单；共用 Ask，不问先后或中途停。
 - Endpoint schema 优先，并与根 `spec/manifest.json` 指向的正式契约核对；必需 Tool 缺失、契约冲突或证据不足即 `integration_required`，不得回退旧参数。
 - 每次调用前先读 `references/tools/<tool>.json`，只传其中字段；只有实际 MCP 成功响应才是后续证据。

@@ -119,6 +119,17 @@ async function answerExternalConfirmation(prepared, answer = "确认发送") {
   }, prepared.context);
 }
 
+async function confirmPendingSend(params, toolCallId, context = DEFAULT_CONTEXT) {
+  const result = await guard("mcp__ypmcn__create_with_distributions", params, toolCallId, context);
+  const prepared = { askInput: askInputFrom(result), params, toolCallId, context };
+  await answerExternalConfirmation(prepared);
+  assert.equal(
+    await guard("mcp__ypmcn__create_with_distributions", params, toolCallId, context),
+    undefined,
+  );
+  return prepared;
+}
+
 async function recordTool(toolName, params, result, context = DEFAULT_CONTEXT, toolCallId) {
   await hooks.get("after_tool_call")({ toolName, params, result, toolCallId }, context);
 }
@@ -328,9 +339,23 @@ describe("YP Action native hooks", () => {
 
     const activeRequirement = requirementId(31);
     await recordFreshRequirement(activeRequirement);
+    const sendParams = { requirement_id: activeRequirement, supplierIds: ["supplier-31"] };
+    const preparedSend = await requestConfirmation(
+      sendParams,
+      DEFAULT_CONTEXT,
+      "call-rank-warning-send",
+      ["测试MCN 31"],
+    );
+    await answerExternalConfirmation(preparedSend);
+    const sendExecutionId = "call-rank-warning-send-execute";
+    assert.equal(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      sendParams,
+      sendExecutionId,
+    ), undefined);
     await recordTool(
       "mcp__ypmcn__create_with_distributions",
-      { requirement_id: activeRequirement, supplierIds: ["supplier-31"] },
+      sendParams,
       {
         success: true,
         data: {
@@ -338,7 +363,7 @@ describe("YP Action native hooks", () => {
           created: [{ supplier_id: "supplier-31", notification_status: "sent" }],
         },
         error: null,
-      },
+      }, DEFAULT_CONTEXT, sendExecutionId,
     );
     assert.equal(await guard("mcp__ypmcn__sync_mcn_inquiry_status", {
       requirement_id: activeRequirement,
@@ -521,11 +546,17 @@ describe("YP Action native hooks", () => {
     let receipt = state.confirmations[state.latest_external_confirmation_id];
     assert.equal(receipt.status, "pending");
     assert.equal(receipt.confirmation_mode, "ask_user_question");
+    assert.equal(state.workflow.wecom_confirmation_status, "popup_required");
+    assert.equal(state.workflow.wecom_confirmation_user_prompted, false);
+    assert.equal(state.workflow.wecom_confirmation_user_approved, false);
 
     await answerExternalConfirmation(prepared);
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     receipt = state.confirmations[state.latest_external_confirmation_id];
     assert.equal(receipt.status, "approved");
+    assert.equal(state.workflow.wecom_confirmation_status, "approved");
+    assert.equal(state.workflow.wecom_confirmation_user_prompted, true);
+    assert.equal(state.workflow.wecom_confirmation_user_approved, true);
 
     const executionToolCallId = "call-send-execute";
     assert.equal(await guard(
@@ -537,6 +568,7 @@ describe("YP Action native hooks", () => {
     receipt = state.confirmations[state.latest_external_confirmation_id];
     assert.equal(receipt.status, "in_flight");
     assert.equal(receipt.tool_call_id, executionToolCallId);
+    assert.equal(state.workflow.wecom_confirmation_status, "in_flight");
 
     await recordTool(
       "mcp__ypmcn__create_with_distributions",
@@ -557,6 +589,9 @@ describe("YP Action native hooks", () => {
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "consumed");
+    assert.equal(state.workflow.wecom_confirmation_status, "consumed");
+    assert.equal(state.workflow.wecom_confirmation_user_prompted, true);
+    assert.equal(state.workflow.wecom_confirmation_user_approved, true);
     assert.equal(state.workflow.phase, "waiting_mcn_return");
     assert.equal(state.workflow.distribution_outcome_status, "all_sent");
     assert.equal(state.workflow.sent_supplier_count, 2);
@@ -564,6 +599,32 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.distribution_send_evidence_status, "valid");
     assert.equal(state.workflow.distribution_send_evidence_tool, "create_with_distributions");
     assert.equal(state.workflow.distribution_sent_detail_count, 2);
+  });
+
+  it("refuses to record a successful send result without a matching final popup confirmation", async () => {
+    const params = distributionParams({ requirement_id: requirementId(91) });
+    await recordTool(
+      "mcp__ypmcn__create_with_distributions",
+      params,
+      {
+        success: true,
+        data: {
+          project_id: "project-unconfirmed",
+          created: [{ supplier_id: "supplier-1", notification_status: "sent" }],
+        },
+        error: null,
+      },
+      DEFAULT_CONTEXT,
+      "call-unconfirmed-send",
+    );
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.last_tool_status, "failed");
+    assert.equal(state.workflow.wecom_confirmation_status, "missing");
+    assert.equal(state.workflow.wecom_confirmation_user_prompted, false);
+    assert.equal(state.workflow.wecom_confirmation_user_approved, false);
+    assert.equal(state.workflow.distribution_outcome_error, "missing_matching_user_confirmation_receipt");
+    assert.equal(state.workflow.sent_supplier_count, undefined);
+    assert.equal(state.workflow.distribution_send_evidence_status, "invalid");
   });
 
   it("never treats sync output as WeCom send evidence or advances without send details", async () => {
@@ -711,8 +772,9 @@ describe("YP Action native hooks", () => {
 
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
     const continuation = state.confirmations[state.latest_external_confirmation_id];
-    assert.equal(continuation.confirmation_mode, "individual_fallback_continuation");
-    assert.equal(continuation.status, "approved");
+    assert.equal(continuation.confirmation_mode, "ask_user_question");
+    assert.equal(continuation.status, "pending");
+    assert.equal(state.workflow.wecom_confirmation_status, "popup_required");
     assert.equal(state.workflow.distribution_outcome_status, "fallback_in_progress");
     assert.equal(state.workflow.next_action, "fallback_send_next_individual_mcn");
     assert.equal(state.workflow.waiting_for, null);
@@ -729,11 +791,7 @@ describe("YP Action native hooks", () => {
     for (const supplierId of supplierIds.filter((id) => id !== "supplier-3")) {
       const retryParams = { ...prepared.params, supplierIds: [supplierId] };
       const retryExecutionId = `call-individual-${supplierId}`;
-      assert.equal(await guard(
-        "mcp__ypmcn__create_with_distributions",
-        retryParams,
-        retryExecutionId,
-      ), undefined);
+      await confirmPendingSend(retryParams, retryExecutionId);
       await recordTool(
         "mcp__ypmcn__create_with_distributions",
         retryParams,
@@ -816,11 +874,7 @@ describe("YP Action native hooks", () => {
     for (let index = 0; index < supplierIds.length; index += 1) {
       const params = { ...prepared.params, supplierIds: [supplierIds[index]] };
       const executionId = `call-individual-fallback-${index + 1}`;
-      assert.equal(await guard(
-        "mcp__ypmcn__create_with_distributions",
-        params,
-        executionId,
-      ), undefined);
+      await confirmPendingSend(params, executionId);
       await recordTool(
         "mcp__ypmcn__create_with_distributions",
         params,

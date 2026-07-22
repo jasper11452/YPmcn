@@ -1250,6 +1250,9 @@ function clearDistributionSendEvidence(workflow: Json): void {
     "distribution_outcome_status", "distribution_outcome_error", "distribution_send_evidence_status",
     "distribution_send_evidence_tool", "distribution_sent_detail_count", "sync_inquiry_ids",
     "inquiry_sync_evidence_status", "inquiry_sync_evidence_error",
+    "wecom_confirmation_id", "wecom_confirmation_status", "wecom_confirmation_mode",
+    "wecom_confirmation_request_sha256", "wecom_confirmation_user_prompted",
+    "wecom_confirmation_user_approved", "wecom_confirmation_updated_at_ms",
   ]) delete workflow[key];
 }
 
@@ -1378,6 +1381,7 @@ function updateLocalWorkflow(
   input: Json,
   rootDir: string,
   preflightDenial?: PreflightDenialReason,
+  externalSendConfirmed = false,
 ): void {
   const stateChangingTools = new Set([
     "validate_requirement", "search_creators", "rank_mcns", "select_inquiry_form_fields",
@@ -1479,7 +1483,9 @@ function updateLocalWorkflow(
     (tool !== "rank_mcns" || rankEvidence !== undefined) &&
     (tool !== "manual_source_creators" || manualEvidence !== undefined) &&
     (tool !== "sync_mcn_inquiry_status" || syncBoundToSendEvidence) &&
-    (tool !== "create_with_distributions" || distributionEvidence !== undefined) &&
+    (tool !== "create_with_distributions" || (
+      externalSendConfirmed && distributionEvidence !== undefined
+    )) &&
     (tool !== "rank_creators" || creatorRankEvidence !== undefined) &&
     (tool !== "create_submission_batch" || exportEvidence !== undefined);
   const writeTool = tool !== "select_inquiry_form_fields";
@@ -1657,6 +1663,12 @@ function updateLocalWorkflow(
         "distribution_send_evidence_tool", "distribution_sent_detail_count",
       ]) delete workflow[key];
       workflow.distribution_send_evidence_status = "invalid";
+      if (!externalSendConfirmed) {
+        workflow.distribution_outcome_error = "missing_matching_user_confirmation_receipt";
+        workflow.wecom_confirmation_status = "missing";
+        workflow.wecom_confirmation_user_prompted = false;
+        workflow.wecom_confirmation_user_approved = false;
+      }
     }
     if (tool === "sync_mcn_inquiry_status") {
       workflow.inquiry_sync_evidence_status = envelopeOk ? "invalid" : "unavailable";
@@ -2010,6 +2022,22 @@ function confirmationRequiredResult(askInput: Json): Json {
   };
 }
 
+function projectExternalConfirmation(
+  current: GuardStore,
+  id: string,
+  receipt: Json,
+  status: string,
+): void {
+  const workflow = current.data.workflow as Json;
+  workflow.wecom_confirmation_id = id;
+  workflow.wecom_confirmation_status = status;
+  workflow.wecom_confirmation_mode = receipt.confirmation_mode;
+  workflow.wecom_confirmation_request_sha256 = receipt.request_fingerprint;
+  workflow.wecom_confirmation_user_prompted = receipt.user_prompted === true;
+  workflow.wecom_confirmation_user_approved = receipt.user_confirmed === true;
+  workflow.wecom_confirmation_updated_at_ms = Date.now();
+}
+
 function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
   const requestFingerprint = fingerprint(input);
   const current = store(rootDir);
@@ -2033,7 +2061,8 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
 
   const approved = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
     receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
-    receipt.status === "approved" && receipt.request_fingerprint === requestFingerprint
+    receipt.status === "approved" && receipt.request_fingerprint === requestFingerprint &&
+    receipt.user_prompted === true && receipt.user_confirmed === true
   );
   if (approved) {
     const [id, receipt] = approved;
@@ -2042,6 +2071,7 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
     receipt.updated_at_ms = Date.now();
     current.data.confirmations[id] = receipt;
     current.data.latest_external_confirmation_id = id;
+    projectExternalConfirmation(current, id, receipt, "in_flight");
     save(current.path, current.data);
     return undefined;
   }
@@ -2102,11 +2132,14 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
     ask_input_fingerprint: fingerprint(askInput),
     safe_summary: summary,
     status: "pending" satisfies ConfirmationStatus,
+    user_prompted: false,
+    user_confirmed: false,
     created_at_ms: now,
     updated_at_ms: now,
     expires_at_ms: now + CONFIRMATION_TTL_MS,
   };
   current.data.latest_external_confirmation_id = id;
+  projectExternalConfirmation(current, id, current.data.confirmations[id], "popup_required");
   save(current.path, current.data);
   return confirmationRequiredResult(askInput);
 }
@@ -2158,7 +2191,7 @@ export function guardWorkflowTool(
   return undefined;
 }
 
-function recordExternalSendResult(event: Json, input: Json, rootDir: string): void {
+function recordExternalSendResult(event: Json, input: Json, rootDir: string): boolean {
   const current = store(rootDir);
   const requestFingerprint = fingerprint(input);
   const afterToolCallId = text(event.toolCallId)
@@ -2175,8 +2208,9 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): vo
     if (afterToolCallId && text(receipt.tool_call_id)) return receipt.tool_call_id === afterToolCallId;
     return true;
   });
-  if (!inFlight) return;
+  if (!inFlight) return false;
   const [id, receipt] = inFlight;
+  if (receipt.user_prompted !== true || receipt.user_confirmed !== true) return false;
   const now = Date.now();
   const unboundRejection = distributionUnboundRejectionEvidence(
     event,
@@ -2190,13 +2224,18 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): vo
     for (const supplierId of unboundRejection.remainingSupplierIds) {
       const retryInput = { ...input, supplierIds: [supplierId] };
       const retryId = randomUUID();
+      const safeSummary = createSummary(retryInput, current.data.workflow as Json);
+      const askInput = externalSendAskInput(retryInput, safeSummary);
       current.data.confirmations[retryId] = {
         kind: "external_send",
-        confirmation_mode: "individual_fallback_continuation",
+        confirmation_mode: "ask_user_question",
         request_fingerprint: fingerprint(retryInput),
         input_fingerprint: fingerprint(retryInput),
-        safe_summary: createSummary(retryInput, current.data.workflow as Json),
-        status: "approved" satisfies ConfirmationStatus,
+        ask_input_fingerprint: fingerprint(askInput),
+        safe_summary: safeSummary,
+        status: "pending" satisfies ConfirmationStatus,
+        user_prompted: false,
+        user_confirmed: false,
         parent_confirmation_id: id,
         excluded_supplier_count: unboundRejection.unboundCount,
         created_at_ms: now,
@@ -2204,6 +2243,7 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): vo
         expires_at_ms: receipt.expires_at_ms,
       };
       current.data.latest_external_confirmation_id = retryId;
+      projectExternalConfirmation(current, retryId, current.data.confirmations[retryId], "popup_required");
     }
   } else if (batchFallback) {
     receipt.status = "consumed" satisfies ConfirmationStatus;
@@ -2211,19 +2251,25 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): vo
     for (const supplierId of batchFallback.supplierIds) {
       const fallbackInput = { ...input, supplierIds: [supplierId] };
       const fallbackId = randomUUID();
+      const safeSummary = createSummary(fallbackInput, current.data.workflow as Json);
+      const askInput = externalSendAskInput(fallbackInput, safeSummary);
       current.data.confirmations[fallbackId] = {
         kind: "external_send",
-        confirmation_mode: "individual_fallback_continuation",
+        confirmation_mode: "ask_user_question",
         request_fingerprint: fingerprint(fallbackInput),
         input_fingerprint: fingerprint(fallbackInput),
-        safe_summary: createSummary(fallbackInput, current.data.workflow as Json),
-        status: "approved" satisfies ConfirmationStatus,
+        ask_input_fingerprint: fingerprint(askInput),
+        safe_summary: safeSummary,
+        status: "pending" satisfies ConfirmationStatus,
+        user_prompted: false,
+        user_confirmed: false,
         parent_confirmation_id: id,
         created_at_ms: now,
         updated_at_ms: now,
         expires_at_ms: receipt.expires_at_ms,
       };
       current.data.latest_external_confirmation_id = fallbackId;
+      projectExternalConfirmation(current, fallbackId, current.data.confirmations[fallbackId], "popup_required");
     }
   } else if (!event.error && definiteFailureEnvelope(event.result) && !hasDistributionWriteEvidence(event.result)) {
     receipt.status = "consumed" satisfies ConfirmationStatus;
@@ -2234,7 +2280,16 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): vo
   receipt.updated_at_ms = now;
   delete receipt.tool_call_id;
   current.data.confirmations[id] = receipt;
+  const latestIdValue = current.data.latest_external_confirmation_id;
+  const latestId = text(latestIdValue) ? latestIdValue.trim() : undefined;
+  const latestReceipt = latestId ? current.data.confirmations[latestId] as Json | undefined : undefined;
+  if ((unboundRejection || batchFallback) && latestId && latestReceipt?.status === "pending") {
+    projectExternalConfirmation(current, latestId, latestReceipt, "popup_required");
+  } else {
+    projectExternalConfirmation(current, id, receipt, receipt.status);
+  }
   save(current.path, current.data);
+  return true;
 }
 
 function recordExternalSendDecision(event: Json, input: Json, rootDir: string): void {
@@ -2282,12 +2337,16 @@ function recordExternalSendDecision(event: Json, input: Json, rootDir: string): 
   if (!matched) return;
 
   const { pending: [id, receipt], answer } = matched;
+  receipt.user_prompted = true;
+  receipt.user_confirmed = !event.error && event.result?.isError !== true &&
+    answer === EXTERNAL_SEND_CONFIRM_LABEL;
   receipt.status = !event.error && event.result?.isError !== true && answer === EXTERNAL_SEND_CONFIRM_LABEL
     ? "approved" satisfies ConfirmationStatus
     : "denied" satisfies ConfirmationStatus;
   receipt.resolution = answer ?? "denied";
   receipt.updated_at_ms = Date.now();
   current.data.confirmations[id] = receipt;
+  projectExternalConfirmation(current, id, receipt, receipt.status);
   save(current.path, current.data);
 }
 
@@ -2305,7 +2364,9 @@ export function recordWorkflowToolResult(
   }
   if (!tool) return;
   const preflightDenial = takePreflightDenial(event, tool, input);
-  if (tool === "create_with_distributions") recordExternalSendResult(event, input, rootDir);
-  updateLocalWorkflow(event, tool, input, rootDir, preflightDenial);
+  const externalSendConfirmed = tool === "create_with_distributions"
+    ? recordExternalSendResult(event, input, rootDir)
+    : false;
+  updateLocalWorkflow(event, tool, input, rootDir, preflightDenial, externalSendConfirmed);
   recordRequirementReceipts(event, tool, rootDir, preflightDenial);
 }

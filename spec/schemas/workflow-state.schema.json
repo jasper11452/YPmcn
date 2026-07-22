@@ -78,6 +78,15 @@
       }
     },
     "field_selection_columns_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "wecom_confirmation_id": {"type": "string", "minLength": 1},
+    "wecom_confirmation_status": {
+      "enum": ["popup_required", "approved", "denied", "in_flight", "consumed", "unknown", "missing"]
+    },
+    "wecom_confirmation_mode": {"type": "string", "minLength": 1},
+    "wecom_confirmation_request_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "wecom_confirmation_user_prompted": {"type": "boolean"},
+    "wecom_confirmation_user_approved": {"type": "boolean"},
+    "wecom_confirmation_updated_at_ms": {"type": "integer", "minimum": 0},
     "rank_creators_evidence_status": {"enum": ["valid", "invalid", "unavailable"]},
     "submission_batch_evidence_status": {"enum": ["valid", "invalid", "unavailable"]},
     "submission_batch_number": {"type": "string", "pattern": "^[1-9][0-9]*$"},
