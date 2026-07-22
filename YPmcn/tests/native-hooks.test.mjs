@@ -253,10 +253,19 @@ describe("YP Action native hooks", () => {
     assert.match(YPMCN_FAST_PATH, /Douyin bands are <18, 18–23, 24–30, 31–40, 41–50, and 50\+/);
     assert.match(YPMCN_FAST_PATH, /hasOrganization, hasOrder30day, and hasSocial30day are direct JSON booleans/);
     assert.match(YPMCN_FAST_PATH, /skills\/media-assistant\/references\/reference_schema\.json/);
+    assert.match(YPMCN_FAST_PATH, /Only a native AskUserQuestion call may request conversational user input/);
+    assert.match(YPMCN_FAST_PATH, /must never ask “是否继续”, “要怎么推进”/);
+    assert.match(YPMCN_FAST_PATH, /submitted AskUserQuestion answer is an executable command/);
+    assert.match(YPMCN_FAST_PATH, /waiting_for="user" means invoke the named native AskUserQuestion gate immediately/);
+    assert.match(YPMCN_FAST_PATH, /confirm_pre_race_supply -> header “供给确认”/);
+    assert.match(YPMCN_FAST_PATH, /confirm_mcn_selection -> header “MCN确认”/);
+    assert.match(YPMCN_FAST_PATH, /never print these as a prose menu/);
+    assert.match(YPMCN_FAST_PATH, /Brief with both supported platforms is not a platform ambiguity/);
     assert.doesNotMatch(YPMCN_FAST_PATH, /schema\/CSV|customer_demands (?:reference )?CSV/);
     assert.doesNotMatch(YPMCN_FAST_PATH, /max\(quantityTotal-actual count,0\)/);
     assert.match(prompt.prependContext, /authoritative local orchestration state/);
     assert.match(prompt.prependContext, /"next_action":"validate_requirement"/);
+    assert.match(prompt.prependContext, /waiting_for=user requires an immediate native AskUserQuestion gate/);
     assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 19);
 
     for (const [toolName, params] of [
@@ -1039,7 +1048,7 @@ describe("YP Action native hooks", () => {
     assert.ok(state.workflow_events.length >= 5);
   });
 
-  it("parses current search supply evidence, accepts one-release legacy evidence, and rejects conflicts", async () => {
+  it("parses current search supply evidence and rejects the retired legacy-only shape", async () => {
     for (const [candidateCount, expectedRisk] of [[500, "safe"], [63, "high_risk"]]) {
       rmSync(join(tempDir, "state"), { recursive: true, force: true });
       await recordTool(
@@ -1075,7 +1084,9 @@ describe("YP Action native hooks", () => {
       { success: true, data: { demand_count: 10, eligible_creator_count: 300, supply_ratio: 30 }, error: null },
     );
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.workflow.pre_race_supply_contract, "legacy-v1");
+    assert.equal(state.workflow.pre_race_supply_status, "invalid");
+    assert.equal(state.workflow.pre_race_supply_contract, undefined);
+    assert.equal(state.workflow.next_action, "recover_search_supply_plan");
 
     rmSync(join(tempDir, "state"), { recursive: true, force: true });
     await recordTool(
@@ -1098,8 +1109,9 @@ describe("YP Action native hooks", () => {
       },
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.workflow.pre_race_supply_status, "invalid");
-    assert.equal(state.workflow.next_action, "recover_search_supply_plan");
+    assert.equal(state.workflow.pre_race_supply_status, "valid");
+    assert.equal(state.workflow.pre_race_supply_contract, "supply-assessment-v2");
+    assert.equal(state.workflow.pre_race_rate_card_creator_count, 500);
   });
 
   it("routes an explicit continuation to manual sourcing after validation", async () => {
@@ -1347,6 +1359,18 @@ describe("YP Action native hooks", () => {
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.phase, "requirement_draft");
     assert.equal(state.workflow.next_action, "recover_validate_requirement");
+  });
+
+  it("does not mark a terminal feedback result as waiting for conversational input", async () => {
+    await recordTool(
+      "mcp__ypmcn__record_client_feedback",
+      { requirement_id: requirementId(4), action: "accept" },
+      { success: true, data: { recorded: true }, error: null },
+    );
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "feedback_routing");
+    assert.equal(state.workflow.next_action, null);
+    assert.equal(state.workflow.waiting_for, null);
   });
 
   it("projects the direct field-selection, fresh validation, manual, rank, and export sequence", async () => {

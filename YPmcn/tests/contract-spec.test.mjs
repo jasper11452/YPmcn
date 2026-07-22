@@ -220,12 +220,7 @@ describe("current Endpoint MCP contract", () => {
         "supply_risk_level", "recommended_action",
       ],
     );
-    assert.deepEqual(profile.outputContracts.search_creators.compatibility, {
-      primary: "supply-assessment-v2",
-      legacyAcceptedIn: "3.4.9-only",
-      legacyFields: ["demand_count", "eligible_creator_count", "supply_ratio"],
-      conflictBehavior: "fail-closed",
-    });
+    assert.equal("compatibility" in profile.outputContracts.search_creators, false);
     assert.deepEqual(profile.outputContracts.rank_mcns.successSchema.properties.data.required, [
       "inquiry_id", "demand_count", "selected_supplier_ids", "selected_mcn_count",
       "coverage_scope", "selected_mcn_covered_creator_count",

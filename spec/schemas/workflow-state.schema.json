@@ -49,7 +49,7 @@
         "requirement_receipt_missing"
       ]
     },
-    "pre_race_supply_contract": {"enum": ["supply-assessment-v2", "legacy-v1"]},
+    "pre_race_supply_contract": {"const": "supply-assessment-v2"},
     "pre_race_recommended_action": {"type": "string", "minLength": 1},
     "platform": {"enum": ["xiaohongshu", "douyin"]},
     "quantity_total": {"type": "integer", "minimum": 1},

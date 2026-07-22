@@ -16,8 +16,9 @@ rollback_strategy: "回退本变更；不清理、不重放远程已创建的需
 2. 主键格式错误在 Provider 调用前拒绝，并从既有验证响应纠正，不得再次执行 `validate_requirement`。
 3. 手扒授权必须绑定同一宿主会话的一次性验证回执；当前宿主若未向 `before_tool_call` 传递会话上下文，则明确返回 `INTEGRATION_REQUIRED`，禁止退回全局状态授权或重复建单。
 4. `rawMessagesJson.originalBrief` 必须等于 Hook 捕获的完整原始 Brief；禁止添加重试标记或按平台重写。多平台拆单共享同一完整 Brief，其余平台条件进入审计 atom。
-5. `search_creators` 以 `total_matched + supply_assessment` 为主响应；仅 3.4.9 兼容旧三字段形状，并记录实际消费的契约。新旧结构冲突时停止。
+5. `search_creators` 以 `total_matched + supply_assessment` 为主响应；3.4.9 曾兼容旧三字段形状，3.4.10 起按既定期限移除旧分支。
 6. 明确“继续手扒”的续接意图优先走手扒；一般新需求验证后默认走搜索。用户澄清统一为最多 5 问、每问 2–6 项，且不展示内部价格字段名。
+7. 修复 `e5bca71` 引入的 Brief 捕获回归：先剥离宿主 `[Current user request]` 包装，再从当前会话真实用户需求消息建立候选哈希；AskUserQuestion/Tool JSON 不覆盖已有 Brief。无直接历史时仅以 payload 内明确的 `originalBrief` 兼容回退，避免把整段 JSON 当作需求。
 
 ## Task Boundary
 
@@ -49,6 +50,7 @@ acceptance:
   - "多平台 payload 保持同一个完整 originalBrief，篡改或加前缀会被拒绝"
   - "当前搜索响应正确判定 500/10 与 63/10，旧结构仅保留一版兼容且冲突时停止"
   - "显式继续手扒不会被误路由到搜索"
+  - "AskUserQuestion 后无需重发需求；宿主包装和后续需求 JSON 不会替换已有原始 Brief"
 verification:
   - "npm run test:fast"
   - "npm run verify"
@@ -62,8 +64,8 @@ rollback: "回退本变更文件；不得删除现存远程重复需求"
 
 ## Verification Result
 
-- `npm run test:fast`：通过，72 项插件测试通过。
-- `npm run verify`：通过，Spec、自动文档、安装与安全门禁、72 项插件测试、Provider 比较器离线测试、Skill 契约及 3.4.9 可复现包内容检查全部通过。
+- `npm run test:fast`：通过，74 项插件测试通过。
+- `npm run verify`：通过，Spec、自动文档、安装与安全门禁、74 项插件测试、Provider 比较器离线测试、Skill 契约及 3.4.9 可复现包内容检查全部通过。
 - `git diff --check`：通过。
-- 已生成 `packages/releases/ypmcn-media-assistant-3.4.9.tgz`（117940 bytes，SHA-256 `61fb9b4bf40e9e1009599f15c413bc3df841b2e2ea27e673b21685a7e9c2fbb2`），发布包安全扫描通过。
+- 已重新生成 `packages/releases/ypmcn-media-assistant-3.4.9.tgz`（119116 bytes，SHA-256 `072fed26297baa05da1c35aa539d779b9c76ec73b129bbd53a4343cfceb14237`），发布包安全扫描通过。
 - 未执行生产写入或远程重复需求清理。

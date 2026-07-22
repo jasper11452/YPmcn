@@ -6,6 +6,10 @@
 
 会话状态写入 `state/confirmation_guard.json`。`phase/next_action` 是 Agent 编排权威；Provider 的 `workflow_state/allowed_actions` 只供事实或对账，不能覆盖本地 phase。状态只按实际成功响应推进。
 
+## Human-in-the-loop
+
+- `waiting_for="user"` 必须 Ask（或已选暂停），禁文字提问；其余 `next_action` 同轮续接。字段 callback 直接用，多平台不停；证据无效、未知写或 `integration_required` 时停止。
+
 ## 手扒与五步导出链
 
 1. 先确认完整需求和 `size`；导出时再确认 `platform`、字段与 `number`。`size`、`number` 必须匹配 `^[1-9][0-9]*$`。

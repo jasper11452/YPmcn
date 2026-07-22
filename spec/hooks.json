@@ -6,7 +6,7 @@
   "executionSurface": "YP Action/OpenClaw Node plugin",
   "events": {
     "before_prompt_build": {
-      "responsibility": "inject_brief_guidance_and_local_json_orchestration_state",
+      "responsibility": "extract_real_client_brief_across_host_wrapping_and_clarification_then_inject_human_in_the_loop_multi_platform_guidance_and_local_json_orchestration_state",
       "mayBlock": false,
       "script": "YPmcn/src/index.ts"
     },
@@ -95,8 +95,9 @@
       "unscopedBehavior": "shape-only degraded validation; no global provenance authorization"
     },
     "briefIntegrityGuard": {
-      "binding": "sha256 of the exact extracted client Brief observed by before_prompt_build",
+      "binding": "sha256 of each exact real client Brief recovered from the current prompt and recent user messages after host-envelope stripping",
       "storesRawBrief": false,
+      "clarificationBehavior": "AskUserQuestion payloads and later Tool-argument JSON do not replace an earlier real Brief; embedded originalBrief is fallback-only when no direct Brief is available",
       "multiPlatform": "every independently validated payload retains the same full originalBrief",
       "authorizationUse": false
     },

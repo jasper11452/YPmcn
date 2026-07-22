@@ -4,7 +4,11 @@
 
 ## 首次用户引导
 
-Brief 不完整时先展示模板，再用一次 AskUserQuestion 收集平台、数量、预算和截止时间。
+仅不可推断必填/歧义用一次 Ask；可选、明确、可换算或顺序不问。
+
+多平台按原文顺序拆；共享缺项只问一题，数量可答“抖音X/小红书Y”。不问先后；明确形式/时长不再问，抖音缺时长才问。payload 共用完整 `originalBrief`。
+
+Hook 剥离包装并哈希 Brief；Ask/JSON 不覆盖。无历史时仅回退明确的 `rawMessagesJson.originalBrief`，不能用整段 JSON。
 
 ## 三态门禁
 

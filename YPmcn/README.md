@@ -30,7 +30,7 @@ select_inquiry_form_fields(platform) → 网页选择字段
 
 ## Provider 状态
 
-开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。插件以搜索响应的 `total_matched + supply_assessment` 为主契约，并仅在 3.4.9 兼容旧三字段形状。当前宿主未向 `before_tool_call` 传递会话上下文，因此手扒保持 `integration_required`，直到宿主升级；三参数 `create_submission_batch` 也尚待发布。
+开发与生产 profile 统一连接 `https://mcp.eshypdata.com/sse`。仓库保留的 15 个业务工具契约仍须通过当前 endpoint 的实时 `tools/list` 检查，不能把旧快照冒充实时结果。插件只接受搜索响应的 `total_matched + supply_assessment` 当前契约。当前宿主未向 `before_tool_call` 传递会话上下文，因此手扒保持 `integration_required`，直到宿主升级；三参数 `create_submission_batch` 也尚待发布。
 
 ```bash
 npm run mcp:dev

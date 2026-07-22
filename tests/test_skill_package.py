@@ -286,6 +286,25 @@ class SkillPackageContractTest(unittest.TestCase):
         self.assertNotIn("score === 80", joined)
         self.assertNotIn("不存在、为空或无法生成", joined)
 
+    def test_human_in_the_loop_uses_one_native_input_surface(self):
+        joined = "\n".join((
+            read(SKILL),
+            read(REFERENCES / "requirement-intake.md"),
+            read(REFERENCES / "execution-gates.md"),
+            read(REFERENCES / "frontend-response.md"),
+        ))
+        for required in (
+            "仅 `AskUserQuestion` 收集输入",
+            "禁索要“继续”",
+            "提交即执行",
+            "不问先后或中途停",
+            "共享缺项只问一题",
+            "禁文字提问",
+            "字段 callback 直接用",
+            "普通回复不收集输入",
+        ):
+            self.assertIn(required, joined)
+
     def test_requirement_goldens_use_current_range_boundary(self):
         cases = json.loads(read(REQUIREMENT_CASES))
         regressions = json.loads(read(REQUIREMENT_REGRESSIONS))
