@@ -258,6 +258,8 @@ describe("YP Action native hooks", () => {
     assert.match(YPMCN_FAST_PATH, /webpage is exclusively user-operated/);
     assert.match(YPMCN_FAST_PATH, /never click, infer, preselect, or submit fields on the user's behalf/);
     assert.match(YPMCN_FAST_PATH, /Do not open another selector while waiting or after success, cancellation, timeout, or invalid callback/);
+    assert.match(YPMCN_FAST_PATH, /Never interpret sync_mcn_inquiry_status as WeCom send evidence/);
+    assert.match(YPMCN_FAST_PATH, /only from a successful create_with_distributions response containing explicit per-supplier sent details/);
     assert.match(YPMCN_FAST_PATH, /confirm_mcn_selection -> header “MCN确认”/);
     assert.match(YPMCN_FAST_PATH, /never print these as a prose menu/);
     assert.match(YPMCN_FAST_PATH, /including “启动拓展”[^]*manual_source_creators path/);
@@ -284,7 +286,9 @@ describe("YP Action native hooks", () => {
   it("allows declared business Tools while guarding manual freshness and send confirmation", async () => {
     await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, DEFAULT_CONTEXT);
     for (const name of [...contract.requiredTools, ...contract.optionalTools]) {
-      if (["select_inquiry_form_fields", "rank_creators", "create_submission_batch"].includes(name)) continue;
+      if ([
+        "select_inquiry_form_fields", "sync_mcn_inquiry_status", "rank_creators", "create_submission_batch",
+      ].includes(name)) continue;
       let params = name === "create_with_distributions" ? distributionParams() : {};
       if (name === "create_with_distributions") await recordMcnRecipients(params);
       if (name === "validate_requirement") {
@@ -324,6 +328,23 @@ describe("YP Action native hooks", () => {
 
     const activeRequirement = requirementId(31);
     await recordFreshRequirement(activeRequirement);
+    await recordTool(
+      "mcp__ypmcn__create_with_distributions",
+      { requirement_id: activeRequirement, supplierIds: ["supplier-31"] },
+      {
+        success: true,
+        data: {
+          project_id: "project-31",
+          created: [{ supplier_id: "supplier-31", notification_status: "sent" }],
+        },
+        error: null,
+      },
+    );
+    assert.equal(await guard("mcp__ypmcn__sync_mcn_inquiry_status", {
+      requirement_id: activeRequirement,
+      project_id: "project-31",
+      supplierIds: ["supplier-31"],
+    }, "call-valid-sync-lineage"), undefined);
     await recordTool(
       "mcp__ypmcn__sync_mcn_inquiry_status",
       { requirement_id: activeRequirement, project_id: "project-31", supplierIds: ["supplier-31"] },
@@ -540,6 +561,49 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.distribution_outcome_status, "all_sent");
     assert.equal(state.workflow.sent_supplier_count, 2);
     assert.equal(state.workflow.unbound_supplier_count, 0);
+    assert.equal(state.workflow.distribution_send_evidence_status, "valid");
+    assert.equal(state.workflow.distribution_send_evidence_tool, "create_with_distributions");
+    assert.equal(state.workflow.distribution_sent_detail_count, 2);
+  });
+
+  it("never treats sync output as WeCom send evidence or advances without send details", async () => {
+    const activeRequirement = requirementId(90);
+    await recordFreshRequirement(activeRequirement);
+    const blocked = await guard("mcp__ypmcn__sync_mcn_inquiry_status", {
+      requirement_id: activeRequirement,
+      project_id: "project-fake-sync",
+      supplierIds: ["supplier-fake-sync"],
+    }, "call-fake-sync-preflight");
+    assert.equal(blocked.errorCode, "INVALID_PHASE");
+    assert.match(blocked.blockReason, /prior successful create_with_distributions[^]*Sync output is never WeCom send evidence/);
+    await recordTool(
+      "mcp__ypmcn__sync_mcn_inquiry_status",
+      {
+        requirement_id: activeRequirement,
+        project_id: "project-fake-sync",
+        supplierIds: ["supplier-fake-sync"],
+      },
+      {
+        success: true,
+        data: {
+          inquiry_id: "inquiry-fake-sync",
+          sent_supplier_ids: ["supplier-fake-sync"],
+          notification_status: "sent",
+        },
+        error: null,
+      },
+    );
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.last_tool_status, "failed");
+    assert.equal(state.workflow.next_action, "recover_sync_mcn_inquiry_status");
+    assert.equal(
+      state.workflow.inquiry_sync_evidence_error,
+      "missing_matching_create_with_distributions_send_details",
+    );
+    assert.equal(state.workflow.sent_supplier_count, undefined);
+    assert.equal(state.workflow.distribution_supplier_statuses, undefined);
+    assert.equal(state.workflow.distribution_send_evidence_status, undefined);
+    assert.equal(state.workflow.sync_inquiry_ids, undefined);
   });
 
   it("keeps partial group-binding outcomes explicit and rejects generic send success", async () => {
@@ -597,7 +661,14 @@ describe("YP Action native hooks", () => {
     await recordTool(
       "mcp__ypmcn__create_with_distributions",
       ambiguous.params,
-      { success: true, data: { project_id: "project-ambiguous" }, error: null },
+      {
+        success: true,
+        data: {
+          project_id: "project-ambiguous",
+          sent_supplier_ids: ambiguous.params.supplierIds,
+        },
+        error: null,
+      },
       DEFAULT_CONTEXT,
       ambiguousExecutionId,
     );

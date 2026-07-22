@@ -19,6 +19,7 @@ const GUARDED_REQUIREMENT_TOOLS = new Set([
   "select_inquiry_form_fields",
   "validate_requirement",
   "search_creators",
+  "sync_mcn_inquiry_status",
   "manual_source_creators",
   "rank_creators",
   "create_submission_batch",

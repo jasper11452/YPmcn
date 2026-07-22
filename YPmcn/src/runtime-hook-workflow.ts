@@ -1111,10 +1111,6 @@ function distributionOutcomeEvidence(root: unknown, input: Json): DistributionOu
   };
 
   for (const record of objectRecords(data)) {
-    for (const key of DISTRIBUTION_SENT_LIST_KEYS) {
-      if (!Array.isArray(record[key])) continue;
-      for (const item of record[key]) recordOutcome(distributionSupplierId(item), "sent");
-    }
     for (const key of DISTRIBUTION_UNBOUND_LIST_KEYS) {
       if (!Array.isArray(record[key])) continue;
       for (const item of record[key]) recordOutcome(distributionSupplierId(item), "unbound");
@@ -1237,6 +1233,48 @@ function appendWorkflowEvent(data: Json, event: Json): void {
   const events = Array.isArray(data.workflow_events) ? data.workflow_events : [];
   events.push(event);
   data.workflow_events = events.slice(-50);
+}
+
+function authorizeInquirySync(event: Json, input: Json, current: GuardStore): Json | undefined {
+  if (syncInputBoundToSendEvidence(input, current.data.workflow as Json)) return undefined;
+  return denyPreflight(
+    event, "sync_mcn_inquiry_status", input, "workflow_lineage", "INVALID_PHASE",
+    "sync_mcn_inquiry_status requires a prior successful create_with_distributions response with explicit per-supplier sent details matching this exact requirement, project, and supplier set. Sync output is never WeCom send evidence.",
+  );
+}
+
+function clearDistributionSendEvidence(workflow: Json): void {
+  for (const key of [
+    "project_id", "requested_supplier_count", "sent_supplier_count", "unbound_supplier_count",
+    "failed_supplier_count", "unknown_supplier_count", "distribution_supplier_statuses",
+    "distribution_outcome_status", "distribution_outcome_error", "distribution_send_evidence_status",
+    "distribution_send_evidence_tool", "distribution_sent_detail_count", "sync_inquiry_ids",
+    "inquiry_sync_evidence_status", "inquiry_sync_evidence_error",
+  ]) delete workflow[key];
+}
+
+function syncInputBoundToSendEvidence(input: Json, workflow: Json): boolean {
+  if (
+    workflow.distribution_send_evidence_status !== "valid" ||
+    workflow.distribution_send_evidence_tool !== "create_with_distributions" ||
+    !Number.isInteger(workflow.sent_supplier_count) || workflow.sent_supplier_count < 1 ||
+    !text(workflow.requirement_id) || !text(input.requirement_id) ||
+    input.requirement_id.trim() !== workflow.requirement_id.trim() ||
+    !text(input.project_id) || !Array.isArray(input.supplierIds) || input.supplierIds.length < 1 ||
+    !input.supplierIds.every(text)
+  ) return false;
+  const supplierIds = input.supplierIds.map((supplierId: string) => supplierId.trim());
+  if (new Set(supplierIds).size !== supplierIds.length) return false;
+  const projectId = input.project_id.trim();
+  const eligibleHashes = distributionFallbackStatuses(workflow)
+    .filter((item) => item.status === "sent" && (
+      text(item.project_id) ? item.project_id.trim() === projectId : workflow.project_id === projectId
+    ))
+    .map((item) => item.supplier_id_sha256.trim())
+    .sort();
+  const requestedHashes = supplierIds.map((supplierId) => sha256Text(supplierId)).sort();
+  return eligibleHashes.length > 0 && eligibleHashes.length === requestedHashes.length &&
+    eligibleHashes.every((hash, index) => hash === requestedHashes[index]);
 }
 
 function postRaceQuestionMatchesEvidence(input: Json, workflow: Json): boolean {
@@ -1415,6 +1453,9 @@ function updateLocalWorkflow(
   const syncInquiryIds = tool === "sync_mcn_inquiry_status" && envelopeOk
     ? syncInquiryIdsEvidence(event.result)
     : undefined;
+  const syncBoundToSendEvidence = tool === "sync_mcn_inquiry_status"
+    ? syncInputBoundToSendEvidence(input, workflow)
+    : true;
   const distributionEvidence = tool === "create_with_distributions" && envelopeOk
     ? distributionOutcomeEvidence(event.result, input)
     : undefined;
@@ -1437,6 +1478,7 @@ function updateLocalWorkflow(
     (tool !== "select_inquiry_form_fields" || fieldEvidence !== undefined) &&
     (tool !== "rank_mcns" || rankEvidence !== undefined) &&
     (tool !== "manual_source_creators" || manualEvidence !== undefined) &&
+    (tool !== "sync_mcn_inquiry_status" || syncBoundToSendEvidence) &&
     (tool !== "create_with_distributions" || distributionEvidence !== undefined) &&
     (tool !== "rank_creators" || creatorRankEvidence !== undefined) &&
     (tool !== "create_submission_batch" || exportEvidence !== undefined);
@@ -1450,6 +1492,7 @@ function updateLocalWorkflow(
   workflow.updated_at_ms = now;
   if (tool === "search_creators" || tool === "rank_mcns") clearMcnRecipientDirectory(workflow);
   if (tool === "search_creators" || tool === "rank_mcns") {
+    clearDistributionSendEvidence(workflow);
     for (const key of [
       "rank_mcn_inquiry_id", "rank_mcn_inquiry_evidence_status", "rank_mcn_inquiry_evidence_error",
       "post_race_evidence_status", "post_race_risk_level", "post_race_selected_mcn_count",
@@ -1494,6 +1537,9 @@ function updateLocalWorkflow(
     workflow.distribution_outcome_status = distributionUnboundRejection.remainingSupplierIds.length > 0
       ? "fallback_in_progress"
       : "none_sent";
+    workflow.distribution_send_evidence_status = "none_sent";
+    workflow.distribution_send_evidence_tool = "create_with_distributions";
+    workflow.distribution_sent_detail_count = 0;
     workflow.next_action = distributionUnboundRejection.remainingSupplierIds.length > 0
       ? "fallback_send_next_individual_mcn"
       : "report_distribution_result";
@@ -1510,6 +1556,9 @@ function updateLocalWorkflow(
       status: "pending",
     }));
     workflow.distribution_outcome_status = "fallback_in_progress";
+    workflow.distribution_send_evidence_status = "none_sent";
+    workflow.distribution_send_evidence_tool = "create_with_distributions";
+    workflow.distribution_sent_detail_count = 0;
     workflow.next_action = "fallback_send_next_individual_mcn";
     workflow.waiting_for = null;
     delete workflow.project_id;
@@ -1536,6 +1585,9 @@ function updateLocalWorkflow(
     workflow.unbound_supplier_count = count("unbound");
     workflow.failed_supplier_count = count("failed");
     workflow.unknown_supplier_count = count("unknown");
+    workflow.distribution_send_evidence_status = workflow.sent_supplier_count > 0 ? "valid" : "none_sent";
+    workflow.distribution_send_evidence_tool = "create_with_distributions";
+    workflow.distribution_sent_detail_count = workflow.sent_supplier_count;
     delete workflow.distribution_outcome_error;
     if (pendingCount > 0) {
       workflow.phase = "inquiry_sending";
@@ -1602,7 +1654,16 @@ function updateLocalWorkflow(
         "distribution_retry_active", "distribution_initial_requested_supplier_count",
         "distribution_excluded_unbound_supplier_count", "distribution_retry_supplier_count",
         "distribution_supplier_statuses", "failed_supplier_count", "unknown_supplier_count",
+        "distribution_send_evidence_tool", "distribution_sent_detail_count",
       ]) delete workflow[key];
+      workflow.distribution_send_evidence_status = "invalid";
+    }
+    if (tool === "sync_mcn_inquiry_status") {
+      workflow.inquiry_sync_evidence_status = envelopeOk ? "invalid" : "unavailable";
+      workflow.inquiry_sync_evidence_error = envelopeOk
+        ? "missing_matching_create_with_distributions_send_details"
+        : "provider_call_failed_or_unknown";
+      delete workflow.sync_inquiry_ids;
     }
     workflow.next_action = unknownWriteResult ? `reconcile_${tool}` : `recover_${tool}`;
     workflow.waiting_for = unknownWriteResult ? "provider" : "user";
@@ -1715,6 +1776,9 @@ function updateLocalWorkflow(
         delete workflow.distribution_retry_active;
         delete workflow.distribution_retry_supplier_count;
         delete workflow.distribution_outcome_error;
+        workflow.distribution_send_evidence_status = distributionEvidence.sentCount > 0 ? "valid" : "none_sent";
+        workflow.distribution_send_evidence_tool = "create_with_distributions";
+        workflow.distribution_sent_detail_count = distributionEvidence.sentCount;
         if (distributionEvidence.sentCount === 0) {
           workflow.phase = "inquiry_fields_ready";
           workflow.next_action = "report_distribution_result";
@@ -1758,6 +1822,8 @@ function updateLocalWorkflow(
         workflow.waiting_for = null;
         break;
       case "sync_mcn_inquiry_status":
+        workflow.inquiry_sync_evidence_status = syncInquiryIds ? "valid_with_inquiries" : "valid_no_inquiries";
+        delete workflow.inquiry_sync_evidence_error;
         if (syncInquiryIds) {
           workflow.sync_inquiry_ids = syncInquiryIds;
           workflow.next_action = "ingest_mcn_submissions";
@@ -2074,6 +2140,7 @@ export function guardWorkflowTool(
     return authorizeFreshManualRequirement(event, input, _current, rootDir);
   }
   if (tool === "rank_creators") return authorizeRankCreators(event, input, _current);
+  if (tool === "sync_mcn_inquiry_status") return authorizeInquirySync(event, input, _current);
   if (tool === "create_submission_batch") return authorizeSubmissionBatch(event, input, _current);
   if (tool === "create_with_distributions") {
     if (!scopeAvailable) {

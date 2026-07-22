@@ -272,7 +272,7 @@
     },
     "create_with_distributions": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "No provider outputSchema is advertised; retain the actual response as evidence before deriving downstream identifiers.",
+      "evidenceBasis": "No provider outputSchema is advertised. WeCom send success requires the actual successful response to contain explicit per-supplier sent status details for the exact request; generic success, requested IDs, or aggregate sent lists are not send evidence.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
@@ -283,7 +283,7 @@
     },
     "sync_mcn_inquiry_status": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "No provider outputSchema is advertised; retain the actual response as evidence before deriving downstream identifiers.",
+      "evidenceBasis": "No provider outputSchema is advertised. The response may prove synchronization facts and inquiry IDs only; it never proves or mutates WeCom send success, which remains exclusively derived from prior create_with_distributions per-supplier details.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
       "successSchema": {
