@@ -26,7 +26,7 @@ description: "Use for YPmcn requirement parsing, manual creator sourcing, audita
 - 除上述当次新 ID 外，不检查该需求是否历史检索过或其他流程是否完成。其余 ID 仍逐项核对 ID 血缘，只复制本轮实际成功响应返回的 ID；不得猜测、串用或用虚构 ID 探测。
 - 任一步失败都停止后续业务 Tool；必需证据无效不算成功。写结果未知时先对账，禁止盲重试；用户要求失败即停时绝不重试。
 - 主键格式错就改用当前响应的 `data.id`，不得再建需求；Hook 缺少宿主会话上下文时由插件自有的一次性回执完成校验，不得重新建需求。不得把 `DEMAND_NOT_FOUND` 猜成去重、清理、覆盖或延迟。
-- Hook 校验原始 Brief、搜索/拓展达人的 `data.id` 与企微外发；先剥离包装，Ask/Tool JSON 不覆盖原文。拓展达人绑定一次性新 ID，但不以 phase 或历史为门槛。重复 `rank_creators` 只提示。本地状态只按实际成功结果推进，preview 不限制 Skill 读取或其他 Tool。
+- Hook 校验原始 Brief、搜索/拓展达人的 `data.id` 与企微外发；先剥离包装，Ask/Tool JSON 不覆盖原文。Copy the Hook-injected `originalBrief`; its hash receipt persists across Hook reloads, and only line endings/blank lines normalize. Never guess or retry variants. 拓展达人绑定一次性新 ID，但不以 phase 或历史为门槛。重复 `rank_creators` 只提示。本地状态只按实际成功结果推进，preview 不限制 Skill 读取或其他 Tool。
 
 ## 主链
 

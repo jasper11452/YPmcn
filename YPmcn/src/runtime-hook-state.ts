@@ -118,8 +118,22 @@ function storeAtPath(path: string): GuardStore {
     data.active_execution_unit_id = unitId;
     changed = true;
   }
+  const orderedExecutionUnitIds = Array.isArray(data.execution_unit_order)
+    ? data.execution_unit_order.filter((id: unknown): id is string => text(id) && Boolean(data.execution_units[id]))
+    : [];
+  const uniqueExecutionUnitIds = [...new Set(orderedExecutionUnitIds)];
+  const remainingExecutionUnitIds = Object.values<Json>(data.execution_units)
+    .filter((unit) => text(unit.id) && !uniqueExecutionUnitIds.includes(unit.id))
+    .sort((left, right) => Number(left.created_at_ms ?? 0) - Number(right.created_at_ms ?? 0) ||
+      left.id.localeCompare(right.id))
+    .map((unit) => unit.id);
+  const normalizedExecutionUnitOrder = [...uniqueExecutionUnitIds, ...remainingExecutionUnitIds];
+  if (canonical(data.execution_unit_order) !== canonical(normalizedExecutionUnitOrder)) {
+    data.execution_unit_order = normalizedExecutionUnitOrder;
+    changed = true;
+  }
   if (!text(data.active_execution_unit_id) || !data.execution_units[data.active_execution_unit_id]) {
-    const firstUnitId = Object.keys(data.execution_units)[0];
+    const firstUnitId = data.execution_unit_order[0];
     if (firstUnitId) {
       data.active_execution_unit_id = firstUnitId;
       data.workflow = data.execution_units[firstUnitId].workflow;
@@ -132,6 +146,11 @@ function storeAtPath(path: string): GuardStore {
     // and the active unit snapshot. The top-level projection is the most recently
     // written value, so rebind it into the active unit on every load.
     activeUnit.workflow = data.workflow;
+  }
+  for (const [unitId, unit] of Object.entries<Json>(data.execution_units)) {
+    if (unitId === data.active_execution_unit_id || unit.status !== "active") continue;
+    unit.status = "suspended";
+    changed = true;
   }
   if (previousSchemaVersion !== undefined && Number(previousSchemaVersion) < 17) {
     for (const key of [

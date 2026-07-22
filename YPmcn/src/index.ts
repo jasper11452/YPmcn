@@ -279,7 +279,9 @@ export function createYpmcnPlugin(
           ? `YPmcn authoritative same-platform requirement units. Call validate_requirement once per payload in this exact order; do not merge or skip units.\n${JSON.stringify({ payloads: splitPayloads })}`
           : `YPmcn authoritative same-platform requirement previews. Resolve all units in one AskUserQuestion popup before validation; do not merge units.\n${JSON.stringify({ previews })}`
         : "";
-      for (const brief of requirementBriefCandidates(hostPrompt, event?.messages)) {
+      const briefCandidates = requirementBriefCandidates(hostPrompt, event?.messages);
+      const authoritativeOriginalBrief = briefCandidates.at(-1);
+      for (const brief of briefCandidates) {
         recordRequirementBriefReceipt(brief, rootDir);
       }
       recordManualCreatorListDisplay(event?.messages, rootDir);
@@ -290,6 +292,9 @@ export function createYpmcnPlugin(
         prependContext: [
           buildRequirementRuntimeClock(now, timeZone),
           renderLocalWorkflowContext(rootDir),
+          authoritativeOriginalBrief
+            ? `YPmcn authoritative originalBrief for validate_requirement. Copy this exact JSON string; never reconstruct it or try variants.\n${JSON.stringify({ originalBrief: authoritativeOriginalBrief })}`
+            : "",
           multiPlatformGuidance,
           splitContext,
           preview && !readyPayload ? renderStandardBriefPreview(preview) : "",

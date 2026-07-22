@@ -97,11 +97,12 @@
       "unscopedBehavior": "shape-only degraded validation; no global provenance authorization"
     },
     "briefIntegrityGuard": {
-      "binding": "sha256 of each exact real client Brief recovered from the current prompt and recent user messages after host-envelope stripping",
+      "binding": "expiring sha256 receipt for each exact real client Brief recovered from the current prompt and recent user messages after host-envelope stripping, persisted in local session state across Hook reloads",
       "storesRawBrief": false,
       "clarificationBehavior": "AskUserQuestion payloads and later Tool-argument JSON do not replace an earlier real Brief; embedded originalBrief is fallback-only when no direct Brief is available",
       "multiPlatform": "every independently validated payload retains the same full originalBrief",
-      "authorizationUse": false
+      "missingSessionContext": "accept exactly one matching persisted receipt across local session stores; zero or multiple matches fail closed",
+      "authorizationUse": true
     },
     "rankCreatorsRepeatNotice": {
       "comparison": "current rank_creators.requirement_id equals the immediately previous rank_creators call in the same state scope",

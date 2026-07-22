@@ -8,7 +8,7 @@
 
 多平台按原文顺序拆；共享缺项只问一题，数量可答“抖音X/小红书Y”。不问先后；明确形式/时长不再问，抖音缺时长才问。payload 共用完整 `originalBrief`。
 
-Hook 剥离包装并哈希 Brief；Ask/JSON 不覆盖。无历史时仅回退明确的 `rawMessagesJson.originalBrief`，不能用整段 JSON。
+The Hook strips the host envelope and operation prefix, injects the exact `originalBrief`, and persists only its expiring hash receipt in local session state. Copy that injected JSON string. Comparison normalizes only `CRLF/LF`, trailing line whitespace, and blank-only lines; text, punctuation, values, order, and nonempty affixes may not change. Ask answers add atoms and never rewrite it. If a Tool hook loses session context, exactly one matching persisted receipt may authorize the call; zero or multiple matches fail closed.
 
 ## 三态门禁
 
@@ -27,7 +27,7 @@ Hook 剥离包装并哈希 Brief；Ask/JSON 不覆盖。无历史时仅回退明
 - 相对时间用宿主 `currentLocalDateTime + timeZone` 唯一换算为 `YYYY-MM-DD HH:mm:ss`；不能唯一确定即询问。
 - atom 只映射一个真实字段或逐字 preserved；`sourceText` 可来自原始 Brief 或明确补充答案。不得篡改 `originalBrief`；补充数量、形式/时长、截止时刻各成 atom。多平台需求共用完整 `originalBrief`，另一平台条款逐字 preserved；禁加“需求A”“快手”等标记。`rawMessagesJson` 的 atoms 非空、计数一致且 `unresolvedCount=0`。
 
-`ready` 时展示并原样调用 `{"payload": {..., "status": "ready"}}`。`search_creators.id` 和 `manual_source_creators.requirement_id` 只复制 `validate_requirement.data.id` 的 32 位主键，数字型 `data.demand_id` 只用于需求版本语义。主键格式错误直接从当前响应纠正，不得重新验证；宿主 Hook 未提供会话上下文时使用插件自有的一次性交接回执。每次拓展达人前都按新建需求处理并省略旧 `id/demandVersion`；仅实际成功响应新生成的需求主键可授权紧邻的一次拓展达人，禁止复用。非拓展达人的补充版本才沿用上一成功响应的 `demandId`。Provider `workflow_state/allowed_actions` 不覆盖本地 phase，未知写结果先对账。
+For `ready`, call `validate_requirement` once with `{"payload": {..., "status": "ready"}}`. `status` belongs inside `payload`; omit `id/demandVersion` for a new requirement. Use the Hook-captured Brief as `rawMessagesJson.originalBrief`, and send final-form atoms with matching counts. Finish all Ask interactions first. On Brief mismatch, do not try prefix, no-prefix, compact-line, or other guessed variants; reuse the runtime-injected `originalBrief`, or stop as `integration_required` if unavailable. `search_creators.id` 和 `manual_source_creators.requirement_id` 只复制成功响应 `data.id` 的 32 位主键，数字型 `data.demand_id` 只用于需求版本语义。主键格式错误直接从当前响应纠正，不得重新验证；宿主 Hook 未提供会话上下文时使用插件自有的一次性交接回执。每次拓展达人前都按新建需求处理并省略旧 `id/demandVersion`；仅实际成功响应新生成的需求主键可授权紧邻的一次拓展达人，禁止复用。非拓展达人的补充版本才沿用上一成功响应的 `demandId`。Provider `workflow_state/allowed_actions` 不覆盖本地 phase，未知写结果先对账。
 
 ## 参数自修复
 

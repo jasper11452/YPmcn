@@ -1007,15 +1007,26 @@ describe("YP Action native hooks", () => {
     ), undefined);
   });
 
-  it("fails closed when external-send before_tool_call has no session context", async () => {
-    const blocked = await hooks.get("before_tool_call")({
-      toolName: "mcp__ypmcn__create_with_distributions",
-      params: distributionParams(),
-      toolCallId: "call-unscoped-send",
-    }, {});
-    assert.equal(blocked.block, true);
-    assert.equal(blocked.errorCode, "INTEGRATION_REQUIRED");
-    assert.match(blocked.blockReason, /omitted session context/);
+  it("creates a global confirmation when session context arrives after the first send attempt", async () => {
+    const prepared = await requestConfirmation(
+      distributionParams(),
+      {},
+      "call-global-preflight",
+    );
+    const question = prepared.askInput.questions[0].question;
+    await recordTool("AskUserQuestion", prepared.askInput, {
+      content: [{ type: "text", text: `${question}: 确认发送` }],
+    }, { sessionKey: "session-context-arrived-late" });
+
+    const globalStateFile = join(tempDir, "state", "confirmation_guard.json");
+    const globalState = JSON.parse(readFileSync(globalStateFile, "utf8"));
+    assert.equal(globalState.confirmations[globalState.latest_external_confirmation_id].status, "approved");
+    assert.equal(await guard(
+      "mcp__ypmcn__create_with_distributions",
+      prepared.params,
+      "call-global-preflight-execute",
+      { sessionKey: "session-context-arrived-late" },
+    ), undefined);
   });
 
   it("uses one unique local confirmation receipt when the host drops session context after approval", async () => {
@@ -1886,6 +1897,45 @@ describe("YP Action native hooks", () => {
     assert.deepEqual(secondState.confirmations, {});
   });
 
+  it("does not create or switch execution units for failed or identifier-less validation", async () => {
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, DEFAULT_CONTEXT);
+    const beforeState = JSON.parse(readFileSync(stateFile, "utf8"));
+    const beforeUnitIds = Object.keys(beforeState.execution_units);
+    const payload = { platform: "xiaohongshu", projectName: "失败验证不得切换流程" };
+
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload },
+      { success: false, data: null, error: { code: "INVALID_INPUT" } },
+    );
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload },
+      { success: true, data: {}, error: null },
+    );
+
+    const afterState = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(afterState.active_execution_unit_id, beforeState.active_execution_unit_id);
+    assert.deepEqual(Object.keys(afterState.execution_units), beforeUnitIds);
+  });
+
+  it("keeps repeated successful validation idempotent in execution-unit order", async () => {
+    const id = requirementId(200);
+    const params = { payload: { platform: "xiaohongshu", projectName: "幂等验证" } };
+    const result = { success: true, data: { id }, error: null };
+    await recordTool("mcp__ypmcn__validate_requirement", params, result);
+    await recordTool("mcp__ypmcn__validate_requirement", params, result);
+
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    const requirementHash = createHash("sha256").update(id).digest("hex");
+    const unitId = state.requirement_execution_unit_ids[requirementHash];
+    assert.ok(unitId);
+    assert.equal(state.execution_unit_order.filter((candidate) => candidate === unitId).length, 1);
+    assert.equal(Object.values(state.execution_units).filter(({ requirement_id_sha256 }) =>
+      requirement_id_sha256 === requirementHash
+    ).length, 1);
+  });
+
   it("isolates same-platform differing requirements and logs suspend, resume, and completion locally", async () => {
     const firstId = requirementId(201);
     const secondId = requirementId(202);
@@ -1942,6 +1992,8 @@ describe("YP Action native hooks", () => {
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.execution_units[firstUnitId].status, "completed");
+    assert.equal(state.active_execution_unit_id, secondUnitId);
+    assert.equal(state.execution_units[secondUnitId].status, "active");
     assert.ok(state.execution_units[firstUnitId].completed_at_ms > 0);
     assert.ok(state.execution_units[firstUnitId].events.some(({ kind }) =>
       kind === "execution_unit_completed"

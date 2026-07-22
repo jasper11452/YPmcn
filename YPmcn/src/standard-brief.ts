@@ -37,7 +37,7 @@ const PRICE_FIELD_LABEL = "(?:(?:单达人|达人)?[ \\t]*(?:L[ \\t]*[123][ \\t]
 const FAN_AGE_FIELD_LABEL = "(?:粉丝年龄(?:占比|要求)?|粉丝画像年龄)";
 const BOOLEAN_FIELD_LABEL = "(?:是否有机构|有无机构|机构情况|近30天(?:是否)?有订单|近30天(?:是否)?有(?:社交互动|发文))";
 const FIELD_LABEL = `(?:品牌|产品|项目|(?:发布|传播)?平台|档期|${PRICE_FIELD_LABEL}|返点(?:要求)?|返佣|内容|账号类型|达人类型|${FAN_AGE_FIELD_LABEL}|${BOOLEAN_FIELD_LABEL}|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?(?:时间)?)`;
-const BRIEF_BLOCK_LABEL = `(?:${FIELD_LABEL}|合作形式|参考账号)`;
+const BRIEF_BLOCK_LABEL = `(?:${FIELD_LABEL}|内容形式|内容形态|合作形式|参考账号)`;
 
 type RequirementPlatform = "xiaohongshu" | "douyin";
 

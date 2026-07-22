@@ -42,6 +42,35 @@ function assertExactPreview(preview) {
 }
 
 describe("deterministic standard Brief parser", () => {
+  it("keeps fields before a content-form line and asks only for the Douyin duration tier", () => {
+    const brief = [
+      "品牌：阿里巴巴",
+      "项目：千问61儿童节",
+      "平台：抖音",
+      "内容形式：视频",
+      "档期：7.30-7.31",
+      "单价：4w以下",
+      "返点：26%以上",
+      "内容：类似于AI帮忙送儿童节礼物",
+      "账号类型：母婴类，亲子相关",
+      "数量：5个",
+      "提报时间：7月25号上午11:00",
+    ].join("\n");
+    const preview = parseStandardBrief(brief, new Date("2026-07-23T04:00:00Z"), "Asia/Shanghai");
+
+    assert.equal(extractStandardBrief(brief), brief);
+    assert.equal(preview.projection.brandName, "阿里巴巴");
+    assert.equal(preview.projection.projectName, "千问61儿童节");
+    assert.equal(preview.projection.platform, "douyin");
+    assert.deepEqual(preview.missingRequired, []);
+    assert.deepEqual(preview.semanticAmbiguities, ["creatorPriceTier"]);
+    assert.deepEqual(preview.atoms.find((atom) => atom.field === "creatorPriceTier")?.candidates, [
+      "抖音1–20秒视频价格",
+      "抖音21–60秒视频价格",
+      "抖音60秒以上视频价格",
+    ]);
+  });
+
   it("keeps the legacy single-requirement result unchanged", () => {
     const now = new Date("2026-07-18T00:00:00Z");
     assert.deepEqual(

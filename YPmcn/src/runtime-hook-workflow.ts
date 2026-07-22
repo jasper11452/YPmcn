@@ -56,6 +56,7 @@ const MCN_NAME_KEYS = [
 const MCN_CONTEXT_KEY = /(?:mcn|supplier|institution|agency|vendor|recommend)/i;
 const REQUIREMENT_PRIMARY_KEY = /^[0-9a-f]{32}$/i;
 const REQUIREMENT_BRIEF_TTL_MS = 30 * 60 * 1_000;
+const REQUIREMENT_BRIEF_RECEIPTS_KEY = "requirement_brief_receipts";
 const PREFLIGHT_DENIAL_TTL_MS = 5 * 60 * 1_000;
 const SEARCH_REQUIREMENT_RECEIPT_KEY = "search_requirement_receipt";
 const WORKFLOW_EVENT_LIMIT = 200;
@@ -75,13 +76,9 @@ type PreflightDenialReason =
   | "workflow_lineage"
   | "workflow_order";
 
-const recentRequirementBriefs = new Map<string, number>();
 const preflightDenials = new Map<string, { reason: PreflightDenialReason; expiresAt: number }>();
 
 function pruneTransientReceipts(now = Date.now()): void {
-  for (const [hash, expiresAt] of recentRequirementBriefs) {
-    if (expiresAt <= now) recentRequirementBriefs.delete(hash);
-  }
   for (const [key, receipt] of preflightDenials) {
     if (receipt.expiresAt <= now) preflightDenials.delete(key);
   }
@@ -126,14 +123,51 @@ function validRequirementPrimaryKey(value: unknown): value is string {
   return text(value) && REQUIREMENT_PRIMARY_KEY.test(value.trim());
 }
 
+function requirementBriefHash(brief: string): string {
+  const normalized = brief
+    .replace(/\r\n?/gu, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== "")
+    .join("\n");
+  return sha256Text(normalized);
+}
+
 export function recordRequirementBriefReceipt(brief: string, rootDir: string): void {
   if (!text(brief)) return;
   pruneTransientReceipts();
-  const briefHash = sha256Text(brief);
-  recentRequirementBriefs.set(briefHash, Date.now() + REQUIREMENT_BRIEF_TTL_MS);
+  const briefHash = requirementBriefHash(brief);
   const current = store(rootDir);
+  const now = Date.now();
+  const receipts = current.data[REQUIREMENT_BRIEF_RECEIPTS_KEY] &&
+      typeof current.data[REQUIREMENT_BRIEF_RECEIPTS_KEY] === "object" &&
+      !Array.isArray(current.data[REQUIREMENT_BRIEF_RECEIPTS_KEY])
+    ? current.data[REQUIREMENT_BRIEF_RECEIPTS_KEY] as Json
+    : {};
+  for (const [hash, expiresAt] of Object.entries(receipts)) {
+    if (Number(expiresAt) <= now) delete receipts[hash];
+  }
+  receipts[briefHash] = now + REQUIREMENT_BRIEF_TTL_MS;
+  current.data[REQUIREMENT_BRIEF_RECEIPTS_KEY] = receipts;
   current.data.source_brief_sha256 = briefHash;
+  current.data.source_brief_expires_at_ms = now + REQUIREMENT_BRIEF_TTL_MS;
   save(current.path, current.data);
+}
+
+function hasRequirementBriefReceipt(current: GuardStore, briefHash: string, now = Date.now()): boolean {
+  const receipts = current.data[REQUIREMENT_BRIEF_RECEIPTS_KEY];
+  if (receipts && typeof receipts === "object" && !Array.isArray(receipts)) {
+    return Number((receipts as Json)[briefHash] ?? 0) > now;
+  }
+  return current.data.source_brief_sha256 === briefHash &&
+    Number(current.data.source_brief_expires_at_ms ?? 0) > now;
+}
+
+function hasAnyRequirementBriefReceipt(current: GuardStore, now = Date.now()): boolean {
+  const receipts = current.data[REQUIREMENT_BRIEF_RECEIPTS_KEY];
+  return Boolean(receipts && typeof receipts === "object" && !Array.isArray(receipts) &&
+    Object.values(receipts as Json).some((expiresAt) => Number(expiresAt) > now)) ||
+    Number(current.data.source_brief_expires_at_ms ?? 0) > now;
 }
 
 export function recordPostValidationIntent(intent: "manual" | "search", rootDir: string): void {
@@ -666,7 +700,13 @@ function authorizeFreshSearchRequirement(event: Json, input: Json, current: Guar
   return undefined;
 }
 
-function authorizeRequirementBrief(event: Json, input: Json): Json | undefined {
+function authorizeRequirementBrief(
+  event: Json,
+  input: Json,
+  current: GuardStore,
+  rootDir: string,
+  scopeAvailable: boolean,
+): Json | undefined {
   const originalBrief = input.payload?.rawMessagesJson?.originalBrief;
   if (!text(originalBrief)) {
     return denyPreflight(
@@ -675,10 +715,30 @@ function authorizeRequirementBrief(event: Json, input: Json): Json | undefined {
     );
   }
   pruneTransientReceipts();
-  if (!recentRequirementBriefs.has(sha256Text(originalBrief))) {
+  const briefHash = requirementBriefHash(originalBrief);
+  if (hasRequirementBriefReceipt(current, briefHash)) return undefined;
+  if (!scopeAvailable) {
+    const stores = [current, ...sessionStores(rootDir)]
+      .filter((candidate, index, all) => all.findIndex((item) => item.path === candidate.path) === index);
+    const candidates = stores.filter((candidate) => hasRequirementBriefReceipt(candidate, briefHash));
+    if (candidates.length === 1) return undefined;
+    if (candidates.length === 0 && stores.some((candidate) => hasAnyRequirementBriefReceipt(candidate))) {
+      return denyPreflight(
+        event, "validate_requirement", input, "brief_mismatch", "INVALID_INPUT",
+        "rawMessagesJson.originalBrief does not match any active persisted Brief receipt. Copy the Hook-injected originalBrief once; never add retry markers or prefixes, reconstruct text, or retry variants.",
+      );
+    }
+    return denyPreflight(
+      event, "validate_requirement", input, "missing_session_context", "INTEGRATION_REQUIRED",
+      candidates.length > 1
+        ? "validate_requirement has no session context and the Brief receipt is ambiguous across sessions. Preserve the session identity; do not retry text variants."
+        : "validate_requirement has no session context and no persisted Brief receipt matches. Ensure before_prompt_build runs for this request and preserves the same plugin root; do not retry text variants.",
+    );
+  }
+  if (!hasRequirementBriefReceipt(current, briefHash)) {
     return denyPreflight(
       event, "validate_requirement", input, "brief_mismatch", "INVALID_INPUT",
-      "rawMessagesJson.originalBrief does not exactly match a recent client Brief. Preserve the full original text; never add retry markers or reconstruct a platform-specific Brief.",
+      "rawMessagesJson.originalBrief does not match this session's persisted client Brief receipt after line-ending and blank-line normalization. Use the Hook-injected originalBrief once; do not add prefixes, reconstruct text, or retry variants.",
     );
   }
   return undefined;
@@ -1363,6 +1423,26 @@ function executionUnitDraftId(input: Json): string {
   return `draft:${fingerprint(input.payload ?? {})}`;
 }
 
+function executionUnitOrder(data: Json): string[] {
+  const units = data.execution_units ?? {};
+  const ordered = Array.isArray(data.execution_unit_order)
+    ? data.execution_unit_order.filter((id: unknown): id is string => text(id) && Boolean(units[id]))
+    : [];
+  const unique = [...new Set(ordered)];
+  const remaining = Object.values<Json>(units)
+    .filter((unit) => text(unit.id) && !unique.includes(unit.id))
+    .sort((left, right) => Number(left.created_at_ms ?? 0) - Number(right.created_at_ms ?? 0) ||
+      left.id.localeCompare(right.id))
+    .map((unit) => unit.id);
+  data.execution_unit_order = [...unique, ...remaining];
+  return data.execution_unit_order;
+}
+
+function runnableExecutionUnit(unit: Json | undefined): boolean {
+  return Boolean(unit && unit.status !== "completed" &&
+    (text(unit.requirement_id_sha256) || text(unit.requirement_payload_sha256)));
+}
+
 function inputRequirementId(tool: string, input: Json): string | undefined {
   if (tool === "validate_requirement") return undefined;
   return [input.requirement_id, input.id].find(text)?.trim();
@@ -1433,6 +1513,11 @@ export function activateExecutionUnitForTool(
     };
     data.execution_units[targetId] = target;
   }
+  const order = executionUnitOrder(data);
+  if (!order.includes(targetId)) {
+    order.push(targetId);
+    data.execution_unit_order = order;
+  }
   if (requirementHash) {
     data.requirement_execution_unit_ids[requirementHash] = targetId;
     target.requirement_id_sha256 = requirementHash;
@@ -1490,6 +1575,58 @@ export function activateExecutionUnitForTool(
   save(current.path, data);
 }
 
+export function restoreExecutionUnitAfterBlockedTool(current: GuardStore, previousId: string): void {
+  const data = current.data;
+  const activeId = text(data.active_execution_unit_id) ? data.active_execution_unit_id.trim() : undefined;
+  if (!activeId || activeId === previousId) return;
+  const active = data.execution_units?.[activeId];
+  const previous = data.execution_units?.[previousId];
+  if (!active || !previous || previous.status === "completed") return;
+  const now = Date.now();
+  active.workflow = data.workflow;
+  stashUnitScopedRootState(data, active);
+  if (active.status !== "completed") active.status = "suspended";
+  active.updated_at_ms = now;
+  data.active_execution_unit_id = previousId;
+  data.workflow = previous.workflow;
+  restoreUnitScopedRootState(data, previous);
+  previous.status = "active";
+  previous.updated_at_ms = now;
+  appendWorkflowEvent(data, {
+    kind: "execution_unit_switch_rolled_back",
+    status: "active",
+    blocked_execution_unit_id: activeId,
+    phase: previous.workflow?.phase,
+    next_action: previous.workflow?.next_action,
+    at_ms: now,
+  });
+  save(current.path, data);
+}
+
+function activateNextExecutionUnit(data: Json, completedId: string, now: number): void {
+  const nextId = executionUnitOrder(data).find((id) =>
+    id !== completedId && runnableExecutionUnit(data.execution_units?.[id])
+  );
+  if (!nextId) return;
+  const next = data.execution_units[nextId];
+  data.active_execution_unit_id = nextId;
+  data.workflow = next.workflow;
+  restoreUnitScopedRootState(data, next);
+  next.status = "active";
+  next.resumed_at_ms = now;
+  delete next.suspended_at_ms;
+  delete next.suspend_reason;
+  next.updated_at_ms = now;
+  appendWorkflowEvent(data, {
+    kind: "execution_unit_resumed",
+    status: "active",
+    previous_execution_unit_id: completedId,
+    phase: next.workflow?.phase,
+    next_action: next.workflow?.next_action,
+    at_ms: now,
+  });
+}
+
 function finalizeActiveExecutionUnit(data: Json, now: number): void {
   const unitId = text(data.active_execution_unit_id) ? data.active_execution_unit_id.trim() : undefined;
   const unit = unitId && data.execution_units?.[unitId];
@@ -1509,6 +1646,7 @@ function finalizeActiveExecutionUnit(data: Json, now: number): void {
       next_action: null,
       at_ms: now,
     });
+    activateNextExecutionUnit(data, unitId, now);
   }
 }
 
@@ -1710,8 +1848,7 @@ function updateLocalWorkflow(
   if (!stateChangingTools.has(tool)) return;
 
   const current = currentOverride ?? store(rootDir);
-  activateExecutionUnitForTool(current, tool, input, event.result);
-  const workflow = current.data.workflow as Json;
+  let workflow = current.data.workflow as Json;
   if (preflightDenial) {
     const now = Date.now();
     workflow.last_tool = tool;
@@ -1761,13 +1898,20 @@ function updateLocalWorkflow(
     save(current.path, current.data);
     return;
   }
+  const envelopeOk = successful(event.error ? { isError: true } : event.result);
+  const validatedRequirementId = tool === "validate_requirement" && envelopeOk
+    ? validationRequirementId(event.result)
+    : undefined;
+  if (tool !== "validate_requirement" || validatedRequirementId) {
+    activateExecutionUnitForTool(current, tool, input, event.result);
+    workflow = current.data.workflow as Json;
+  }
   const continueToManualAfterValidation = tool === "validate_requirement" &&
     (workflow.post_validation_intent === "manual" || (
     workflow.next_action === "validate_requirement" && (
       workflow.phase === "inquiry_fields_ready" ||
       (Number.isInteger(workflow.pending_manual_target_count) && workflow.pending_manual_target_count > 0)
     )));
-  const envelopeOk = successful(event.error ? { isError: true } : event.result);
   const fieldEvidence = tool === "select_inquiry_form_fields" && envelopeOk
     ? fieldSelectionEvidence(event.result)
     : undefined;
@@ -1804,6 +1948,7 @@ function updateLocalWorkflow(
   const isIndividualFallback = tool === "create_with_distributions" &&
     individualFallbackPending(workflow, input);
   const ok = envelopeOk &&
+    (tool !== "validate_requirement" || validatedRequirementId !== undefined) &&
     (tool !== "select_inquiry_form_fields" || fieldEvidence !== undefined) &&
     (tool !== "rank_mcns" || rankEvidence !== undefined) &&
     (tool !== "manual_source_creators" || manualEvidence !== undefined) &&
@@ -2491,7 +2636,6 @@ function authorizeExternalSend(
   input: Json,
   rootDir: string,
   toolCallId?: string,
-  allowNewConfirmation = true,
 ): Json | undefined {
   const requestFingerprint = fingerprint(input);
   let current = store(rootDir);
@@ -2550,13 +2694,6 @@ function authorizeExternalSend(
     pending[1].resolution = "prompt-changed";
     pending[1].updated_at_ms = Date.now();
     current.data.confirmations[pending[0]] = pending[1];
-  }
-
-  if (!allowNewConfirmation) {
-    return denyStructured(
-      "INTEGRATION_REQUIRED",
-      "The host omitted session context and no unique matching local confirmation receipt was found. Reopen the confirmation from a stable session before sending.",
-    );
   }
 
   const now = Date.now();
@@ -2621,7 +2758,9 @@ export function guardWorkflowTool(
   scopeAvailable: boolean,
 ): Json | undefined {
   if (tool === "select_inquiry_form_fields") return authorizeFieldSelection(event, input, _current);
-  if (tool === "validate_requirement") return authorizeRequirementBrief(event, input);
+  if (tool === "validate_requirement") {
+    return authorizeRequirementBrief(event, input, _current, rootDir, scopeAvailable);
+  }
   if (tool === "search_creators") {
     if (!validRequirementPrimaryKey(input.id)) {
       return denyPreflight(
@@ -2648,7 +2787,7 @@ export function guardWorkflowTool(
       ? event.toolCallId.trim()
       : text(event.callID)
         ? event.callID.trim()
-        : undefined, scopeAvailable);
+        : undefined);
   }
   return undefined;
 }

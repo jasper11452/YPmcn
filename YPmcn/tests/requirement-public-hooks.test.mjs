@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -74,6 +75,142 @@ describe("requirement behavior through public plugin hooks", () => {
       { contentTag: "科技", followercount: "[10000,999999999]" },
     ]);
     assert.ok(payloads.every((payload) => payload.rawMessagesJson.originalBrief === brief));
+  });
+
+  it("runs split Brief units in stable order and resumes the next unit after completion", async () => {
+    const context = { sessionKey: "public-split-execution-order" };
+    const brief = [
+      "项目：同项目双需求执行",
+      "平台：小红书",
+      "单达人L1官方报价：8000元以内",
+      "数量：2位达人",
+      "母婴类达人且粉丝2万以上",
+      "科技类达人且粉丝1万以上",
+      "提报截止：2099-07-20 11:00",
+    ].join("；");
+    const intake = await hooks.get("before_prompt_build")({ prompt: brief, messages: [] }, context);
+    const serialized = intake.prependContext.split("\n").find((line) => line.startsWith('{"payloads":'));
+    const { payloads } = JSON.parse(serialized);
+    const requirementIds = [301, 302].map((value) => value.toString(16).padStart(32, "0"));
+
+    for (const [index, payload] of payloads.entries()) {
+      await hooks.get("after_tool_call")({
+        toolName: "mcp__ypmcn__validate_requirement",
+        params: { payload },
+        result: { success: true, data: { id: requirementIds[index] }, error: null },
+      }, context);
+    }
+
+    const stateFile = join(
+      rootDir,
+      "state",
+      "sessions",
+      createHash("sha256").update(context.sessionKey).digest("hex").slice(0, 24),
+      "confirmation_guard.json",
+    );
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    const unitIds = requirementIds.map((id) => state.requirement_execution_unit_ids[
+      createHash("sha256").update(id).digest("hex")
+    ]);
+    assert.deepEqual(
+      state.execution_unit_order.filter((id) => unitIds.includes(id)),
+      unitIds,
+    );
+
+    await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__rank_mcns",
+      params: { id: requirementIds[0], platform: "xiaohongshu" },
+    }, context);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__record_client_feedback",
+      params: {},
+      result: { success: true, data: {}, error: null },
+    }, context);
+
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.execution_units[unitIds[0]].status, "completed");
+    assert.equal(state.active_execution_unit_id, unitIds[1]);
+    assert.equal(state.execution_units[unitIds[1]].status, "active");
+    assert.equal(state.workflow.next_action, "search_creators");
+  });
+
+  it("accepts equivalent Brief line endings and blank-line layout without accepting text changes", async () => {
+    const compactBrief = READY_BRIEF.replace("美妆护肤", "空行归一化测试");
+    const blankLineBrief = compactBrief.split("\n").join("\r\n\r\n");
+    await hooks.get("before_prompt_build")({ prompt: blankLineBrief, messages: [] }, {});
+
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: { rawMessagesJson: { originalBrief: compactBrief } } },
+    }, {}), undefined);
+    const changed = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: { rawMessagesJson: { originalBrief: compactBrief.replace("空行归一化测试", "文字已改变") } } },
+    }, {});
+    assert.equal(changed.errorCode, "INVALID_INPUT");
+  });
+
+  it("authorizes validate_requirement from the persisted session Brief receipt", async () => {
+    const sessionId = "persisted-brief-receipt";
+    const sessionHash = createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
+    const brief = READY_BRIEF.replace("美妆护肤", "持久回执测试");
+    const context = { sessionId };
+    const intake = await hooks.get("before_prompt_build")({ prompt: brief, messages: [] }, context);
+    assert.match(intake.prependContext, /authoritative originalBrief for validate_requirement/);
+    assert.match(intake.prependContext, /持久回执测试/);
+
+    const persisted = JSON.parse(readFileSync(
+      join(rootDir, "state", "sessions", sessionHash, "confirmation_guard.json"),
+      "utf8",
+    ));
+    assert.ok(Object.values(persisted.requirement_brief_receipts).every((expiresAt) => expiresAt > Date.now()));
+
+    const call = {
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: { rawMessagesJson: { originalBrief: brief } } },
+    };
+    assert.equal(await hooks.get("before_tool_call")(call, context), undefined);
+    assert.equal(await hooks.get("before_tool_call")(call, {}), undefined);
+
+    const missing = await hooks.get("before_tool_call")({
+      ...call,
+      params: { payload: { rawMessagesJson: { originalBrief: `${brief}被修改` } } },
+    }, {});
+    assert.equal(missing.errorCode, "INVALID_INPUT");
+    assert.match(missing.blockReason, /does not match any active persisted Brief receipt/);
+  });
+
+  it("keeps the exact Brief available after AskUserQuestion and accepts the next validation", async () => {
+    const brief = [
+      "品牌：阿里巴巴",
+      "项目：千问61儿童节",
+      "平台：抖音",
+      "内容形式：视频",
+      "档期：7.30-7.31",
+      "单价：4w以下",
+      "返点：26%以上",
+      "内容：类似于AI帮忙送儿童节礼物",
+      "账号类型：母婴类，亲子相关",
+      "数量：5个",
+      "提报时间：7月25号上午11:00",
+    ].join("\n\n");
+    const wrapped = `[Current user request]\n单独调用validate_requirements工具：\n${brief}`;
+    const context = { sessionId: "brief-after-ask" };
+    const first = await hooks.get("before_prompt_build")({ prompt: wrapped, messages: [] }, context);
+    assert.match(first.prependContext, /"platform":"douyin"/);
+    assert.match(first.prependContext, /"missingRequired":\[\]/);
+
+    const afterAsk = await hooks.get("before_prompt_build")({
+      prompt: "1–20秒视频",
+      messages: [{ role: "user", content: wrapped }],
+    }, context);
+    const authoritativeLine = afterAsk.prependContext.split("\n")
+      .find((line) => line.startsWith('{"originalBrief":'));
+    assert.equal(JSON.parse(authoritativeLine).originalBrief, brief);
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: { rawMessagesJson: { originalBrief: brief } } },
+    }, context), undefined);
   });
 
   it("keeps ordinary tools available while enforcing Brief and primary-key preflights", async () => {

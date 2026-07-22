@@ -12,6 +12,7 @@ import {
   isAskTool,
   normalize,
   recordWorkflowToolResult,
+  restoreExecutionUnitAfterBlockedTool,
 } from "./runtime-hook-workflow.js";
 
 export { withStateScope } from "./runtime-hook-state.js";
@@ -27,7 +28,7 @@ const GUARDED_REQUIREMENT_TOOLS = new Set([
   "create_submission_batch",
 ]);
 const EXECUTION_UNIT_ROUTED_TOOLS = new Set([
-  "validate_requirement", "search_creators", "rank_mcns", "select_inquiry_form_fields",
+  "search_creators", "rank_mcns", "select_inquiry_form_fields",
   "create_with_distributions", "sync_mcn_inquiry_status", "ingest_mcn_submissions",
   "manual_source_creators", "rank_creators", "audit_manual_adjustment",
   "create_submission_batch", "record_client_feedback",
@@ -128,6 +129,9 @@ export function beforeTool(
       : undefined;
   }
   let current = tool && EXECUTION_UNIT_ROUTED_TOOLS.has(tool) ? store(rootDir) : undefined;
+  const previousExecutionUnitId = current && text(current.data.active_execution_unit_id)
+    ? current.data.active_execution_unit_id.trim()
+    : undefined;
   if (current && tool) activateExecutionUnitForTool(current, tool, input);
   if (tool === "rank_creators") {
     const notice = repeatedRankCreatorsNotice(input, rootDir);
@@ -140,7 +144,11 @@ export function beforeTool(
     onNotice?.("YPmcn search_creators is using primary-key shape validation only because the host omitted session context.");
   }
   current ??= store(rootDir);
-  return guardWorkflowTool(event, tool, input, current, rootDir, scopeAvailable);
+  const guarded = guardWorkflowTool(event, tool, input, current, rootDir, scopeAvailable);
+  if (guarded?.block === true && previousExecutionUnitId) {
+    restoreExecutionUnitAfterBlockedTool(current, previousExecutionUnitId);
+  }
+  return guarded;
 }
 
 export function afterTool(event: Json, _ctx: Json, rootDir: string): void {
