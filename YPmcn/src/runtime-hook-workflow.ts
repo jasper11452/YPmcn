@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   CONFIRMATION_TTL_MS,
+  canonical,
   denyStructured,
   fingerprint,
   globalStore,
@@ -15,6 +16,7 @@ import {
 } from "./runtime-hook-state.js";
 
 const PREFIXES = ["ypmcn__", "mcp__ypmcn__", "ypmcn-mcp__", "ypmcn-provider__"];
+const HOSTED_MCP_PREFIXES = ["ypmcn-mcp_", "ypmcn-provider_"];
 const EXTERNAL_SEND_HEADER = "企微外发确认";
 const EXTERNAL_SEND_CONFIRM_LABEL = "确认发送";
 const EXTERNAL_SEND_CANCEL_LABEL = "取消发送";
@@ -58,10 +60,13 @@ const SEARCH_REQUIREMENT_RECEIPT_KEY = "search_requirement_receipt";
 
 type PreflightDenialReason =
   | "brief_mismatch"
+  | "invalid_input"
   | "missing_session_context"
   | "primary_key_format"
   | "requirement_id_mismatch"
-  | "requirement_receipt_missing";
+  | "requirement_receipt_missing"
+  | "workflow_lineage"
+  | "workflow_order";
 
 const recentRequirementBriefs = new Map<string, number>();
 const preflightDenials = new Map<string, { reason: PreflightDenialReason; expiresAt: number }>();
@@ -76,8 +81,13 @@ function pruneTransientReceipts(now = Date.now()): void {
 }
 
 function preflightKey(event: Json, tool: string, input: Json): string {
-  return text(event.toolCallId)
-    ? `call:${event.toolCallId.trim()}`
+  const callId = text(event.toolCallId)
+    ? event.toolCallId.trim()
+    : text(event.callID)
+      ? event.callID.trim()
+      : undefined;
+  return callId
+    ? `call:${callId}`
     : `input:${tool}:${fingerprint(input)}`;
 }
 
@@ -134,6 +144,9 @@ export function normalize(name: string): string | undefined {
   for (const prefix of PREFIXES) {
     if (name.startsWith(prefix)) return name.slice(prefix.length) || undefined;
   }
+  for (const prefix of HOSTED_MCP_PREFIXES) {
+    if (name.startsWith(prefix)) return name.slice(prefix.length) || undefined;
+  }
   return undefined;
 }
 
@@ -149,6 +162,56 @@ function selectedColumnName(value: unknown): string | undefined {
     column.label, column.name, column.field_name,
     column.field, column.key, column.field_key,
   ].find(text)?.trim();
+}
+
+type InquiryColumn = { key: string; name: string };
+
+function normalizedInquiryColumn(value: unknown): InquiryColumn | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const column = value as Json;
+  const key = [column.key, column.field_key, column.field, column.database_field].find(text)?.trim();
+  const name = [column.name, column.field_name, column.label, column.description].find(text)?.trim();
+  return key && name ? { key, name } : undefined;
+}
+
+function validInquiryColumns(value: unknown): InquiryColumn[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const columns = value.map(normalizedInquiryColumn);
+  if (columns.some((column) => !column)) return undefined;
+  const normalized = columns as InquiryColumn[];
+  return new Set(normalized.map(({ key }) => key)).size === normalized.length ? normalized : undefined;
+}
+
+function columnsFromDescription(value: unknown): InquiryColumn[] | undefined {
+  if (!text(value)) return undefined;
+  const columns = value.split(/\r?\n/).flatMap((line) => {
+    const match = /^\s*([^：:]+?)\s*[：:]\s*(.+?)\s*$/.exec(line);
+    return match ? [{ key: match[1].trim(), name: match[2].trim() }] : [];
+  });
+  return validInquiryColumns(columns);
+}
+
+function fieldSelectionEvidence(root: unknown): InquiryColumn[] | undefined {
+  const candidates: InquiryColumn[][] = [];
+  const visit = (value: unknown, key?: string): void => {
+    if (Array.isArray(value)) {
+      const columns = validInquiryColumns(value);
+      if (columns) candidates.push(columns);
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!value || typeof value !== "object") {
+      if (key && /description/i.test(key)) {
+        const columns = columnsFromDescription(value);
+        if (columns) candidates.push(columns);
+      }
+      return;
+    }
+    for (const [childKey, child] of Object.entries(value as Json)) visit(child, childKey);
+  };
+  visit(unwrap(root));
+  const unique = new Map(candidates.map((columns) => [canonical(columns), columns]));
+  return unique.size === 1 ? [...unique.values()][0] : undefined;
 }
 
 function parsedJsonObject(value: string): Json | undefined {
@@ -576,6 +639,72 @@ function authorizeRequirementBrief(event: Json, input: Json): Json | undefined {
   return undefined;
 }
 
+function authorizeFieldSelection(event: Json, input: Json, current: GuardStore): Json | undefined {
+  if (!text(input.platform) || !["xiaohongshu", "douyin"].includes(input.platform.trim())) {
+    return denyPreflight(
+      event, "select_inquiry_form_fields", input, "invalid_input", "INVALID_INPUT",
+      "select_inquiry_form_fields.platform must be the confirmed xiaohongshu or douyin platform.",
+    );
+  }
+  const workflow = current.data.workflow as Json;
+  if (workflow.field_selection_evidence_status === "valid" && workflow.next_action !== null) {
+    return denyPreflight(
+      event, "select_inquiry_form_fields", input, "workflow_order", "INVALID_PHASE",
+      "select_inquiry_form_fields already succeeded for the active export flow; do not reopen the selector.",
+    );
+  }
+  return undefined;
+}
+
+function authorizeRankCreators(event: Json, input: Json, current: GuardStore): Json | undefined {
+  const workflow = current.data.workflow as Json;
+  if (workflow.phase !== "candidate_pool_enriched" || workflow.next_action !== "rank_creators") {
+    return denyPreflight(
+      event, "rank_creators", input, "workflow_order", "INVALID_PHASE",
+      "rank_creators requires the current successful manual_source_creators result and field-selection evidence.",
+    );
+  }
+  const inquiryIds = Array.isArray(workflow.manual_sourcing_inquiry_ids)
+    ? workflow.manual_sourcing_inquiry_ids
+    : undefined;
+  const columns = validInquiryColumns(input.columns);
+  if (
+    workflow.manual_sourcing_evidence_status !== "valid" ||
+    !text(workflow.requirement_id) || input.requirement_id !== workflow.requirement_id ||
+    !inquiryIds || canonical(input.inquiry_ids) !== canonical(inquiryIds) ||
+    !columns || !text(workflow.field_selection_columns_sha256) ||
+    sha256Text(canonical(columns)) !== workflow.field_selection_columns_sha256
+  ) {
+    return denyPreflight(
+      event, "rank_creators", input, "workflow_lineage", "INVALID_INPUT",
+      "rank_creators must use the exact requirement_id and inquiry_ids from this manual sourcing result and the ordered columns from this flow's field selection.",
+    );
+  }
+  return undefined;
+}
+
+function authorizeSubmissionBatch(event: Json, input: Json, current: GuardStore): Json | undefined {
+  const workflow = current.data.workflow as Json;
+  if (workflow.phase !== "recommendation_ready" || workflow.next_action !== "create_submission_batch") {
+    return denyPreflight(
+      event, "create_submission_batch", input, "workflow_order", "INVALID_PHASE",
+      "create_submission_batch requires the immediately preceding successful rank_creators result.",
+    );
+  }
+  if (
+    workflow.rank_creators_evidence_status !== "valid" ||
+    !text(workflow.requirement_id) || input.requirement_id !== workflow.requirement_id ||
+    !text(workflow.manual_sourcing_size) || input.size !== workflow.manual_sourcing_size ||
+    !text(input.number) || !/^[1-9]\d*$/.test(input.number.trim())
+  ) {
+    return denyPreflight(
+      event, "create_submission_batch", input, "workflow_lineage", "INVALID_INPUT",
+      "create_submission_batch must use the current manual sourcing requirement_id and size plus a positive integer batch number.",
+    );
+  }
+  return undefined;
+}
+
 type DistributionOutcomeEvidence = {
   projectId?: string;
   requestedCount: number;
@@ -728,6 +857,27 @@ function directManualSourcingEvidence(
     size: input.size.trim(),
     inquiryIds: [...unique.values()][0],
   };
+}
+
+function rankCreatorsEvidence(root: unknown): Json | undefined {
+  const envelope = unwrap(root);
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) return undefined;
+  const records = objectRecords(envelope.data);
+  return records.find((record) =>
+    (Array.isArray(record.batch_items) && record.batch_items.length > 0) ||
+    (text(record.run_id) && Number.isInteger(record.ranked_count) && record.ranked_count > 0)
+  );
+}
+
+function submissionBatchEvidence(root: unknown): Json | undefined {
+  const envelope = unwrap(root);
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) return undefined;
+  const records = objectRecords(envelope.data);
+  return records.find((record) =>
+    record.exported === true ||
+    [record.file_url, record.download_url, record.spreadsheet_url].some(text) ||
+    (text(record.submission_batch_id) && ["success", "completed", "exported"].includes(record.status))
+  );
 }
 
 function distributionSupplierId(value: unknown): string | undefined {
@@ -1185,6 +1335,15 @@ function updateLocalWorkflow(
     } else if (preflightDenial === "brief_mismatch") {
       workflow.next_action = "restore_exact_original_brief";
       workflow.waiting_for = "assistant";
+    } else if (preflightDenial === "invalid_input") {
+      workflow.next_action = `correct_${tool}_input`;
+      workflow.waiting_for = "assistant";
+    } else if (preflightDenial === "workflow_lineage") {
+      workflow.next_action = `recover_${tool}_lineage`;
+      workflow.waiting_for = "assistant";
+    } else if (preflightDenial === "workflow_order") {
+      workflow.next_action = workflow.next_action ?? `recover_${tool}_order`;
+      workflow.waiting_for = "assistant";
     } else {
       workflow.next_action = "validate_requirement";
       workflow.waiting_for = "assistant";
@@ -1209,6 +1368,9 @@ function updateLocalWorkflow(
       (Number.isInteger(workflow.pending_manual_target_count) && workflow.pending_manual_target_count > 0)
     )));
   const envelopeOk = successful(event.error ? { isError: true } : event.result);
+  const fieldEvidence = tool === "select_inquiry_form_fields" && envelopeOk
+    ? fieldSelectionEvidence(event.result)
+    : undefined;
   const rankEvidence = tool === "rank_mcns" && envelopeOk
     ? rankMcnCoverageEvidence(event.result, input, workflow)
     : undefined;
@@ -1220,6 +1382,12 @@ function updateLocalWorkflow(
   const distributionEvidence = tool === "create_with_distributions" && envelopeOk
     ? distributionOutcomeEvidence(event.result, input)
     : undefined;
+  const creatorRankEvidence = tool === "rank_creators" && envelopeOk
+    ? rankCreatorsEvidence(event.result)
+    : undefined;
+  const exportEvidence = tool === "create_submission_batch" && envelopeOk
+    ? submissionBatchEvidence(event.result)
+    : undefined;
   const distributionUnboundRejection = tool === "create_with_distributions" && !envelopeOk
     ? distributionUnboundRejectionEvidence(event, input, workflow)
     : undefined;
@@ -1230,12 +1398,19 @@ function updateLocalWorkflow(
   const isIndividualFallback = tool === "create_with_distributions" &&
     individualFallbackPending(workflow, input);
   const ok = envelopeOk &&
+    (tool !== "select_inquiry_form_fields" || fieldEvidence !== undefined) &&
     (tool !== "rank_mcns" || rankEvidence !== undefined) &&
     (tool !== "manual_source_creators" || manualEvidence !== undefined) &&
-    (tool !== "create_with_distributions" || distributionEvidence !== undefined);
+    (tool !== "create_with_distributions" || distributionEvidence !== undefined) &&
+    (tool !== "rank_creators" || creatorRankEvidence !== undefined) &&
+    (tool !== "create_submission_batch" || exportEvidence !== undefined);
+  const writeTool = tool !== "select_inquiry_form_fields";
+  const unknownWriteResult = writeTool && !envelopeOk &&
+    (Boolean(event.error) || !definiteFailureEnvelope(event.result));
   const now = Date.now();
   workflow.last_tool = tool;
-  workflow.last_tool_status = ok ? "success" : "failed";
+  workflow.last_tool_status = ok ? "success" : unknownWriteResult ? "unknown" : "failed";
+  workflow.transition_seq = Number(workflow.transition_seq ?? 0) + 1;
   workflow.updated_at_ms = now;
   if (tool === "search_creators" || tool === "rank_mcns") clearMcnRecipientDirectory(workflow);
   if (tool === "search_creators" || tool === "rank_mcns") {
@@ -1249,11 +1424,15 @@ function updateLocalWorkflow(
 
   if (tool === "select_inquiry_form_fields" && ok) {
     // The Tool waits for the selector callback and returns the submitted fields.
-    // Keep those fields in Agent context and project only the safe next action.
+    // Persist normalized callback evidence so later calls and resumed sessions can verify lineage.
     workflow.phase = "inquiry_fields_ready";
     workflow.next_action = "validate_requirement";
     workflow.waiting_for = null;
     if (text(input.platform)) workflow.platform = input.platform.trim();
+    workflow.field_selection_evidence_status = "valid";
+    workflow.field_selection_columns = fieldEvidence;
+    workflow.field_selection_columns_sha256 = sha256Text(canonical(fieldEvidence));
+    delete workflow.field_selection_evidence_error;
   } else if (tool === "create_with_distributions" && distributionUnboundRejection) {
     const unboundHashes = new Set(
       distributionUnboundRejection.unboundSupplierIds.map((supplierId) => sha256Text(supplierId)),
@@ -1338,6 +1517,14 @@ function updateLocalWorkflow(
       workflow.waiting_for = null;
     }
   } else if (!ok) {
+    if (tool === "select_inquiry_form_fields") {
+      workflow.field_selection_evidence_status = envelopeOk ? "invalid" : "unavailable";
+      workflow.field_selection_evidence_error = envelopeOk
+        ? "missing_or_conflicting_callback_columns"
+        : "provider_call_failed";
+      delete workflow.field_selection_columns;
+      delete workflow.field_selection_columns_sha256;
+    }
     if (tool === "rank_mcns") {
       workflow.rank_mcn_inquiry_evidence_status = envelopeOk ? "invalid" : "unavailable";
       workflow.rank_mcn_inquiry_evidence_error = envelopeOk
@@ -1353,6 +1540,18 @@ function updateLocalWorkflow(
           : "missing_or_conflicting_task_evidence"
         : "provider_call_failed_or_unknown";
     }
+    if (tool === "rank_creators") {
+      workflow.rank_creators_evidence_status = envelopeOk ? "invalid" : "unavailable";
+      workflow.rank_creators_evidence_error = envelopeOk
+        ? "missing_persisted_ranking_evidence"
+        : unknownWriteResult ? "write_result_unknown" : "provider_call_failed";
+    }
+    if (tool === "create_submission_batch") {
+      workflow.submission_batch_evidence_status = envelopeOk ? "invalid" : "unavailable";
+      workflow.submission_batch_evidence_error = envelopeOk
+        ? "missing_export_evidence"
+        : unknownWriteResult ? "write_result_unknown" : "provider_call_failed";
+    }
     if (tool === "create_with_distributions") {
       workflow.distribution_outcome_status = envelopeOk ? "incomplete" : "unavailable";
       workflow.distribution_outcome_error = envelopeOk
@@ -1365,10 +1564,9 @@ function updateLocalWorkflow(
         "distribution_supplier_statuses", "failed_supplier_count", "unknown_supplier_count",
       ]) delete workflow[key];
     }
-    workflow.next_action = `recover_${tool}`;
-    workflow.waiting_for = "user";
+    workflow.next_action = unknownWriteResult ? `reconcile_${tool}` : `recover_${tool}`;
+    workflow.waiting_for = unknownWriteResult ? "provider" : "user";
   } else {
-    workflow.transition_seq = Number(workflow.transition_seq ?? 0) + 1;
     const root = event.result;
     switch (tool) {
       case "validate_requirement": {
@@ -1502,6 +1700,9 @@ function updateLocalWorkflow(
         workflow.phase = "recommendation_ready";
         workflow.next_action = "create_submission_batch";
         workflow.waiting_for = null;
+        workflow.rank_creators_evidence_status = "valid";
+        workflow.rank_creators_input_sha256 = sha256Text(canonical(input));
+        delete workflow.rank_creators_evidence_error;
         const runId = resultText(root, ["run_id"]);
         if (runId) workflow.run_id = runId;
         break;
@@ -1510,6 +1711,9 @@ function updateLocalWorkflow(
         workflow.phase = "submission_batch_ready";
         workflow.next_action = null;
         workflow.waiting_for = null;
+        workflow.submission_batch_evidence_status = "valid";
+        workflow.submission_batch_input_sha256 = sha256Text(canonical(input));
+        delete workflow.submission_batch_evidence_error;
         if (text(input.number)) workflow.submission_batch_number = input.number.trim();
         break;
       case "record_client_feedback":
@@ -1530,7 +1734,9 @@ function updateLocalWorkflow(
           workflow.manual_sourcing_inquiry_ids = manualEvidence.inquiryIds;
           workflow.manual_sourcing_evidence_status = "valid";
           delete workflow.manual_sourcing_evidence_error;
-          workflow.next_action = "rank_creators";
+          workflow.next_action = workflow.field_selection_evidence_status === "valid"
+            ? "rank_creators"
+            : null;
           workflow.waiting_for = null;
         } else {
           workflow.manual_sourcing_task_id = manualEvidence.taskId;
@@ -1806,6 +2012,7 @@ export function guardWorkflowTool(
   rootDir: string,
   scopeAvailable: boolean,
 ): Json | undefined {
+  if (tool === "select_inquiry_form_fields") return authorizeFieldSelection(event, input, _current);
   if (tool === "validate_requirement") return authorizeRequirementBrief(event, input);
   if (tool === "search_creators") {
     if (!validRequirementPrimaryKey(input.id)) {
@@ -1825,6 +2032,8 @@ export function guardWorkflowTool(
     }
     return authorizeFreshManualRequirement(event, input, _current, rootDir);
   }
+  if (tool === "rank_creators") return authorizeRankCreators(event, input, _current);
+  if (tool === "create_submission_batch") return authorizeSubmissionBatch(event, input, _current);
   if (tool === "create_with_distributions") {
     if (!scopeAvailable) {
       return denyPreflight(
@@ -1832,7 +2041,11 @@ export function guardWorkflowTool(
         "The host omitted session context from before_tool_call, so external-send confirmation cannot be verified safely. Stop and upgrade the host integration before sending.",
       );
     }
-    return authorizeExternalSend(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined);
+    return authorizeExternalSend(input, rootDir, text(event.toolCallId)
+      ? event.toolCallId.trim()
+      : text(event.callID)
+        ? event.callID.trim()
+        : undefined);
   }
   return undefined;
 }
@@ -1840,7 +2053,11 @@ export function guardWorkflowTool(
 function recordExternalSendResult(event: Json, input: Json, rootDir: string): void {
   const current = store(rootDir);
   const requestFingerprint = fingerprint(input);
-  const afterToolCallId = text(event.toolCallId) ? event.toolCallId.trim() : undefined;
+  const afterToolCallId = text(event.toolCallId)
+    ? event.toolCallId.trim()
+    : text(event.callID)
+      ? event.callID.trim()
+      : undefined;
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) => {
     if (
       receipt.kind !== "external_send" ||

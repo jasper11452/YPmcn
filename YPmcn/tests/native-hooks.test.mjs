@@ -268,7 +268,7 @@ describe("YP Action native hooks", () => {
     assert.match(prompt.prependContext, /authoritative local orchestration state/);
     assert.match(prompt.prependContext, /"next_action":"validate_requirement"/);
     assert.match(prompt.prependContext, /waiting_for=user requires an immediate native AskUserQuestion gate/);
-    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 19);
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 20);
 
     for (const [toolName, params] of [
       ["read", { file_path: "/tmp/SKILL.md" }],
@@ -285,6 +285,7 @@ describe("YP Action native hooks", () => {
   it("allows declared business Tools while guarding manual freshness and send confirmation", async () => {
     await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, DEFAULT_CONTEXT);
     for (const name of [...contract.requiredTools, ...contract.optionalTools]) {
+      if (["select_inquiry_form_fields", "rank_creators", "create_submission_batch"].includes(name)) continue;
       let params = name === "create_with_distributions" ? distributionParams() : {};
       if (name === "create_with_distributions") await recordMcnRecipients(params);
       if (name === "validate_requirement") {
@@ -323,17 +324,29 @@ describe("YP Action native hooks", () => {
       columns: [{ key: "kwUid", name: "达人 ID" }],
     });
 
-    for (const requirementId of ["requirement-repeat-1", "requirement-repeat-1", "requirement-repeat-2", "requirement-repeat-2"]) {
+    await recordTool(
+      "mcp__ypmcn__select_inquiry_form_fields",
+      { platform: "xiaohongshu" },
+      { success: true, data: { fields: [{ key: "kwUid", name: "达人 ID" }] }, error: null },
+    );
+    const activeRequirement = requirementId(31);
+    await recordFreshRequirement(activeRequirement);
+    const manualParams = { requirement_id: activeRequirement, size: "1" };
+    assert.equal(await guard("mcp__ypmcn__manual_source_creators", manualParams), undefined);
+    await recordTool(
+      "mcp__ypmcn__manual_source_creators",
+      manualParams,
+      { success: true, data: { inquiry_ids: ["31"] }, error: null },
+    );
+
+    for (let index = 0; index < 2; index += 1) {
       assert.equal(await localHooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__rank_creators",
-        params: rankParams(requirementId),
+        params: rankParams(activeRequirement),
       }, DEFAULT_CONTEXT), undefined);
     }
 
-    assert.deepEqual(warnings, [
-      "已根据需求进行排序，请注意",
-      "已根据需求进行排序，请注意",
-    ]);
+    assert.deepEqual(warnings, ["已根据需求进行排序，请注意"]);
     const persisted = readFileSync(stateFile, "utf8");
     assert.match(persisted, /"last_rank_creators_requirement_id_sha256": "[0-9a-f]{64}"/);
     assert.doesNotMatch(persisted, /requirement-repeat/);
@@ -1293,8 +1306,10 @@ describe("YP Action native hooks", () => {
       error: "connection lost",
     }, DEFAULT_CONTEXT);
     state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.workflow.next_action, "recover_manual_source_creators");
+    assert.equal(state.workflow.next_action, "reconcile_manual_source_creators");
     assert.equal(state.workflow.manual_sourcing_evidence_status, "unavailable");
+    assert.equal(state.workflow.last_tool_status, "unknown");
+    assert.equal(state.workflow.waiting_for, "provider");
     assert.equal(state.workflow.pending_manual_target_count, 4);
   });
 
@@ -1381,6 +1396,10 @@ describe("YP Action native hooks", () => {
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.next_action, "validate_requirement");
     assert.equal(state.workflow.platform, "xiaohongshu");
+    assert.deepEqual(state.workflow.field_selection_columns, [
+      { key: "kwUid", name: "达人 ID" },
+      { key: "nickname", name: "达人昵称" },
+    ]);
 
     await recordFreshRequirement(requirementId(3));
     state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -1400,27 +1419,119 @@ describe("YP Action native hooks", () => {
     assert.deepEqual(state.workflow.manual_sourcing_inquiry_ids, ["31", "32"]);
     assert.equal(state.workflow.manual_sourcing_size, "8");
 
+    const rankParams = {
+      inquiry_ids: ["31", "32"],
+      requirement_id: requirementId(3),
+      columns: [
+        { key: "kwUid", name: "达人 ID" },
+        { key: "nickname", name: "达人昵称" },
+      ],
+    };
+    assert.equal(await guard("mcp__ypmcn__rank_creators", rankParams), undefined);
     await recordTool(
       "mcp__ypmcn__rank_creators",
-      {
-        inquiry_ids: ["31", "32"],
-        requirement_id: requirementId(3),
-        columns: [{ key: "kwUid", name: "达人 ID" }],
-      },
+      rankParams,
       { success: true, data: { batch_items: [{ kwUid: "creator-1" }] }, error: null },
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.next_action, "create_submission_batch");
 
+    const exportParams = { requirement_id: requirementId(3), size: "8", number: "2" };
+    assert.equal(await guard("mcp__ypmcn__create_submission_batch", exportParams), undefined);
     await recordTool(
       "mcp__ypmcn__create_submission_batch",
-      { requirement_id: requirementId(3), size: "8", number: "2" },
+      exportParams,
       { success: true, data: { exported: true }, error: null },
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.phase, "submission_batch_ready");
     assert.equal(state.workflow.next_action, null);
     assert.equal(state.workflow.submission_batch_number, "2");
+  });
+
+  it("blocks out-of-order direct-flow calls and mismatched lineage", async () => {
+    const earlyRank = await guard("mcp__ypmcn__rank_creators", {
+      requirement_id: requirementId(60),
+      inquiry_ids: ["invented"],
+      columns: [{ key: "kwUid", name: "达人 ID" }],
+    });
+    assert.equal(earlyRank.errorCode, "INVALID_PHASE");
+
+    const earlyExport = await guard("mcp__ypmcn__create_submission_batch", {
+      requirement_id: requirementId(60), size: "1", number: "1",
+    });
+    assert.equal(earlyExport.errorCode, "INVALID_PHASE");
+    assert.equal((await guard("mcp__ypmcn__select_inquiry_form_fields", {
+      platform: "weibo",
+    })).errorCode, "INVALID_INPUT");
+
+    await recordTool(
+      "mcp__ypmcn__select_inquiry_form_fields",
+      { platform: "xiaohongshu" },
+      { success: true, data: { fields: [{ key: "kwUid", name: "达人 ID" }] }, error: null },
+    );
+    const activeRequirement = requirementId(61);
+    await recordFreshRequirement(activeRequirement);
+    const manualParams = { requirement_id: activeRequirement, size: "3" };
+    assert.equal(await guard("mcp__ypmcn__manual_source_creators", manualParams), undefined);
+    await recordTool(
+      "mcp__ypmcn__manual_source_creators",
+      manualParams,
+      { success: true, data: { inquiry_ids: ["61", "62"] }, error: null },
+    );
+
+    const wrongRank = await guard("mcp__ypmcn__rank_creators", {
+      requirement_id: activeRequirement,
+      inquiry_ids: ["61", "invented"],
+      columns: [{ key: "kwUid", name: "达人 ID" }],
+    });
+    assert.equal(wrongRank.errorCode, "INVALID_INPUT");
+    assert.match(wrongRank.blockReason, /exact requirement_id and inquiry_ids/);
+  });
+
+  it("requires business evidence and records unknown writes without advancing", async () => {
+    await recordTool(
+      "mcp__ypmcn__select_inquiry_form_fields",
+      { platform: "xiaohongshu" },
+      { success: true, data: {}, error: null },
+    );
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "requirement_draft");
+    assert.equal(state.workflow.field_selection_evidence_status, "invalid");
+    assert.equal(state.workflow.transition_seq, 1);
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    await recordTool(
+      "mcp__ypmcn__select_inquiry_form_fields",
+      { platform: "xiaohongshu" },
+      { success: true, data: { fields: [{ key: "kwUid", name: "达人 ID" }] }, error: null },
+    );
+    const activeRequirement = requirementId(62);
+    await recordFreshRequirement(activeRequirement);
+    const manualParams = { requirement_id: activeRequirement, size: "2" };
+    assert.equal(await guard("mcp__ypmcn__manual_source_creators", manualParams), undefined);
+    await recordTool(
+      "mcp__ypmcn__manual_source_creators",
+      manualParams,
+      { success: true, data: { inquiry_ids: ["71", "72"] }, error: null },
+    );
+    const rankParams = {
+      requirement_id: activeRequirement,
+      inquiry_ids: ["71", "72"],
+      columns: [{ key: "kwUid", name: "达人 ID" }],
+    };
+    assert.equal(await guard("mcp__ypmcn__rank_creators", rankParams), undefined);
+    await hooks.get("after_tool_call")({
+      toolName: "mcp__ypmcn__rank_creators",
+      params: rankParams,
+      error: "connection lost",
+    }, DEFAULT_CONTEXT);
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "candidate_pool_enriched");
+    assert.equal(state.workflow.last_tool_status, "unknown");
+    assert.equal(state.workflow.next_action, "reconcile_rank_creators");
+    assert.equal(state.workflow.waiting_for, "provider");
+    assert.equal(state.workflow_events.at(-1).status, "unknown");
   });
 
   it("uses callback-returned fields without reopening the selector", async () => {
@@ -1469,7 +1580,7 @@ describe("YP Action native hooks", () => {
     assert.deepEqual(secondState.confirmations, {});
   });
 
-  it("migrates v18 state to v19 without rewriting a completed workflow phase", async () => {
+  it("migrates v18 state to v20 without rewriting a completed workflow phase", async () => {
     mkdirSync(join(tempDir, "state", "sessions", defaultSessionHash), { recursive: true });
     writeFileSync(stateFile, JSON.stringify({
       schema_version: 18,
@@ -1487,7 +1598,7 @@ describe("YP Action native hooks", () => {
     }));
     await hooks.get("before_prompt_build")({ prompt: "查看状态", messages: [] }, DEFAULT_CONTEXT);
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(state.schema_version, 19);
+    assert.equal(state.schema_version, 20);
     assert.equal(state.workflow.phase, "recommendation_ready");
     assert.equal(state.workflow.next_action, null);
     assert.equal(state.manual_sourcing_requirement_receipt, undefined);
@@ -1508,6 +1619,97 @@ describe("YP Action native hooks", () => {
   it("still requests confirmation when provider arguments are incomplete because schema validation is not a Hook gate", async () => {
     const result = await guard("mcp__ypmcn__create_with_distributions", {}, "call-provider-validation");
     askInputFrom(result);
+  });
+
+  it("recognizes OpenCode-style MCP tool names and session aliases", async () => {
+    const opencodeContext = { sessionID: "opencode-session" };
+    await hooks.get("before_prompt_build")({
+      prompt: UNRESOLVED_BRIEF,
+      messages: [],
+      sessionID: "opencode-session",
+    }, opencodeContext);
+
+    await hooks.get("after_tool_call")({
+      toolName: "ypmcn-mcp_select_inquiry_form_fields",
+      params: { platform: "xiaohongshu" },
+      result: {
+        success: true,
+        data: {
+          fields: [{ key: "kwUid", name: "达人 ID" }],
+        },
+        error: null,
+      },
+      callID: "call-opencode-fields",
+      sessionID: "opencode-session",
+    }, opencodeContext);
+
+    let state = JSON.parse(readFileSync(sessionStateFile("opencode-session"), "utf8"));
+    assert.equal(state.workflow.phase, "inquiry_fields_ready");
+    assert.equal(state.workflow.next_action, "validate_requirement");
+
+    const requirement = requirementId(50);
+    await hooks.get("after_tool_call")({
+      toolName: "ypmcn-mcp_validate_requirement",
+      params: {
+        payload: {
+          platform: "xiaohongshu",
+          quantityTotal: 1,
+          rawMessagesJson: { originalBrief: UNRESOLVED_BRIEF },
+        },
+      },
+      result: { success: true, data: { id: requirement }, error: null },
+      callID: "call-opencode-validate",
+      sessionID: "opencode-session",
+    }, opencodeContext);
+
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "ypmcn-mcp_search_creators",
+      params: { id: requirement },
+      callID: "call-opencode-search",
+      sessionID: "opencode-session",
+    }, opencodeContext), undefined);
+  });
+
+  it("binds preflight denials and confirmations with callID aliases", async () => {
+    const opencodeContext = { sessionID: "opencode-callid" };
+    await hooks.get("before_prompt_build")({
+      prompt: UNRESOLVED_BRIEF,
+      messages: [],
+      sessionID: "opencode-callid",
+    }, opencodeContext);
+
+    const freshId = requirementId(51);
+    await hooks.get("after_tool_call")({
+      toolName: "ypmcn-mcp_validate_requirement",
+      params: {
+        payload: {
+          platform: "xiaohongshu",
+          quantityTotal: 1,
+          rawMessagesJson: { originalBrief: UNRESOLVED_BRIEF },
+        },
+      },
+      result: { success: true, data: { id: freshId }, error: null },
+      callID: "call-opencode-validate-fresh",
+      sessionID: "opencode-callid",
+    }, opencodeContext);
+
+    const deniedEvent = {
+      toolName: "ypmcn-mcp_search_creators",
+      params: { id: "1784689136279241" },
+      callID: "call-opencode-bad-search",
+      sessionID: "opencode-callid",
+    };
+    const denied = await hooks.get("before_tool_call")(deniedEvent, opencodeContext);
+    assert.equal(denied.errorCode, "INVALID_INPUT");
+    await hooks.get("after_tool_call")({ ...deniedEvent, error: denied.blockReason }, opencodeContext);
+
+    const corrected = await hooks.get("before_tool_call")({
+      toolName: "ypmcn-mcp_search_creators",
+      params: { id: freshId },
+      callID: "call-opencode-good-search",
+      sessionID: "opencode-callid",
+    }, opencodeContext);
+    assert.equal(corrected, undefined);
   });
 
   it("fails open for ordinary tools and closed for all guarded requirement or external-send calls", async () => {

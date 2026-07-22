@@ -38,7 +38,7 @@
     },
     "workflowState": {
       "path": "schemas/workflow-state.schema.json",
-      "hash": "33ee031647bec6d3a948dfa8ec456231a6d2c4cf59a3dc3d96c060baf036dc32"
+      "hash": "245739be622c0f80060d69b5576010b082eb6f17d58fcbd00189c6f1a72c8512"
     }
   },
   "canonicalInput": {

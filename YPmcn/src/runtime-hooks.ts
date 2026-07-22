@@ -16,9 +16,12 @@ export { withStateScope } from "./runtime-hook-state.js";
 
 const SHELL_TOOLS = new Set(["bash", "exec", "shell", "powershell", "pwsh"]);
 const GUARDED_REQUIREMENT_TOOLS = new Set([
+  "select_inquiry_form_fields",
   "validate_requirement",
   "search_creators",
   "manual_source_creators",
+  "rank_creators",
+  "create_submission_batch",
 ]);
 const PROVIDER_WRITE_TARGET = /create[-_]with[-_]distributions|\/api\/projects\/create-with-distributions/i;
 const SHELL_WRITE_CLIENT = /\b(?:curl|wget|httpie)\b|\bInvoke-(?:WebRequest|RestMethod)\b|\brequests\.(?:post|put|patch|delete)\b|\baxios\.(?:post|put|patch|delete)\b|\bfetch\s*\(|\b(?:mcp|mcporter|openclaw)\b[^\n]*(?:call|invoke|run)\b/i;
@@ -85,7 +88,6 @@ export function beforeTool(
   if (tool === "rank_creators") {
     const notice = repeatedRankCreatorsNotice(input, rootDir);
     if (notice) onNotice?.(notice);
-    return undefined;
   }
   if (!tool || (!GUARDED_REQUIREMENT_TOOLS.has(tool) && tool !== "create_with_distributions")) {
     return undefined;
