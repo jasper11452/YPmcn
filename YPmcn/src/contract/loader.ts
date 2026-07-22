@@ -315,7 +315,7 @@ function validateOutputContractMap(
   validateToolMapKeys(contracts, expectedNames, label);
   for (const [name, rawContract] of Object.entries(contracts)) {
     const contract = requireRecord(rawContract, `${label}.${name}`);
-    const expectedKeys = new Set([
+    const requiredKeys = new Set([
       "advertisedOutputSchema",
       "evidenceBasis",
       "successEnvelope",
@@ -323,11 +323,26 @@ function validateOutputContractMap(
       "successSchema",
       "errorCodes",
     ]);
-    for (const key of expectedKeys) {
+    const allowedKeys = new Set([...requiredKeys, "compatibility"]);
+    for (const key of requiredKeys) {
       if (!hasOwn(contract, key)) throw new Error(`${label}.${name}.${key} is missing`);
     }
     for (const key of Object.keys(contract)) {
-      if (!expectedKeys.has(key)) throw new Error(`${label}.${name}.${key} is not declared`);
+      if (!allowedKeys.has(key)) throw new Error(`${label}.${name}.${key} is not declared`);
+    }
+    if (name === "search_creators") {
+      const compatibility = requireRecord(contract.compatibility, `${label}.${name}.compatibility`);
+      if (
+        compatibility.primary !== "supply-assessment-v2" ||
+        compatibility.legacyAcceptedIn !== "3.4.9-only" ||
+        JSON.stringify(compatibility.legacyFields) !==
+          JSON.stringify(["demand_count", "eligible_creator_count", "supply_ratio"]) ||
+        compatibility.conflictBehavior !== "fail-closed"
+      ) {
+        throw new Error(`${label}.${name}.compatibility is invalid`);
+      }
+    } else if (hasOwn(contract, "compatibility")) {
+      throw new Error(`${label}.${name}.compatibility is not declared`);
     }
     if (
       typeof contract.successEnvelope !== "string" ||
@@ -757,7 +772,11 @@ export function loadRequirementsContract(): RequirementsContract {
     JSON.stringify(canonicalInput.requiredMembers) !==
       JSON.stringify(["originalBrief", "atoms", "coverageCheck"]) ||
     JSON.stringify(canonicalInput.compatibilityAliases) !== JSON.stringify([]) ||
-    canonicalInput.dictionaryMayContainValues !== false
+    canonicalInput.dictionaryMayContainValues !== false ||
+    canonicalInput.sourceBinding !== "sha256-of-exact-client-brief-observed-before-tool-call" ||
+    canonicalInput.originalBriefMutationAllowed !== false ||
+    canonicalInput.supplementalAnswers !==
+      "represented-as-audit-atoms-without-rewriting-originalBrief"
   ) {
     throw new Error("requirements canonical input policy is invalid");
   }
@@ -862,6 +881,8 @@ export function loadRequirementsContract(): RequirementsContract {
     platformSplit.executionUnitPlatformCardinality !== 1 ||
     platformSplit.multiPlatformBehavior !==
       "one independently validated customer_demands record per platform" ||
+    platformSplit.multiPlatformOriginalBrief !==
+      "every platform record retains the same complete originalBrief and preserves the other platform clause as an atom" ||
     platformSplit.crossPlatformExecutionAllowed !== false
   ) {
     throw new Error("requirements single-platform split policy is invalid");

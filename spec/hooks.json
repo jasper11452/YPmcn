@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "profile": "mvp-v2",
   "implementation": "YPmcn/src/index.ts",
   "handlerImplementation": "YPmcn/src/runtime-hooks.ts",
@@ -11,7 +11,7 @@
       "script": "YPmcn/src/index.ts"
     },
     "before_tool_call": {
-      "responsibility": "one_time_fresh_manual_requirement_binding_plus_non_blocking_repeated_rank_requirement_notice_plus_native_exact_call_external_send_approval_and_shell_bypass_guard",
+      "responsibility": "exact_brief_and_requirement_primary_key_preflight_plus_one_time_same_session_manual_binding_plus_non_blocking_repeated_rank_notice_plus_native_external_send_approval_and_shell_bypass_guard",
       "mayBlock": true,
       "script": "YPmcn/src/runtime-hooks.ts"
     },
@@ -27,12 +27,12 @@
     }
   },
   "stateStore": {
-    "path": "YPmcn/state/sessions/<sha256(sessionKey)>/confirmation_guard.json (legacy fallback: YPmcn/state/confirmation_guard.json when session context is unavailable)",
+    "path": "YPmcn/state/sessions/<sha256(sessionKey)>/confirmation_guard.json; the legacy global file may hold non-authorizing diagnostics only",
     "ttl": {
       "oneTimeConfirmations": "10m",
       "unknownExternalSend": "10m; every retry requires a fresh explicit confirmation"
     },
-    "format": "confirmation_guard_schema_v18",
+    "format": "confirmation_guard_schema_v19",
     "storesBusinessPayload": false,
     "storesWorkflowIdentifiers": true,
     "authoritativeForOrchestration": true,
@@ -45,6 +45,8 @@
       "provider_send_shell_bypass_blocking",
       "one_time_confirmation_fingerprints",
       "manual_sourcing_fresh_requirement_receipt_binding",
+      "search_and_manual_requirement_primary_key_shape_validation",
+      "exact_original_brief_hash_preflight",
       "one_time_manual_requirement_consumption",
       "non_blocking_repeated_rank_requirement_notice",
       "callback_returned_field_selection_reuse_without_browser_reopen",
@@ -53,11 +55,11 @@
     "doesNotOwn": [
       "general_tool_permissions",
       "requirement_input_validation",
-      "tool_parameter_validation",
+      "general_tool_parameter_validation_beyond_requirement_primary_keys_and_original_brief",
       "workflow_order_enforcement",
       "rank_creators_duplicate_call_blocking",
       "field_selector_browser_opening_or_reopening",
-      "identifier_provenance_enforcement_beyond_current_manual_requirement_receipt",
+      "identifier_provenance_enforcement_beyond_current_search_and_manual_requirement_receipts",
       "historical_requirement_or_search_lookup",
       "provider_requirement_id_uniqueness",
       "database_schema",
@@ -79,11 +81,24 @@
     "manualSourcingGuard": {
       "phaseIndependent": true,
       "requiredPredecessor": "validate_requirement",
-      "requiredEvidence": "fresh non-empty requirement ID from the immediately preceding successful response",
+      "requiredEvidence": "fresh 32-character data.id primary key from the immediately preceding successful response plus the same host session scope",
       "oneTime": true,
       "checksHistoricalSearch": false,
       "checksOtherWorkflowCompletion": false,
-      "storesRawRequirementId": false
+      "storesRawRequirementId": false,
+      "missingSessionContext": "INTEGRATION_REQUIRED and await_host_upgrade; never fall back to global authorization or revalidate"
+    },
+    "searchRequirementGuard": {
+      "primaryKeySource": "validate_requirement.data.id",
+      "rejects": ["data.demand_id", "demand_version", "non-32-hex-identifiers"],
+      "scopedBehavior": "bind to the latest same-session validation receipt",
+      "unscopedBehavior": "shape-only degraded validation; no global provenance authorization"
+    },
+    "briefIntegrityGuard": {
+      "binding": "sha256 of the exact extracted client Brief observed by before_prompt_build",
+      "storesRawBrief": false,
+      "multiPlatform": "every independently validated payload retains the same full originalBrief",
+      "authorizationUse": false
     },
     "rankCreatorsRepeatNotice": {
       "comparison": "current rank_creators.requirement_id equals the immediately previous rank_creators call in the same state scope",

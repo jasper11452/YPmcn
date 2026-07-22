@@ -51,6 +51,84 @@ const MCN_NAME_KEYS = [
   "agency_name", "agencyName", "organization_name", "organizationName", "display_name", "displayName",
 ];
 const MCN_CONTEXT_KEY = /(?:mcn|supplier|institution|agency|vendor|recommend)/i;
+const REQUIREMENT_PRIMARY_KEY = /^[0-9a-f]{32}$/i;
+const REQUIREMENT_BRIEF_TTL_MS = 30 * 60 * 1_000;
+const PREFLIGHT_DENIAL_TTL_MS = 5 * 60 * 1_000;
+const SEARCH_REQUIREMENT_RECEIPT_KEY = "search_requirement_receipt";
+
+type PreflightDenialReason =
+  | "brief_mismatch"
+  | "missing_session_context"
+  | "primary_key_format"
+  | "requirement_id_mismatch"
+  | "requirement_receipt_missing";
+
+const recentRequirementBriefs = new Map<string, number>();
+const preflightDenials = new Map<string, { reason: PreflightDenialReason; expiresAt: number }>();
+
+function pruneTransientReceipts(now = Date.now()): void {
+  for (const [hash, expiresAt] of recentRequirementBriefs) {
+    if (expiresAt <= now) recentRequirementBriefs.delete(hash);
+  }
+  for (const [key, receipt] of preflightDenials) {
+    if (receipt.expiresAt <= now) preflightDenials.delete(key);
+  }
+}
+
+function preflightKey(event: Json, tool: string, input: Json): string {
+  return text(event.toolCallId)
+    ? `call:${event.toolCallId.trim()}`
+    : `input:${tool}:${fingerprint(input)}`;
+}
+
+function denyPreflight(
+  event: Json,
+  tool: string,
+  input: Json,
+  reason: PreflightDenialReason,
+  code: string,
+  message: string,
+): Json {
+  pruneTransientReceipts();
+  preflightDenials.set(preflightKey(event, tool, input), {
+    reason,
+    expiresAt: Date.now() + PREFLIGHT_DENIAL_TTL_MS,
+  });
+  return denyStructured(code, message);
+}
+
+function takePreflightDenial(event: Json, tool: string, input: Json): PreflightDenialReason | undefined {
+  pruneTransientReceipts();
+  const key = preflightKey(event, tool, input);
+  const receipt = preflightDenials.get(key);
+  if (receipt) preflightDenials.delete(key);
+  return receipt?.reason;
+}
+
+function validRequirementPrimaryKey(value: unknown): value is string {
+  return text(value) && REQUIREMENT_PRIMARY_KEY.test(value.trim());
+}
+
+export function recordRequirementBriefReceipt(brief: string, rootDir: string): void {
+  if (!text(brief)) return;
+  pruneTransientReceipts();
+  const briefHash = sha256Text(brief);
+  recentRequirementBriefs.set(briefHash, Date.now() + REQUIREMENT_BRIEF_TTL_MS);
+  const current = store(rootDir);
+  current.data.source_brief_sha256 = briefHash;
+  save(current.path, current.data);
+}
+
+export function recordPostValidationIntent(intent: "manual" | "search", rootDir: string): void {
+  const current = store(rootDir);
+  const workflow = current.data.workflow as Json;
+  workflow.post_validation_intent = intent;
+  workflow.post_validation_actions = [intent === "manual" ? "manual_source_creators" : "search_creators"];
+  workflow.next_action = "validate_requirement";
+  workflow.waiting_for = null;
+  workflow.updated_at_ms = Date.now();
+  save(current.path, current.data);
+}
 
 export function normalize(name: string): string | undefined {
   for (const prefix of PREFIXES) {
@@ -279,11 +357,46 @@ type SearchSupplyEvidence = {
   rateCardCreatorCount: number;
   rateCardMultiplier: number;
   riskLevel: SupplyRiskLevel;
+  contract: "supply-assessment-v2" | "legacy-v1";
+  recommendedAction?: string;
 };
 
-function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEvidence | undefined {
-  const data = approvedTargetData(root);
-  if (!data) return undefined;
+function providerSupplyRisk(value: unknown): SupplyRiskLevel | undefined {
+  if (value === "high_risk" || value === "medium_risk" || value === "safe") return value;
+  return value === "low_risk" ? "safe" : undefined;
+}
+
+function currentSearchSupplyEvidence(data: Json, workflow: Json): SearchSupplyEvidence | undefined {
+  const assessment = data.supply_assessment;
+  if (!assessment || typeof assessment !== "object" || Array.isArray(assessment)) return undefined;
+  const candidateCount = assessment.candidate_count;
+  const demandCount = assessment.quantity_total;
+  const multiplier = assessment.supply_multiplier;
+  const statedRisk = providerSupplyRisk(assessment.supply_risk_level);
+  const recommendedAction = text(assessment.recommended_action)
+    ? assessment.recommended_action.trim()
+    : undefined;
+  if (
+    !Number.isInteger(data.total_matched) || data.total_matched < 0 ||
+    !Number.isInteger(candidateCount) || candidateCount < 0 || candidateCount !== data.total_matched ||
+    !Number.isInteger(demandCount) || demandCount < 1 ||
+    !multiplierMatches(multiplier, candidateCount, demandCount) ||
+    !statedRisk || !recommendedAction
+  ) return undefined;
+  if (Number.isInteger(workflow.quantity_total) && workflow.quantity_total !== demandCount) return undefined;
+  const calculatedRisk = supplyRiskLevel(candidateCount, demandCount);
+  if (calculatedRisk !== statedRisk) return undefined;
+  return {
+    demandCount,
+    rateCardCreatorCount: candidateCount,
+    rateCardMultiplier: multiplier,
+    riskLevel: calculatedRisk,
+    contract: "supply-assessment-v2",
+    recommendedAction,
+  };
+}
+
+function legacySearchSupplyEvidence(data: Json, workflow: Json): SearchSupplyEvidence | undefined {
   for (const record of objectRecords(data)) {
     const demandCount = record.demand_count;
     const rateCardCreatorCount = record.eligible_creator_count;
@@ -299,9 +412,26 @@ function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEviden
       rateCardCreatorCount,
       rateCardMultiplier,
       riskLevel: supplyRiskLevel(rateCardCreatorCount, demandCount),
+      contract: "legacy-v1",
     };
   }
   return undefined;
+}
+
+function sameSearchSupplyEvidence(left: SearchSupplyEvidence, right: SearchSupplyEvidence): boolean {
+  return left.demandCount === right.demandCount &&
+    left.rateCardCreatorCount === right.rateCardCreatorCount &&
+    Math.abs(left.rateCardMultiplier - right.rateCardMultiplier) <= 0.01 &&
+    left.riskLevel === right.riskLevel;
+}
+
+function searchSupplyEvidence(root: unknown, workflow: Json): SearchSupplyEvidence | undefined {
+  const data = approvedTargetData(root);
+  if (!data) return undefined;
+  const current = currentSearchSupplyEvidence(data, workflow);
+  const legacy = legacySearchSupplyEvidence(data, workflow);
+  if (current && legacy && !sameSearchSupplyEvidence(current, legacy)) return undefined;
+  return current ?? legacy;
 }
 
 type RankMcnCoverageEvidence = {
@@ -336,60 +466,76 @@ const MANUAL_REQUIREMENT_RECEIPT_KEY = "manual_sourcing_requirement_receipt";
 function validationRequirementId(root: unknown): string | undefined {
   const data = approvedTargetData(root);
   if (!data) return undefined;
-  const candidates = [data.id, data.requirement_id]
-    .map(identifierText)
-    .filter(text);
-  const unique = [...new Set(candidates)];
-  return unique.length === 1 ? unique[0] : undefined;
+  return validRequirementPrimaryKey(data.id) ? data.id.trim() : undefined;
 }
 
-function recordManualRequirementReceipt(
+function freshRequirementReceipt(requirementId: string, now: number): Json {
+  return {
+    requirement_id_sha256: sha256Text(requirementId),
+    status: "fresh",
+    issued_at_ms: now,
+  };
+}
+
+function recordRequirementReceipts(
   event: Json,
   tool: string,
   rootDir: string,
+  preflightDenial?: PreflightDenialReason,
 ): void {
   const current = store(rootDir);
-  const existing = current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
+  const manualReceipt = current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
+  const searchReceipt = current.data[SEARCH_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
   const now = Date.now();
 
   if (tool === "validate_requirement") {
     const requirementId = event.error ? undefined : validationRequirementId(event.result);
     if (requirementId) {
-      current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = {
-        requirement_id_sha256: sha256Text(requirementId),
-        status: "fresh",
-        issued_at_ms: now,
-      };
+      current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = freshRequirementReceipt(requirementId, now);
+      current.data[SEARCH_REQUIREMENT_RECEIPT_KEY] = freshRequirementReceipt(requirementId, now);
     } else {
       delete current.data[MANUAL_REQUIREMENT_RECEIPT_KEY];
+      delete current.data[SEARCH_REQUIREMENT_RECEIPT_KEY];
     }
     save(current.path, current.data);
     return;
   }
 
-  if (!existing || existing.status !== "fresh") return;
-  existing.status = tool === "manual_source_creators" ? "consumed" : "expired";
-  existing.updated_at_ms = now;
-  current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = existing;
-  save(current.path, current.data);
+  if (preflightDenial === "primary_key_format" || preflightDenial === "brief_mismatch") return;
+  let changed = false;
+  if (manualReceipt?.status === "fresh") {
+    manualReceipt.status = tool === "manual_source_creators" && preflightDenial !== "missing_session_context"
+      ? "consumed"
+      : "expired";
+    manualReceipt.updated_at_ms = now;
+    current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = manualReceipt;
+    changed = true;
+  }
+  if (searchReceipt?.status === "fresh") {
+    searchReceipt.status = tool === "search_creators" ? "consumed" : "expired";
+    searchReceipt.updated_at_ms = now;
+    current.data[SEARCH_REQUIREMENT_RECEIPT_KEY] = searchReceipt;
+    changed = true;
+  }
+  if (changed) save(current.path, current.data);
 }
 
-function authorizeFreshManualRequirement(input: Json, current: GuardStore): Json | undefined {
+function authorizeFreshManualRequirement(event: Json, input: Json, current: GuardStore): Json | undefined {
   const receipt = current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
-  const matches = text(input.requirement_id) &&
-    receipt?.status === "fresh" &&
-    text(receipt.requirement_id_sha256) &&
-    sha256Text(input.requirement_id.trim()) === receipt.requirement_id_sha256;
-  if (!matches) {
-    if (receipt?.status === "fresh") {
-      receipt.status = "expired";
-      receipt.updated_at_ms = Date.now();
-      current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = receipt;
-      save(current.path, current.data);
-    }
-    return denyStructured(
-      "INVALID_INPUT",
-      "manual_source_creators requires the fresh requirement_id returned by the immediately preceding successful validate_requirement call; parse the requirement again instead of reusing an old ID.",
+  if (receipt?.status !== "fresh" || !text(receipt.requirement_id_sha256)) {
+    return denyPreflight(
+      event, "manual_source_creators", input, "requirement_receipt_missing", "INVALID_PHASE",
+      "manual_source_creators requires a fresh same-session validate_requirement receipt. Do not reuse a historical ID.",
+    );
+  }
+  if (sha256Text(input.requirement_id.trim()) !== receipt.requirement_id_sha256) {
+    receipt.status = "expired";
+    receipt.updated_at_ms = Date.now();
+    current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = receipt;
+    save(current.path, current.data);
+    return denyPreflight(
+      event, "manual_source_creators", input, "requirement_id_mismatch", "INVALID_INPUT",
+      "manual_source_creators.requirement_id must equal data.id from the immediately preceding successful validate_requirement response; data.demand_id is never valid.",
     );
   }
 
@@ -397,6 +543,45 @@ function authorizeFreshManualRequirement(input: Json, current: GuardStore): Json
   receipt.updated_at_ms = Date.now();
   current.data[MANUAL_REQUIREMENT_RECEIPT_KEY] = receipt;
   save(current.path, current.data);
+  return undefined;
+}
+
+function authorizeFreshSearchRequirement(event: Json, input: Json, current: GuardStore): Json | undefined {
+  const receipt = current.data[SEARCH_REQUIREMENT_RECEIPT_KEY] as Json | undefined;
+  if (receipt?.status !== "fresh" || !text(receipt.requirement_id_sha256)) {
+    return denyPreflight(
+      event, "search_creators", input, "requirement_receipt_missing", "INVALID_PHASE",
+      "search_creators requires data.id from the latest successful same-session validate_requirement response. Do not create another requirement merely to recover from an ID namespace mistake.",
+    );
+  }
+  if (sha256Text(input.id.trim()) !== receipt.requirement_id_sha256) {
+    return denyPreflight(
+      event, "search_creators", input, "requirement_id_mismatch", "INVALID_INPUT",
+      "search_creators.id must equal data.id from the latest successful validate_requirement response; data.demand_id is never valid.",
+    );
+  }
+  receipt.status = "consumed";
+  receipt.updated_at_ms = Date.now();
+  current.data[SEARCH_REQUIREMENT_RECEIPT_KEY] = receipt;
+  save(current.path, current.data);
+  return undefined;
+}
+
+function authorizeRequirementBrief(event: Json, input: Json): Json | undefined {
+  const originalBrief = input.payload?.rawMessagesJson?.originalBrief;
+  if (!text(originalBrief)) {
+    return denyPreflight(
+      event, "validate_requirement", input, "brief_mismatch", "INVALID_INPUT",
+      "validate_requirement.payload.rawMessagesJson.originalBrief must contain the exact original client Brief.",
+    );
+  }
+  pruneTransientReceipts();
+  if (!recentRequirementBriefs.has(sha256Text(originalBrief))) {
+    return denyPreflight(
+      event, "validate_requirement", input, "brief_mismatch", "INVALID_INPUT",
+      "rawMessagesJson.originalBrief does not exactly match a recent client Brief. Preserve the full original text; never add retry markers or reconstruct a platform-specific Brief.",
+    );
+  }
   return undefined;
 }
 
@@ -974,7 +1159,13 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
   save(current.path, current.data);
 }
 
-function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: string): void {
+function updateLocalWorkflow(
+  event: Json,
+  tool: string,
+  input: Json,
+  rootDir: string,
+  preflightDenial?: PreflightDenialReason,
+): void {
   const stateChangingTools = new Set([
     "validate_requirement", "search_creators", "rank_mcns", "select_inquiry_form_fields",
     "create_with_distributions", "sync_mcn_inquiry_status", "ingest_mcn_submissions",
@@ -985,11 +1176,46 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
 
   const current = store(rootDir);
   const workflow = current.data.workflow as Json;
+  if (preflightDenial) {
+    const now = Date.now();
+    workflow.last_tool = tool;
+    workflow.last_tool_status = "blocked";
+    workflow.preflight_error = preflightDenial;
+    workflow.transition_seq = Number(workflow.transition_seq ?? 0) + 1;
+    workflow.updated_at_ms = now;
+    if (preflightDenial === "missing_session_context") {
+      workflow.phase = "blocked";
+      workflow.next_action = "await_host_upgrade";
+      workflow.waiting_for = "integration";
+    } else if (preflightDenial === "primary_key_format") {
+      workflow.next_action = `correct_${tool}_primary_key_from_validate_data_id`;
+      workflow.waiting_for = "assistant";
+    } else if (preflightDenial === "brief_mismatch") {
+      workflow.next_action = "restore_exact_original_brief";
+      workflow.waiting_for = "assistant";
+    } else {
+      workflow.next_action = "validate_requirement";
+      workflow.waiting_for = "assistant";
+    }
+    appendWorkflowEvent(current.data, {
+      seq: workflow.transition_seq,
+      kind: "tool_preflight_denied",
+      tool,
+      status: "blocked",
+      reason: preflightDenial,
+      phase: workflow.phase,
+      next_action: workflow.next_action,
+      at_ms: now,
+    });
+    save(current.path, current.data);
+    return;
+  }
   const continueToManualAfterValidation = tool === "validate_requirement" &&
+    (workflow.post_validation_intent === "manual" || (
     workflow.next_action === "validate_requirement" && (
       workflow.phase === "inquiry_fields_ready" ||
       (Number.isInteger(workflow.pending_manual_target_count) && workflow.pending_manual_target_count > 0)
-    );
+    )));
   const envelopeOk = successful(event.error ? { isError: true } : event.result);
   const rankEvidence = tool === "rank_mcns" && envelopeOk
     ? rankMcnCoverageEvidence(event.result, input, workflow)
@@ -1155,11 +1381,14 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
     switch (tool) {
       case "validate_requirement": {
         workflow.phase = "requirement_ready";
-        workflow.next_action = continueToManualAfterValidation
+        const nextAction = continueToManualAfterValidation
           ? "manual_source_creators"
           : "search_creators";
+        workflow.next_action = nextAction;
+        workflow.post_validation_actions = [nextAction];
+        delete workflow.post_validation_intent;
         workflow.waiting_for = null;
-        const requirementId = resultText(root, ["id", "requirement_id"]);
+        const requirementId = validationRequirementId(root);
         if (requirementId) workflow.requirement_id = requirementId;
         if (text(input.payload?.platform)) workflow.platform = input.payload.platform.trim();
         if (Number.isInteger(input.payload?.quantityTotal)) workflow.quantity_total = input.payload.quantityTotal;
@@ -1179,6 +1408,7 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
           for (const key of [
             "demand_count", "pre_race_rate_card_creator_count",
             "pre_race_rate_card_multiplier", "pre_race_risk_level",
+            "pre_race_supply_contract", "pre_race_recommended_action",
           ]) delete workflow[key];
           workflow.pre_race_supply_status = "invalid";
           workflow.pre_race_supply_error = "missing_or_contradictory_rate_card_evidence";
@@ -1191,6 +1421,9 @@ function updateLocalWorkflow(event: Json, tool: string, input: Json, rootDir: st
         workflow.pre_race_rate_card_creator_count = supply.rateCardCreatorCount;
         workflow.pre_race_rate_card_multiplier = supply.rateCardMultiplier;
         workflow.pre_race_risk_level = supply.riskLevel;
+        workflow.pre_race_supply_contract = supply.contract;
+        if (supply.recommendedAction) workflow.pre_race_recommended_action = supply.recommendedAction;
+        else delete workflow.pre_race_recommended_action;
         workflow.next_action = "confirm_pre_race_supply";
         break;
       }
@@ -1578,9 +1811,40 @@ export function guardWorkflowTool(
   input: Json,
   _current: GuardStore,
   rootDir: string,
+  scopeAvailable: boolean,
 ): Json | undefined {
-  if (tool === "manual_source_creators") return authorizeFreshManualRequirement(input, _current);
+  if (tool === "validate_requirement") return authorizeRequirementBrief(event, input);
+  if (tool === "search_creators") {
+    if (!validRequirementPrimaryKey(input.id)) {
+      return denyPreflight(
+        event, tool, input, "primary_key_format", "INVALID_INPUT",
+        "search_creators.id must be the 32-character hexadecimal data.id returned by validate_requirement; never pass numeric data.demand_id or demand_version. Correct the ID from the existing response without validating again.",
+      );
+    }
+    return scopeAvailable ? authorizeFreshSearchRequirement(event, input, _current) : undefined;
+  }
+  if (tool === "manual_source_creators") {
+    if (!validRequirementPrimaryKey(input.requirement_id)) {
+      return denyPreflight(
+        event, tool, input, "primary_key_format", "INVALID_INPUT",
+        "manual_source_creators.requirement_id must be the 32-character hexadecimal data.id returned by validate_requirement; never pass numeric data.demand_id or demand_version. Correct the ID from the existing response without validating again.",
+      );
+    }
+    if (!scopeAvailable) {
+      return denyPreflight(
+        event, tool, input, "missing_session_context", "INTEGRATION_REQUIRED",
+        "The host omitted session context from before_tool_call, so the fresh manual-sourcing receipt cannot be verified safely. Stop this flow and do not call validate_requirement again; upgrade the host integration first.",
+      );
+    }
+    return authorizeFreshManualRequirement(event, input, _current);
+  }
   if (tool === "create_with_distributions") {
+    if (!scopeAvailable) {
+      return denyPreflight(
+        event, tool, input, "missing_session_context", "INTEGRATION_REQUIRED",
+        "The host omitted session context from before_tool_call, so external-send confirmation cannot be verified safely. Stop and upgrade the host integration before sending.",
+      );
+    }
     return authorizeExternalSend(input, rootDir, text(event.toolCallId) ? event.toolCallId.trim() : undefined);
   }
   return undefined;
@@ -1728,7 +1992,8 @@ export function recordWorkflowToolResult(
     return;
   }
   if (!tool) return;
+  const preflightDenial = takePreflightDenial(event, tool, input);
   if (tool === "create_with_distributions") recordExternalSendResult(event, input, rootDir);
-  updateLocalWorkflow(event, tool, input, rootDir);
-  recordManualRequirementReceipt(event, tool, rootDir);
+  updateLocalWorkflow(event, tool, input, rootDir, preflightDenial);
+  recordRequirementReceipts(event, tool, rootDir, preflightDenial);
 }

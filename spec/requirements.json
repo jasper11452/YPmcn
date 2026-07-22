@@ -38,7 +38,7 @@
     },
     "workflowState": {
       "path": "schemas/workflow-state.schema.json",
-      "hash": "ffd51796890be17db9e623f8f44bb57c7f999146b9773a43a9cfd88561c6c7ce"
+      "hash": "01a81f0c811bc7aad191fa2112134f64c09784898667ff80353eaacee9f5ca4c"
     }
   },
   "canonicalInput": {
@@ -49,7 +49,10 @@
     "canonicalization": "recursive-key-sort-json-v1-preserve-array-order",
     "requiredMembers": ["originalBrief", "atoms", "coverageCheck"],
     "compatibilityAliases": [],
-    "dictionaryMayContainValues": false
+    "dictionaryMayContainValues": false,
+    "sourceBinding": "sha256-of-exact-client-brief-observed-before-tool-call",
+    "originalBriefMutationAllowed": false,
+    "supplementalAnswers": "represented-as-audit-atoms-without-rewriting-originalBrief"
   },
   "valuePolicies": {
     "mappedRanges": {
@@ -149,6 +152,7 @@
       "executionEntity": "customer_demands",
       "executionUnitPlatformCardinality": 1,
       "multiPlatformBehavior": "one independently validated customer_demands record per platform",
+      "multiPlatformOriginalBrief": "every platform record retains the same complete originalBrief and preserves the other platform clause as an atom",
       "crossPlatformExecutionAllowed": false,
       "onUnsplittableInput": "INVALID_INPUT"
     }

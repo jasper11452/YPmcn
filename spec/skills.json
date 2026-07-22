@@ -38,6 +38,13 @@
           "manual_source_creators": "phase-independent-after-fresh-requirement-validation"
         },
         "interactionPolicy": {
+          "requirementClarification": {
+            "maxQuestions": 5,
+            "minOptionsPerQuestion": 2,
+            "maxOptionsPerQuestion": 6,
+            "exposeInternalPriceFieldNames": false,
+            "contentFormImpliesDuration": false
+          },
           "fieldSelection": {
             "resultSource": "actual fields returned by the select_inquiry_form_fields webpage callback",
             "reopenSelectorAfterToolResult": false
@@ -67,9 +74,15 @@
           }
         },
         "preconditions": {
+          "search_creators": [
+            "id_is_the_32_character_data_id_from_the_latest_same_session_successful_validation",
+            "numeric_data_demand_id_and_demand_version_are_rejected_without_revalidation",
+            "missing_before_tool_session_context_never_uses_global_state_as_authorization"
+          ],
           "manual_source_creators": [
             "validate_requirement_succeeded_immediately_before_this_call",
-            "requirement_id_equals_the_fresh_id_returned_by_that_validation",
+            "requirement_id_equals_the_fresh_32_character_data_id_returned_by_that_validation",
+            "same_session_context_is_available_to_the_before_tool_hook",
             "fresh_requirement_id_receipt_is_consumed_by_this_call",
             "size_is_a_positive_integer_decimal_string"
           ],

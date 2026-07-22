@@ -6,7 +6,7 @@
     "productionEndpoint": "https://mcp.eshypdata.com/sse",
     "activeProfile": "development",
     "inputAuthority": "approved-target-with-live-tools-list-comparison",
-    "schemaSelection": "2026-07-21-live-selector-manual-rank-plus-approved-submission-target",
+    "schemaSelection": "2026-07-22-search-supply-v2-plus-primary-id-guards",
     "ignoredToolPrefix": "pgy",
     "advertisedOutputSchema": false
   },
@@ -111,9 +111,15 @@
     },
     "search_creators": {
       "advertisedOutputSchema": false,
-      "evidenceBasis": "Provider tools/list does not advertise outputSchema. Before MCN racing, only demand_count, the deduplicated eligible rate-card creator count, and their multiplier are decision evidence; an exact manual-sourcing target is forbidden at this stage.",
+      "evidenceBasis": "Provider tools/list does not advertise outputSchema. The current observed response uses total_matched plus supply_assessment for demand count, deduplicated eligible rate-card creator count, multiplier, risk, and recommended action; an exact manual-sourcing target is forbidden at this stage.",
       "successEnvelope": "observed-runtime",
       "failureEnvelope": "observed-runtime",
+      "compatibility": {
+        "primary": "supply-assessment-v2",
+        "legacyAcceptedIn": "3.4.9-only",
+        "legacyFields": ["demand_count", "eligible_creator_count", "supply_ratio"],
+        "conflictBehavior": "fail-closed"
+      },
       "successSchema": {
         "type": "object",
         "required": [
@@ -128,22 +134,34 @@
           "data": {
             "type": "object",
             "required": [
-              "demand_count",
-              "eligible_creator_count",
-              "supply_ratio"
+              "total_matched",
+              "supply_assessment"
             ],
             "properties": {
-              "demand_count": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "eligible_creator_count": {
+              "total_matched": {
                 "type": "integer",
                 "minimum": 0
               },
-              "supply_ratio": {
-                "type": "number",
-                "minimum": 0
+              "supply_assessment": {
+                "type": "object",
+                "required": [
+                  "candidate_count",
+                  "quantity_total",
+                  "supply_multiplier",
+                  "supply_risk_level",
+                  "recommended_action"
+                ],
+                "properties": {
+                  "candidate_count": {"type": "integer", "minimum": 0},
+                  "quantity_total": {"type": "integer", "minimum": 1},
+                  "supply_multiplier": {"type": "number", "minimum": 0},
+                  "supply_risk_level": {
+                    "type": "string",
+                    "enum": ["high_risk", "medium_risk", "low_risk", "safe"]
+                  },
+                  "recommended_action": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": true
               }
             },
             "additionalProperties": true
@@ -424,6 +442,9 @@
         }
       },
       "forbidden": [],
+      "agentSemanticRequirements": {
+        "id": "must be the 32-character hexadecimal data.id from the latest successful validate_requirement response; numeric data.demand_id and demand_version are not accepted"
+      },
       "sideEffects": "business-write",
       "writers": {
         "always": [],
@@ -705,7 +726,7 @@
       },
       "forbidden": [],
       "agentSemanticRequirements": {
-        "requirement_id": "must exactly equal the fresh non-empty ID returned by the immediately preceding successful validate_requirement call and may authorize only this one manual_source_creators invocation",
+        "requirement_id": "must be the 32-character hexadecimal data.id returned by the immediately preceding successful validate_requirement call, exactly match its same-session receipt, and authorize only this one manual_source_creators invocation; numeric data.demand_id is forbidden",
         "eligibility": "independent of current workflow phase, historical creator search, and completion of other workflow steps"
       },
       "sideEffects": "business-write",

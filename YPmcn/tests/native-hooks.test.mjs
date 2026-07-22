@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
@@ -8,16 +8,20 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import plugin, { createYpmcnPlugin, YPMCN_FAST_PATH } from "../dist/index.js";
 
 const tempDir = mkdtempSync(join(tmpdir(), "ypmcn-native-hooks-"));
-const stateFile = join(tempDir, "state", "confirmation_guard.json");
+const DEFAULT_SESSION_KEY = "ypmcn-native-hooks-default";
+const DEFAULT_CONTEXT = { sessionKey: DEFAULT_SESSION_KEY };
+const defaultSessionHash = createHash("sha256").update(DEFAULT_SESSION_KEY).digest("hex").slice(0, 24);
+const stateFile = join(tempDir, "state", "sessions", defaultSessionHash, "confirmation_guard.json");
 const hooks = new Map();
 const UNRESOLVED_BRIEF = "找5位小红书达人，单达人预算口径待确认，明天提报。";
 const contract = JSON.parse(readFileSync(new URL("../../spec/mcp.json", import.meta.url), "utf8"));
+const requirementId = (value) => Number(value).toString(16).padStart(32, "0");
 
 const distributionParams = (overrides = {}) => {
   const description = overrides.description ??
     "您好，现招募小红书达人参与测试项目。\n图文报价：5000元以内\n请协助推荐合适人选，谢谢。";
   return {
-    requirement_id: "requirement-1",
+    requirement_id: requirementId(1),
     columns: [{ key: "creator_name", name: "达人名称" }],
     supplierIds: ["supplier-1"],
     description,
@@ -45,11 +49,11 @@ function sessionStateFile(sessionKey) {
   return join(tempDir, "state", "sessions", hash, "confirmation_guard.json");
 }
 
-async function guard(toolName, params = {}, toolCallId, context = {}) {
+async function guard(toolName, params = {}, toolCallId, context = DEFAULT_CONTEXT) {
   return hooks.get("before_tool_call")({ toolName, params, toolCallId }, context);
 }
 
-async function recordMcnRecipients(params, context = {}, recipientNames) {
+async function recordMcnRecipients(params, context = DEFAULT_CONTEXT, recipientNames) {
   if (!Array.isArray(params.supplierIds) || params.supplierIds.length === 0) return;
   const names = recipientNames ?? params.supplierIds.map((_, index) => `测试MCN ${index + 1}`);
   await recordTool(
@@ -99,7 +103,7 @@ function askInputFrom(result) {
 
 async function requestConfirmation(
   params = distributionParams(),
-  context = {},
+  context = DEFAULT_CONTEXT,
   toolCallId = "call-send",
   recipientNames,
 ) {
@@ -115,11 +119,11 @@ async function answerExternalConfirmation(prepared, answer = "确认发送") {
   }, prepared.context);
 }
 
-async function recordTool(toolName, params, result, context = {}, toolCallId) {
+async function recordTool(toolName, params, result, context = DEFAULT_CONTEXT, toolCallId) {
   await hooks.get("after_tool_call")({ toolName, params, result, toolCallId }, context);
 }
 
-async function recordFreshRequirement(requirementId, context = {}) {
+async function recordFreshRequirement(requirementId, context = DEFAULT_CONTEXT) {
   await recordTool(
     "mcp__ypmcn__validate_requirement",
     { payload: { platform: "xiaohongshu", quantityTotal: 1 } },
@@ -128,12 +132,25 @@ async function recordFreshRequirement(requirementId, context = {}) {
   );
 }
 
-const preRaceSupply = (overrides = {}) => ({
-  demand_count: 5,
-  eligible_creator_count: 6,
-  supply_ratio: 1.2,
-  ...overrides,
-});
+const preRaceSupply = (overrides = {}) => {
+  const candidateCount = overrides.candidate_count ?? 6;
+  const quantityTotal = overrides.quantity_total ?? 5;
+  const risk = candidateCount < quantityTotal * 20
+    ? "high_risk"
+    : candidateCount < quantityTotal * 30
+      ? "medium_risk"
+      : "low_risk";
+  return {
+    total_matched: overrides.total_matched ?? candidateCount,
+    supply_assessment: {
+      candidate_count: candidateCount,
+      quantity_total: quantityTotal,
+      supply_multiplier: overrides.supply_multiplier ?? candidateCount / quantityTotal,
+      supply_risk_level: overrides.supply_risk_level ?? risk,
+      recommended_action: overrides.recommended_action ?? "continue",
+    },
+  };
+};
 
 const supplyQuestion = {
   questions: [{
@@ -155,11 +172,11 @@ async function recordHighRiskSupply() {
   await recordTool(
     "mcp__ypmcn__validate_requirement",
     { payload: { platform: "xiaohongshu", quantityTotal: 5 } },
-    { success: true, data: { id: "requirement-local" }, error: null },
+    { success: true, data: { id: requirementId(2) }, error: null },
   );
   await recordTool(
     "mcp__ypmcn__search_creators",
-    { id: "requirement-local" },
+    { id: requirementId(2) },
     { success: true, data: preRaceSupply(), error: null },
   );
 }
@@ -181,7 +198,7 @@ async function answerPostRace(answer) {
 async function recordRankForManual(inquiryId = "inquiry-manual-1", overrides = {}) {
   await recordTool(
     "mcp__ypmcn__rank_mcns",
-    { id: "requirement-local", platform: "xiaohongshu", minimum_mcn_count: 7 },
+    { id: requirementId(2), platform: "xiaohongshu", minimum_mcn_count: 7 },
     {
       success: true,
       data: {
@@ -214,11 +231,11 @@ describe("YP Action native hooks", () => {
   });
 
   it("injects the local JSON orchestration state and the fresh-ID manual flow", async () => {
-    const prompt = await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, {});
+    const prompt = await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, DEFAULT_CONTEXT);
     assert.equal(prompt.prependSystemContext, YPMCN_FAST_PATH);
     assert.match(YPMCN_FAST_PATH, /select_inquiry_form_fields -> validate_requirement -> manual_source_creators -> rank_creators -> create_submission_batch/);
     assert.match(YPMCN_FAST_PATH, /Manual sourcing may start from any current workflow phase/);
-    assert.match(YPMCN_FAST_PATH, /fresh non-empty requirement ID[^]*immediately following manual call only/);
+    assert.match(YPMCN_FAST_PATH, /fresh 32-character data\.id primary key[^]*immediately following manual call/);
     assert.match(YPMCN_FAST_PATH, /Do not check whether that requirement was searched before/);
     assert.match(YPMCN_FAST_PATH, /manual_source_creators\(\{requirement_id,size\}\)/);
     assert.match(YPMCN_FAST_PATH, /actual successful manual response provides[^]*inquiry_ids/);
@@ -239,13 +256,15 @@ describe("YP Action native hooks", () => {
     assert.doesNotMatch(YPMCN_FAST_PATH, /schema\/CSV|customer_demands (?:reference )?CSV/);
     assert.doesNotMatch(YPMCN_FAST_PATH, /max\(quantityTotal-actual count,0\)/);
     assert.match(prompt.prependContext, /authoritative local orchestration state/);
-    assert.match(prompt.prependContext, /"next_action":"select_inquiry_form_fields"/);
-    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 18);
+    assert.match(prompt.prependContext, /"next_action":"validate_requirement"/);
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).schema_version, 19);
 
     for (const [toolName, params] of [
       ["read", { file_path: "/tmp/SKILL.md" }],
       ["AskUserQuestion", { questions: [{ header: "供给确认" }] }],
-      ["mcp__ypmcn__validate_requirement", { payload: {} }],
+      ["mcp__ypmcn__validate_requirement", {
+        payload: { rawMessagesJson: { originalBrief: UNRESOLVED_BRIEF } },
+      }],
       ["mcp__ypmcn__rank_mcns", { id: "any", platform: "xiaohongshu" }],
     ]) {
       assert.equal(await guard(toolName, params), undefined, toolName);
@@ -253,11 +272,21 @@ describe("YP Action native hooks", () => {
   });
 
   it("allows declared business Tools while guarding manual freshness and send confirmation", async () => {
+    await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, DEFAULT_CONTEXT);
     for (const name of [...contract.requiredTools, ...contract.optionalTools]) {
       let params = name === "create_with_distributions" ? distributionParams() : {};
       if (name === "create_with_distributions") await recordMcnRecipients(params);
+      if (name === "validate_requirement") {
+        params = { payload: {
+          rawMessagesJson: { originalBrief: UNRESOLVED_BRIEF },
+        } };
+      }
+      if (name === "search_creators") {
+        params = { id: requirementId(9) };
+        await recordFreshRequirement(params.id);
+      }
       if (name === "manual_source_creators") {
-        params = { requirement_id: "requirement-manual-allow", size: "1" };
+        params = { requirement_id: requirementId(10), size: "1" };
         await recordFreshRequirement(params.requirement_id);
       }
       const result = await guard(`mcp__ypmcn__${name}`, params);
@@ -287,7 +316,7 @@ describe("YP Action native hooks", () => {
       assert.equal(await localHooks.get("before_tool_call")({
         toolName: "mcp__ypmcn__rank_creators",
         params: rankParams(requirementId),
-      }, {}), undefined);
+      }, DEFAULT_CONTEXT), undefined);
     }
 
     assert.deepEqual(warnings, [
@@ -302,36 +331,36 @@ describe("YP Action native hooks", () => {
   it("requires and consumes the immediately preceding fresh requirement ID for every manual call", async () => {
     const withoutParse = await guard(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-old", size: "3" },
+      { requirement_id: "1784689136279241", size: "3" },
     );
     assert.equal(withoutParse?.block, true);
-    assert.match(withoutParse.blockReason, /INVALID_INPUT.*fresh requirement_id/);
+    assert.match(withoutParse.blockReason, /INVALID_INPUT.*data\.id/);
 
-    await recordFreshRequirement("requirement-fresh-1");
+    await recordFreshRequirement(requirementId(11));
     const mismatched = await guard(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-old", size: "3" },
+      { requirement_id: requirementId(12), size: "3" },
     );
     assert.equal(mismatched?.block, true);
     assert.match(mismatched.blockReason, /immediately preceding successful validate_requirement/);
     const expiredAfterMismatch = await guard(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-fresh-1", size: "3" },
+      { requirement_id: requirementId(11), size: "3" },
     );
     assert.equal(expiredAfterMismatch?.block, true);
 
-    await recordFreshRequirement("requirement-fresh-2");
+    await recordFreshRequirement(requirementId(13));
     assert.equal(await guard(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-fresh-2", size: "3" },
+      { requirement_id: requirementId(13), size: "3" },
     ), undefined);
     const replay = await guard(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-fresh-2", size: "3" },
+      { requirement_id: requirementId(13), size: "3" },
     );
     assert.equal(replay?.block, true);
 
-    await recordFreshRequirement("requirement-fresh-3");
+    await recordFreshRequirement(requirementId(14));
     await recordTool(
       "mcp__ypmcn__get_creator_detail",
       { creator_id: "creator-1" },
@@ -339,7 +368,7 @@ describe("YP Action native hooks", () => {
     );
     const intervened = await guard(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-fresh-3", size: "3" },
+      { requirement_id: requirementId(14), size: "3" },
     );
     assert.equal(intervened?.block, true);
 
@@ -350,10 +379,10 @@ describe("YP Action native hooks", () => {
     );
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.phase, "feedback_routing");
-    await recordFreshRequirement("requirement-from-late-phase");
+    await recordFreshRequirement(requirementId(15));
     assert.equal(await guard(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-from-late-phase", size: "3" },
+      { requirement_id: requirementId(15), size: "3" },
     ), undefined);
 
     state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -361,8 +390,62 @@ describe("YP Action native hooks", () => {
     assert.equal(state.manual_sourcing_requirement_receipt.requirement_id, undefined);
     assert.notEqual(
       state.manual_sourcing_requirement_receipt.requirement_id_sha256,
-      "requirement-from-late-phase",
+      requirementId(15),
     );
+  });
+
+  it("rejects demand_id values without consuming a correctable primary-key receipt", async () => {
+    const freshId = requirementId(40);
+    await recordFreshRequirement(freshId);
+    const badSearchEvent = {
+      toolName: "mcp__ypmcn__search_creators",
+      params: { id: "1784689136279241" },
+      toolCallId: "call-bad-search-id",
+    };
+    const badSearch = await hooks.get("before_tool_call")(badSearchEvent, DEFAULT_CONTEXT);
+    assert.equal(badSearch.errorCode, "INVALID_INPUT");
+    assert.match(badSearch.blockReason, /data\.demand_id/);
+    await hooks.get("after_tool_call")({ ...badSearchEvent, error: badSearch.blockReason }, DEFAULT_CONTEXT);
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.search_requirement_receipt.status, "fresh");
+    assert.equal(await guard("mcp__ypmcn__search_creators", { id: freshId }, "call-correct-search-id"), undefined);
+
+    const manualId = requirementId(41);
+    await recordFreshRequirement(manualId);
+    const badManualEvent = {
+      toolName: "mcp__ypmcn__manual_source_creators",
+      params: { requirement_id: "1784689136279241", size: "3" },
+      toolCallId: "call-bad-manual-id",
+    };
+    const badManual = await hooks.get("before_tool_call")(badManualEvent, DEFAULT_CONTEXT);
+    assert.equal(badManual.errorCode, "INVALID_INPUT");
+    await hooks.get("after_tool_call")({ ...badManualEvent, error: badManual.blockReason }, DEFAULT_CONTEXT);
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.manual_sourcing_requirement_receipt.status, "fresh");
+    assert.equal(await guard(
+      "mcp__ypmcn__manual_source_creators",
+      { requirement_id: manualId, size: "3" },
+      "call-correct-manual-id",
+    ), undefined);
+  });
+
+  it("reports host integration failure for asymmetric manual hook context and stops revalidation", async () => {
+    const freshId = requirementId(42);
+    await recordFreshRequirement(freshId, DEFAULT_CONTEXT);
+    const event = {
+      toolName: "mcp__ypmcn__manual_source_creators",
+      params: { requirement_id: freshId, size: "3" },
+      toolCallId: "call-asymmetric-manual",
+    };
+    const blocked = await hooks.get("before_tool_call")(event, {});
+    assert.equal(blocked.errorCode, "INTEGRATION_REQUIRED");
+    assert.match(blocked.blockReason, /do not call validate_requirement again/);
+    await hooks.get("after_tool_call")({ ...event, error: blocked.blockReason }, DEFAULT_CONTEXT);
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.phase, "blocked");
+    assert.equal(state.workflow.next_action, "await_host_upgrade");
+    assert.equal(state.workflow.waiting_for, "integration");
+    assert.equal(state.manual_sourcing_requirement_receipt.status, "expired");
   });
 
   it("blocks only provider send bypasses through shell", async () => {
@@ -382,7 +465,7 @@ describe("YP Action native hooks", () => {
         { key: "kwUid", name: "达人 ID" },
       ],
       description: "您好，想邀请贵司参与真实企微消息项目。\n请协助推荐合适达人。",
-    }), {}, "call-send", ["星图文化", "青禾传媒"]);
+    }), DEFAULT_CONTEXT, "call-send", ["星图文化", "青禾传媒"]);
     const question = prepared.askInput.questions[0].question;
     assert.match(question, /^⚠️ 不可逆企微外发\n\n/);
     assert.match(question, /确认后将立即向 2 家机构/);
@@ -431,7 +514,7 @@ describe("YP Action native hooks", () => {
         },
         error: null,
       },
-      {},
+      DEFAULT_CONTEXT,
       executionToolCallId,
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -445,7 +528,7 @@ describe("YP Action native hooks", () => {
   it("keeps partial group-binding outcomes explicit and rejects generic send success", async () => {
     const partial = await requestConfirmation(distributionParams({
       supplierIds: ["supplier-1", "supplier-2"],
-    }), {}, "call-partial-binding", ["星图文化", "青禾传媒"]);
+    }), DEFAULT_CONTEXT, "call-partial-binding", ["星图文化", "青禾传媒"]);
     await answerExternalConfirmation(partial);
     const partialExecutionId = "call-partial-binding-execute";
     assert.equal(await guard(
@@ -471,7 +554,7 @@ describe("YP Action native hooks", () => {
         },
         error: null,
       },
-      {},
+      DEFAULT_CONTEXT,
       partialExecutionId,
     );
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -483,8 +566,8 @@ describe("YP Action native hooks", () => {
 
     rmSync(join(tempDir, "state"), { recursive: true, force: true });
     const ambiguous = await requestConfirmation(
-      distributionParams({ requirement_id: "requirement-ambiguous-send" }),
-      {},
+      distributionParams({ requirement_id: requirementId(20) }),
+      DEFAULT_CONTEXT,
       "call-ambiguous-send",
     );
     await answerExternalConfirmation(ambiguous);
@@ -498,7 +581,7 @@ describe("YP Action native hooks", () => {
       "mcp__ypmcn__create_with_distributions",
       ambiguous.params,
       { success: true, data: { project_id: "project-ambiguous" }, error: null },
-      {},
+      DEFAULT_CONTEXT,
       ambiguousExecutionId,
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -512,7 +595,7 @@ describe("YP Action native hooks", () => {
     const supplierIds = [
       "supplier-1", "supplier-2", "supplier-3", "supplier-4", "supplier-5",
     ];
-    const prepared = await requestConfirmation(distributionParams({ supplierIds }), {}, "call-five-suppliers", [
+    const prepared = await requestConfirmation(distributionParams({ supplierIds }), DEFAULT_CONTEXT, "call-five-suppliers", [
       "星图文化", "青禾传媒", "未绑定机构", "光合传媒", "远山文化",
     ]);
     await answerExternalConfirmation(prepared);
@@ -534,7 +617,7 @@ describe("YP Action native hooks", () => {
         },
         error: "供应商未绑定企业微信群聊，项目事务未创建",
       },
-      {},
+      DEFAULT_CONTEXT,
       initialExecutionId,
     );
 
@@ -574,7 +657,7 @@ describe("YP Action native hooks", () => {
           },
           error: null,
         },
-        {},
+        DEFAULT_CONTEXT,
         retryExecutionId,
       );
     }
@@ -592,7 +675,7 @@ describe("YP Action native hooks", () => {
     const supplierIds = ["supplier-1", "supplier-2", "supplier-3"];
     const prepared = await requestConfirmation(
       distributionParams({ supplierIds }),
-      {},
+      DEFAULT_CONTEXT,
       "call-batch-fallback",
       ["星图文化", "青禾传媒", "远山文化"],
     );
@@ -607,7 +690,7 @@ describe("YP Action native hooks", () => {
       "mcp__ypmcn__create_with_distributions",
       prepared.params,
       { success: false, data: null, error: "批量发送失败，事务未创建" },
-      {},
+      DEFAULT_CONTEXT,
       batchExecutionId,
     );
 
@@ -654,7 +737,7 @@ describe("YP Action native hooks", () => {
         "mcp__ypmcn__create_with_distributions",
         params,
         individualResults[index],
-        {},
+        DEFAULT_CONTEXT,
         executionId,
       );
     }
@@ -681,7 +764,7 @@ describe("YP Action native hooks", () => {
   });
 
   it("accepts an exact echoed confirmation when the host depth-truncates popup params", async () => {
-    const prepared = await requestConfirmation(distributionParams(), {}, "call-truncated-popup");
+    const prepared = await requestConfirmation(distributionParams(), DEFAULT_CONTEXT, "call-truncated-popup");
     const truncatedInput = structuredClone(prepared.askInput);
     truncatedInput.questions[0].options = ["[truncated-depth]", "[truncated-depth]"];
     const question = prepared.askInput.questions[0].question;
@@ -699,29 +782,22 @@ describe("YP Action native hooks", () => {
     ), undefined);
   });
 
-  it("matches a global preflight receipt when AskUserQuestion gains session context", async () => {
-    const prepared = await requestConfirmation(distributionParams(), {}, "call-global-preflight");
-    await recordTool("AskUserQuestion", prepared.askInput, {
-      content: [{
-        type: "text",
-        text: `${prepared.askInput.questions[0].question}: 确认发送`,
-      }],
-    }, { sessionKey: "session-context-arrived-late" });
-
-    const globalState = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.equal(globalState.confirmations[globalState.latest_external_confirmation_id].status, "approved");
-    assert.equal(await guard(
-      "mcp__ypmcn__create_with_distributions",
-      prepared.params,
-      "call-global-preflight-execute",
-    ), undefined);
+  it("fails closed when external-send before_tool_call has no session context", async () => {
+    const blocked = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params: distributionParams(),
+      toolCallId: "call-unscoped-send",
+    }, {});
+    assert.equal(blocked.block, true);
+    assert.equal(blocked.errorCode, "INTEGRATION_REQUIRED");
+    assert.match(blocked.blockReason, /omitted session context/);
   });
 
   it("keeps the full multiline WeCom message in the scrollable AskUserQuestion body", async () => {
     const message = `您好，现有以下合作需求：\n${"长消息".repeat(300)}\n以上为完整消息结尾。`;
     const prepared = await requestConfirmation(distributionParams({
       description: message,
-    }), {}, "call-long-preview");
+    }), DEFAULT_CONTEXT, "call-long-preview");
     const question = prepared.askInput.questions[0].question;
     assert.ok(Array.from(question).length > 256);
     assert.ok(question.includes(message));
@@ -730,13 +806,13 @@ describe("YP Action native hooks", () => {
 
   it("resolves available MCN names and allows recipients without names", async () => {
     const params = distributionParams({ supplierIds: ["supplier-1", "supplier-2"] });
-    await recordMcnRecipients(params, {}, ["星图文化", "青禾传媒"]);
+    await recordMcnRecipients(params, DEFAULT_CONTEXT, ["星图文化", "青禾传媒"]);
 
     const confirmation = await guard("mcp__ypmcn__create_with_distributions", params, "call-shaped-result");
     assert.match(askInputFrom(confirmation).questions[0].question, /1\. 星图文化\n2\. 青禾传媒/);
 
     const unknownParams = { ...params, supplierIds: ["supplier-1", "supplier-unverified"] };
-    await recordMcnRecipients(unknownParams, {}, ["星图文化", undefined]);
+    await recordMcnRecipients(unknownParams, DEFAULT_CONTEXT, ["星图文化", undefined]);
     const unknownRecipient = await guard(
       "mcp__ypmcn__create_with_distributions",
       unknownParams,
@@ -747,7 +823,7 @@ describe("YP Action native hooks", () => {
 
     const staleRequirement = await guard(
       "mcp__ypmcn__create_with_distributions",
-      { ...params, requirement_id: "requirement-other" },
+      { ...params, requirement_id: requirementId(21) },
       "call-stale-requirement",
     );
     assert.equal(staleRequirement.block, true);
@@ -756,7 +832,7 @@ describe("YP Action native hooks", () => {
   it("keeps a rejected AskUserQuestion send unsent and allows a revised confirmation", async () => {
     const prepared = await requestConfirmation(distributionParams({
       supplierIds: ["supplier-1", "supplier-2"],
-    }), {}, "call-reject-and-edit", ["星图文化", "青禾传媒"]);
+    }), DEFAULT_CONTEXT, "call-reject-and-edit", ["星图文化", "青禾传媒"]);
     await answerExternalConfirmation(prepared, "取消发送");
 
     const deniedState = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -767,7 +843,7 @@ describe("YP Action native hooks", () => {
       supplierIds: ["supplier-2"],
       description: "您好，这是修改后的企微消息。",
     };
-    await recordMcnRecipients(revisedParams, {}, ["青禾传媒"]);
+    await recordMcnRecipients(revisedParams, DEFAULT_CONTEXT, ["青禾传媒"]);
     const revised = await guard(
       "mcp__ypmcn__create_with_distributions",
       revisedParams,
@@ -779,7 +855,7 @@ describe("YP Action native hooks", () => {
   });
 
   it("does not authorize cancellation, host denial, tool error, a modified popup, or changed parameters", async () => {
-    const cancelled = await requestConfirmation(distributionParams({ requirement_id: "requirement-cancel" }));
+    const cancelled = await requestConfirmation(distributionParams({ requirement_id: requirementId(22) }));
     await answerExternalConfirmation(cancelled, "取消发送");
     askInputFrom(await guard(
       "mcp__ypmcn__create_with_distributions",
@@ -788,7 +864,7 @@ describe("YP Action native hooks", () => {
     ));
 
     rmSync(join(tempDir, "state"), { recursive: true, force: true });
-    const denied = await requestConfirmation(distributionParams({ requirement_id: "requirement-denied" }));
+    const denied = await requestConfirmation(distributionParams({ requirement_id: requirementId(23) }));
     await recordTool("AskUserQuestion", denied.askInput, {
       content: [{ type: "text", text: "User denied the operation." }],
     });
@@ -796,7 +872,7 @@ describe("YP Action native hooks", () => {
     assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "denied");
 
     rmSync(join(tempDir, "state"), { recursive: true, force: true });
-    const failedTool = await requestConfirmation(distributionParams({ requirement_id: "requirement-tool-error" }));
+    const failedTool = await requestConfirmation(distributionParams({ requirement_id: requirementId(24) }));
     await recordTool("AskUserQuestion", failedTool.askInput, {
       isError: true,
       answers: [{ selected_labels: ["确认发送"] }],
@@ -805,7 +881,7 @@ describe("YP Action native hooks", () => {
     assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "denied");
 
     rmSync(join(tempDir, "state"), { recursive: true, force: true });
-    const modifiedPopup = await requestConfirmation(distributionParams({ requirement_id: "requirement-modified" }));
+    const modifiedPopup = await requestConfirmation(distributionParams({ requirement_id: requirementId(25) }));
     const changedAskInput = structuredClone(modifiedPopup.askInput);
     changedAskInput.questions[0].question += "\n额外内容";
     await recordTool("AskUserQuestion", changedAskInput, {
@@ -822,11 +898,11 @@ describe("YP Action native hooks", () => {
     rmSync(join(tempDir, "state"), { recursive: true, force: true });
     const first = await requestConfirmation(distributionParams({
       supplierIds: ["supplier-1", "supplier-2"],
-    }), {}, "call-original", ["星图文化", "青禾传媒"]);
+    }), DEFAULT_CONTEXT, "call-original", ["星图文化", "青禾传媒"]);
     await answerExternalConfirmation(first);
     await recordMcnRecipients(
       { ...first.params, supplierIds: ["supplier-2"] },
-      {},
+      DEFAULT_CONTEXT,
       ["青禾传媒"],
     );
     const changed = await guard(
@@ -856,19 +932,19 @@ describe("YP Action native hooks", () => {
       [1, undefined],
     ]) {
       const params = distributionParams({ requirement_id: `requirement-replay-${index}` });
-      const prepared = await requestConfirmation(params, {}, `call-replay-${index}`);
+      const prepared = await requestConfirmation(params, DEFAULT_CONTEXT, `call-replay-${index}`);
       await answerExternalConfirmation(prepared);
       const executionId = `call-replay-${index}-execute`;
       assert.equal(await guard("mcp__ypmcn__create_with_distributions", params, executionId), undefined);
       if (eventResult) {
-        await recordTool("mcp__ypmcn__create_with_distributions", params, eventResult, {}, executionId);
+        await recordTool("mcp__ypmcn__create_with_distributions", params, eventResult, DEFAULT_CONTEXT, executionId);
       } else {
         await hooks.get("after_tool_call")({
           toolName: "mcp__ypmcn__create_with_distributions",
           params,
           toolCallId: executionId,
           error: "connection lost",
-        }, {});
+        }, DEFAULT_CONTEXT);
       }
       askInputFrom(await guard(
         "mcp__ypmcn__create_with_distributions",
@@ -884,17 +960,17 @@ describe("YP Action native hooks", () => {
     await recordTool(
       "mcp__ypmcn__validate_requirement",
       validateInput,
-      { success: true, data: { id: "requirement-local" }, error: null },
+      { success: true, data: { id: requirementId(2) }, error: null },
     );
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.deepEqual(
       [state.workflow.phase, state.workflow.next_action, state.workflow.requirement_id],
-      ["requirement_ready", "search_creators", "requirement-local"],
+      ["requirement_ready", "search_creators", requirementId(2)],
     );
 
     await recordTool(
       "mcp__ypmcn__search_creators",
-      { id: "requirement-local" },
+      { id: requirementId(2) },
       { success: true, data: preRaceSupply(), error: null },
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -935,12 +1011,12 @@ describe("YP Action native hooks", () => {
 
     await recordTool(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-local", target_count: 4 },
+      { requirement_id: requirementId(2), target_count: 4 },
       {
         success: true,
         data: {
           task_id: "manual-task-1",
-          requirement_id: "requirement-local",
+          requirement_id: requirementId(2),
           inquiry_id: "inquiry-manual-1",
           target_count: 4,
           status: "started",
@@ -963,21 +1039,98 @@ describe("YP Action native hooks", () => {
     assert.ok(state.workflow_events.length >= 5);
   });
 
+  it("parses current search supply evidence, accepts one-release legacy evidence, and rejects conflicts", async () => {
+    for (const [candidateCount, expectedRisk] of [[500, "safe"], [63, "high_risk"]]) {
+      rmSync(join(tempDir, "state"), { recursive: true, force: true });
+      await recordTool(
+        "mcp__ypmcn__validate_requirement",
+        { payload: { platform: "xiaohongshu", quantityTotal: 10 } },
+        { success: true, data: { id: requirementId(candidateCount) }, error: null },
+      );
+      await recordTool(
+        "mcp__ypmcn__search_creators",
+        { id: requirementId(candidateCount) },
+        {
+          success: true,
+          data: preRaceSupply({ candidate_count: candidateCount, quantity_total: 10 }),
+          error: null,
+        },
+      );
+      const state = JSON.parse(readFileSync(stateFile, "utf8"));
+      assert.equal(state.workflow.pre_race_supply_status, "valid");
+      assert.equal(state.workflow.pre_race_rate_card_creator_count, candidateCount);
+      assert.equal(state.workflow.pre_race_risk_level, expectedRisk);
+      assert.equal(state.workflow.pre_race_supply_contract, "supply-assessment-v2");
+    }
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload: { platform: "xiaohongshu", quantityTotal: 10 } },
+      { success: true, data: { id: requirementId(50) }, error: null },
+    );
+    await recordTool(
+      "mcp__ypmcn__search_creators",
+      { id: requirementId(50) },
+      { success: true, data: { demand_count: 10, eligible_creator_count: 300, supply_ratio: 30 }, error: null },
+    );
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.pre_race_supply_contract, "legacy-v1");
+
+    rmSync(join(tempDir, "state"), { recursive: true, force: true });
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload: { platform: "xiaohongshu", quantityTotal: 10 } },
+      { success: true, data: { id: requirementId(51) }, error: null },
+    );
+    await recordTool(
+      "mcp__ypmcn__search_creators",
+      { id: requirementId(51) },
+      {
+        success: true,
+        data: {
+          ...preRaceSupply({ candidate_count: 500, quantity_total: 10 }),
+          demand_count: 10,
+          eligible_creator_count: 63,
+          supply_ratio: 6.3,
+        },
+        error: null,
+      },
+    );
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.pre_race_supply_status, "invalid");
+    assert.equal(state.workflow.next_action, "recover_search_supply_plan");
+  });
+
+  it("routes an explicit continuation to manual sourcing after validation", async () => {
+    await hooks.get("before_prompt_build")({
+      prompt: "继续",
+      messages: [{ role: "assistant", content: "需要我继续走手扒流程吗？" }],
+    }, DEFAULT_CONTEXT);
+    let state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.post_validation_intent, "manual");
+    assert.deepEqual(state.workflow.post_validation_actions, ["manual_source_creators"]);
+    await recordFreshRequirement(requirementId(60));
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.workflow.next_action, "manual_source_creators");
+    assert.deepEqual(state.workflow.post_validation_actions, ["manual_source_creators"]);
+  });
+
   it("does not create a manual target without complete selected-supplier rank evidence", async () => {
     for (const [rankInput, rankData] of [
       [
-        { id: "requirement-local", platform: "xiaohongshu", minimum_mcn_count: 7 },
+        { id: requirementId(2), platform: "xiaohongshu", minimum_mcn_count: 7 },
         { suppliers: [] },
       ],
       [
         {
-          id: "requirement-local", platform: "xiaohongshu", minimum_mcn_count: 7,
+          id: requirementId(2), platform: "xiaohongshu", minimum_mcn_count: 7,
           write_mcn_recommendation_items: false,
         },
         { inquiry_id: "inquiry-not-persisted", suppliers: [] },
       ],
       [
-        { id: "requirement-local", platform: "xiaohongshu", minimum_mcn_count: 7 },
+        { id: requirementId(2), platform: "xiaohongshu", minimum_mcn_count: 7 },
         {
           inquiry_id: "inquiry-incomplete",
           demand_count: 5,
@@ -985,7 +1138,7 @@ describe("YP Action native hooks", () => {
         },
       ],
       [
-        { id: "requirement-local", platform: "xiaohongshu", minimum_mcn_count: 7 },
+        { id: requirementId(2), platform: "xiaohongshu", minimum_mcn_count: 7 },
         {
           inquiry_id: "inquiry-conflict-1",
           demand_count: 5,
@@ -1035,14 +1188,14 @@ describe("YP Action native hooks", () => {
       await recordTool(
         "mcp__ypmcn__validate_requirement",
         { payload: { platform: "xiaohongshu", quantityTotal: 5 } },
-        { success: true, data: { id: "requirement-local" }, error: null },
+        { success: true, data: { id: requirementId(2) }, error: null },
       );
       await recordTool(
         "mcp__ypmcn__search_creators",
-        { id: "requirement-local" },
+        { id: requirementId(2) },
         { success: true, data: preRaceSupply({
-          eligible_creator_count: coverage,
-          supply_ratio: coverage / 5,
+          candidate_count: coverage,
+          supply_multiplier: coverage / 5,
         }), error: null },
       );
       const state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -1082,7 +1235,7 @@ describe("YP Action native hooks", () => {
     await answerPostRace("一键发起手扒补量");
     await recordTool(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-local", target_count: 4 },
+      { requirement_id: requirementId(2), target_count: 4 },
       { success: true, data: { message: "started" }, error: null },
     );
     let state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -1098,12 +1251,12 @@ describe("YP Action native hooks", () => {
     await answerPostRace("一键发起手扒补量");
     await recordTool(
       "mcp__ypmcn__manual_source_creators",
-      { requirement_id: "requirement-local", target_count: 4 },
+      { requirement_id: requirementId(2), target_count: 4 },
       {
         success: true,
         data: {
           task_id: "manual-task-mismatch",
-          requirement_id: "requirement-local",
+          requirement_id: requirementId(2),
           inquiry_id: "inquiry-manual-1",
           target_count: 5,
           status: "running",
@@ -1125,9 +1278,9 @@ describe("YP Action native hooks", () => {
     await answerPostRace("一键发起手扒补量");
     await hooks.get("after_tool_call")({
       toolName: "mcp__ypmcn__manual_source_creators",
-      params: { requirement_id: "requirement-local", target_count: 4 },
+      params: { requirement_id: requirementId(2), target_count: 4 },
       error: "connection lost",
-    }, {});
+    }, DEFAULT_CONTEXT);
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.next_action, "recover_manual_source_creators");
     assert.equal(state.workflow.manual_sourcing_evidence_status, "unavailable");
@@ -1168,7 +1321,7 @@ describe("YP Action native hooks", () => {
     await answerPostRace("暂不补量，继续询价");
     const mismatched = await guard(
       "mcp__ypmcn__create_with_distributions",
-      distributionParams({ requirement_id: "requirement-local", supplierIds: ["supplier-1"] }),
+      distributionParams({ requirement_id: requirementId(2), supplierIds: ["supplier-1"] }),
       "call-selection-mismatch",
     );
     assert.equal(mismatched?.block, true);
@@ -1177,7 +1330,7 @@ describe("YP Action native hooks", () => {
     const matched = await guard(
       "mcp__ypmcn__create_with_distributions",
       distributionParams({
-        requirement_id: "requirement-local",
+        requirement_id: requirementId(2),
         supplierIds: ["supplier-2", "supplier-1"],
       }),
       "call-selection-match",
@@ -1206,12 +1359,12 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.next_action, "validate_requirement");
     assert.equal(state.workflow.platform, "xiaohongshu");
 
-    await recordFreshRequirement("requirement-direct");
+    await recordFreshRequirement(requirementId(3));
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.phase, "requirement_ready");
     assert.equal(state.workflow.next_action, "manual_source_creators");
 
-    const manualParams = { requirement_id: "requirement-direct", size: "8" };
+    const manualParams = { requirement_id: requirementId(3), size: "8" };
     assert.equal(await guard("mcp__ypmcn__manual_source_creators", manualParams), undefined);
     await recordTool(
       "mcp__ypmcn__manual_source_creators",
@@ -1228,7 +1381,7 @@ describe("YP Action native hooks", () => {
       "mcp__ypmcn__rank_creators",
       {
         inquiry_ids: ["31", "32"],
-        requirement_id: "requirement-direct",
+        requirement_id: requirementId(3),
         columns: [{ key: "kwUid", name: "达人 ID" }],
       },
       { success: true, data: { batch_items: [{ kwUid: "creator-1" }] }, error: null },
@@ -1238,7 +1391,7 @@ describe("YP Action native hooks", () => {
 
     await recordTool(
       "mcp__ypmcn__create_submission_batch",
-      { requirement_id: "requirement-direct", size: "8", number: "2" },
+      { requirement_id: requirementId(3), size: "8", number: "2" },
       { success: true, data: { exported: true }, error: null },
     );
     state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -1272,7 +1425,7 @@ describe("YP Action native hooks", () => {
         },
         error: null,
       },
-    }, {});
+    }, DEFAULT_CONTEXT);
 
     assert.deepEqual(openedUrls, []);
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -1293,6 +1446,31 @@ describe("YP Action native hooks", () => {
     assert.deepEqual(secondState.confirmations, {});
   });
 
+  it("migrates v18 state to v19 without rewriting a completed workflow phase", async () => {
+    mkdirSync(join(tempDir, "state", "sessions", defaultSessionHash), { recursive: true });
+    writeFileSync(stateFile, JSON.stringify({
+      schema_version: 18,
+      confirmations: {},
+      workflow: {
+        phase: "recommendation_ready",
+        next_action: null,
+        waiting_for: null,
+        transition_seq: 7,
+        updated_at_ms: 1,
+      },
+      workflow_events: [],
+      manual_sourcing_requirement_receipt: { status: "fresh" },
+      search_requirement_receipt: { status: "fresh" },
+    }));
+    await hooks.get("before_prompt_build")({ prompt: "查看状态", messages: [] }, DEFAULT_CONTEXT);
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.schema_version, 19);
+    assert.equal(state.workflow.phase, "recommendation_ready");
+    assert.equal(state.workflow.next_action, null);
+    assert.equal(state.manual_sourcing_requirement_receipt, undefined);
+    assert.equal(state.search_requirement_receipt, undefined);
+  });
+
   it("stores fingerprints and workflow metadata without persisting the message body", async () => {
     await requestConfirmation(distributionParams({
       description: "您好，这是一条 should-not-be-stored 的私密企微消息。",
@@ -1309,7 +1487,7 @@ describe("YP Action native hooks", () => {
     askInputFrom(result);
   });
 
-  it("fails open for ordinary tools and closed for guarded manual or external-send calls", async () => {
+  it("fails open for ordinary tools and closed for all guarded requirement or external-send calls", async () => {
     const localHooks = new Map();
     const errors = [];
     createYpmcnPlugin({ beforeTool() { throw new Error("guard exploded"); } }).register({
@@ -1322,12 +1500,24 @@ describe("YP Action native hooks", () => {
       toolName: "mcp__ypmcn__create_with_distributions",
       params: distributionParams(),
     }, {});
-    assert.deepEqual(result, { block: true, blockReason: "YPmcn guard unavailable: guard exploded" });
+    assert.equal(result.errorCode, "INTEGRATION_REQUIRED");
+    assert.match(result.blockReason, /YPmcn guard unavailable: guard exploded/);
     const manual = await localHooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__manual_source_creators",
-      params: { requirement_id: "requirement-new", size: "1" },
+      params: { requirement_id: requirementId(30), size: "1" },
     }, {});
-    assert.deepEqual(manual, { block: true, blockReason: "YPmcn guard unavailable: guard exploded" });
-    assert.equal(errors.length, 3);
+    assert.equal(manual.errorCode, "INTEGRATION_REQUIRED");
+    assert.match(manual.blockReason, /YPmcn guard unavailable: guard exploded/);
+    const validate = await localHooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__validate_requirement",
+      params: { payload: {} },
+    }, {});
+    assert.equal(validate.errorCode, "INTEGRATION_REQUIRED");
+    const search = await localHooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__search_creators",
+      params: { id: requirementId(31) },
+    }, {});
+    assert.equal(search.errorCode, "INTEGRATION_REQUIRED");
+    assert.equal(errors.length, 5);
   });
 });

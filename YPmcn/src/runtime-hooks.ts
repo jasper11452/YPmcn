@@ -15,6 +15,11 @@ import {
 export { withStateScope } from "./runtime-hook-state.js";
 
 const SHELL_TOOLS = new Set(["bash", "exec", "shell", "powershell", "pwsh"]);
+const GUARDED_REQUIREMENT_TOOLS = new Set([
+  "validate_requirement",
+  "search_creators",
+  "manual_source_creators",
+]);
 const PROVIDER_WRITE_TARGET = /create[-_]with[-_]distributions|\/api\/projects\/create-with-distributions/i;
 const SHELL_WRITE_CLIENT = /\b(?:curl|wget|httpie)\b|\bInvoke-(?:WebRequest|RestMethod)\b|\brequests\.(?:post|put|patch|delete)\b|\baxios\.(?:post|put|patch|delete)\b|\bfetch\s*\(|\b(?:mcp|mcporter|openclaw)\b[^\n]*(?:call|invoke|run)\b/i;
 const LAST_RANK_CREATORS_REQUIREMENT_KEY = "last_rank_creators_requirement_id_sha256";
@@ -53,11 +58,18 @@ export function isManualSourcingAttempt(event: Json): boolean {
   return normalize(raw) === "manual_source_creators";
 }
 
+export function isRequirementGuardAttempt(event: Json): boolean {
+  const raw = String(event.toolName ?? event.name ?? "").trim();
+  const tool = normalize(raw);
+  return Boolean(tool && GUARDED_REQUIREMENT_TOOLS.has(tool));
+}
+
 export function beforeTool(
   event: Json,
   _ctx: Json,
   rootDir: string,
   onNotice?: (message: string) => void,
+  scopeAvailable = false,
 ): Json | undefined {
   const raw = String(event.toolName ?? event.name ?? "").trim();
   const input = event.params && typeof event.params === "object" ? event.params :
@@ -75,9 +87,14 @@ export function beforeTool(
     if (notice) onNotice?.(notice);
     return undefined;
   }
-  if (tool !== "create_with_distributions" && tool !== "manual_source_creators") return undefined;
+  if (!tool || (!GUARDED_REQUIREMENT_TOOLS.has(tool) && tool !== "create_with_distributions")) {
+    return undefined;
+  }
+  if (tool === "search_creators" && !scopeAvailable) {
+    onNotice?.("YPmcn search_creators is using primary-key shape validation only because the host omitted session context.");
+  }
   const current = store(rootDir);
-  return guardWorkflowTool(event, tool, input, current, rootDir);
+  return guardWorkflowTool(event, tool, input, current, rootDir, scopeAvailable);
 }
 
 export function afterTool(event: Json, _ctx: Json, rootDir: string): void {

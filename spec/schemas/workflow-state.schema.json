@@ -32,7 +32,25 @@
     "waiting_for": {"type": ["string", "null"]},
     "transition_seq": {"type": "integer", "minimum": 0},
     "updated_at_ms": {"type": ["integer", "null"]},
-    "requirement_id": {"type": "string", "minLength": 1},
+    "requirement_id": {"type": "string", "pattern": "^[0-9a-fA-F]{32}$"},
+    "post_validation_intent": {"enum": ["search", "manual"]},
+    "post_validation_actions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {"enum": ["search_creators", "manual_source_creators"]}
+    },
+    "preflight_error": {
+      "enum": [
+        "brief_mismatch",
+        "missing_session_context",
+        "primary_key_format",
+        "requirement_id_mismatch",
+        "requirement_receipt_missing"
+      ]
+    },
+    "pre_race_supply_contract": {"enum": ["supply-assessment-v2", "legacy-v1"]},
+    "pre_race_recommended_action": {"type": "string", "minLength": 1},
     "platform": {"enum": ["xiaohongshu", "douyin"]},
     "quantity_total": {"type": "integer", "minimum": 1},
     "manual_sourcing_size": {"type": "string", "pattern": "^[1-9][0-9]*$"},

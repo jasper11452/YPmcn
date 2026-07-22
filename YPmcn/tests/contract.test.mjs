@@ -24,6 +24,7 @@ const CURRENT_TOOLS = [
   "record_client_feedback", "get_recommendation_run_detail",
   "get_creator_detail", "audit_manual_adjustment", "get_workflow_state",
 ];
+const PRIMARY_REQUIREMENT_ID = "0123456789abcdef0123456789abcdef";
 
 function validDistribution(overrides = {}) {
   const description = overrides.description ??
@@ -141,7 +142,7 @@ describe("current Endpoint input validation", () => {
   it("accepts representative live inputs including nullable anyOf branches", () => {
     const cases = [
       ["validate_requirement", { payload: { raw: "brief" } }],
-      ["search_creators", { id: "req-1" }],
+      ["search_creators", { id: PRIMARY_REQUIREMENT_ID }],
       ["rank_mcns", { id: "req-1", platform: "xiaohongshu", medium_risk_confirmation: null }],
       ["select_inquiry_form_fields", { platform: "xiaohongshu", timeout_seconds: 30 }],
       ["create_with_distributions", validDistribution()],
@@ -149,7 +150,7 @@ describe("current Endpoint input validation", () => {
         requirement_id: "req-1", project_id: "project-1", supplierIds: ["supplier-1"],
       }],
       ["ingest_mcn_submissions", { inquiry_ids: ["1"] }],
-      ["manual_source_creators", { requirement_id: "req-1", size: "4" }],
+      ["manual_source_creators", { requirement_id: PRIMARY_REQUIREMENT_ID, size: "4" }],
       ["rank_creators", {
         requirement_id: "req-1",
         inquiry_ids: ["10", "11"],
@@ -263,18 +264,18 @@ describe("current Endpoint input validation", () => {
 
   it("requires positive string sizes and batch numbers for the direct flow", () => {
     assert.deepEqual(
-      validateToolParams("manual_source_creators", { requirement_id: "req-1" }).map(({ path }) => path),
+      validateToolParams("manual_source_creators", { requirement_id: PRIMARY_REQUIREMENT_ID }).map(({ path }) => path),
       ["$.size"],
     );
     for (const size of [0, -1, 1.5, "0", "01", "4.5"]) {
       assert.equal(
-        validateToolParams("manual_source_creators", { requirement_id: "req-1", size })[0].path,
+        validateToolParams("manual_source_creators", { requirement_id: PRIMARY_REQUIREMENT_ID, size })[0].path,
         "$.size",
       );
     }
     assert.deepEqual(
       validateToolParams("manual_source_creators", {
-        requirement_id: "req-1", size: "4", target_count: 4,
+        requirement_id: PRIMARY_REQUIREMENT_ID, size: "4", target_count: 4,
       }).map(({ path }) => path),
       ["$.target_count"],
     );
@@ -287,6 +288,10 @@ describe("current Endpoint input validation", () => {
     assert.equal(validateToolParams("create_submission_batch", {
       requirement_id: "req-1", size: "4", number: "2", run_id: "1",
     })[0].path, "$.run_id");
+    assert.equal(validateToolParams("search_creators", { id: "1784689136279241" })[0].path, "$.id");
+    assert.equal(validateToolParams("manual_source_creators", {
+      requirement_id: "1784689136279241", size: "4",
+    })[0].path, "$.requirement_id");
   });
 
   it("enforces semantic lookup constraints without changing live schemas", () => {

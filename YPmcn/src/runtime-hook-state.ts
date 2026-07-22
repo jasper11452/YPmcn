@@ -9,7 +9,7 @@ export type Json = Record<string, any>;
 export type ConfirmationStatus = "pending" | "approved" | "in_flight" | "consumed" | "unknown" | "denied";
 export type GuardStore = { path: string; data: Json };
 const STATE_SCOPE = new AsyncLocalStorage<string>();
-const STATE_SCHEMA_VERSION = 18;
+const STATE_SCHEMA_VERSION = 19;
 
 export const CONFIRMATION_TTL_MS = 10 * 60 * 1_000;
 
@@ -126,6 +126,9 @@ function storeAtPath(path: string): GuardStore {
   }
   if (previousSchemaVersion !== undefined && previousSchemaVersion !== STATE_SCHEMA_VERSION) {
     delete data.manual_sourcing_requirement_receipt;
+    delete data.search_requirement_receipt;
+    delete data.workflow.post_validation_actions;
+    delete data.workflow.pre_race_supply_contract;
     if (data.workflow.next_action === "manual_source_creators") {
       data.workflow.next_action = "validate_requirement";
       data.workflow.waiting_for = null;

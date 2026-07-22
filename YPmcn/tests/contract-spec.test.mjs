@@ -115,7 +115,7 @@ describe("current Endpoint MCP contract", () => {
       productionEndpoint: "https://mcp.eshypdata.com/sse",
       activeProfile: "development",
       inputAuthority: "approved-target-with-live-tools-list-comparison",
-      schemaSelection: "2026-07-21-live-selector-manual-rank-plus-approved-submission-target",
+      schemaSelection: "2026-07-22-search-supply-v2-plus-primary-id-guards",
       ignoredToolPrefix: "pgy",
       advertisedOutputSchema: false,
     });
@@ -139,8 +139,9 @@ describe("current Endpoint MCP contract", () => {
     assert.match(profile.tools.rank_creators.agentSemanticRequirements.inquiry_ids, /manual_source_creators/);
     assert.match(
       profile.tools.manual_source_creators.agentSemanticRequirements.requirement_id,
-      /fresh non-empty ID.*immediately preceding successful validate_requirement.*one manual_source_creators invocation/,
+      /32-character hexadecimal data\.id.*immediately preceding successful validate_requirement.*same-session receipt.*one manual_source_creators invocation/,
     );
+    assert.match(profile.tools.search_creators.agentSemanticRequirements.id, /data\.id.*data\.demand_id/);
     assert.match(
       profile.tools.manual_source_creators.agentSemanticRequirements.eligibility,
       /independent of current workflow phase, historical creator search, and completion of other workflow steps/,
@@ -209,8 +210,22 @@ describe("current Endpoint MCP contract", () => {
       }
     }
     assert.deepEqual(profile.outputContracts.search_creators.successSchema.properties.data.required, [
-      "demand_count", "eligible_creator_count", "supply_ratio",
+      "total_matched", "supply_assessment",
     ]);
+    assert.deepEqual(
+      profile.outputContracts.search_creators.successSchema.properties.data.properties
+        .supply_assessment.required,
+      [
+        "candidate_count", "quantity_total", "supply_multiplier",
+        "supply_risk_level", "recommended_action",
+      ],
+    );
+    assert.deepEqual(profile.outputContracts.search_creators.compatibility, {
+      primary: "supply-assessment-v2",
+      legacyAcceptedIn: "3.4.9-only",
+      legacyFields: ["demand_count", "eligible_creator_count", "supply_ratio"],
+      conflictBehavior: "fail-closed",
+    });
     assert.deepEqual(profile.outputContracts.rank_mcns.successSchema.properties.data.required, [
       "inquiry_id", "demand_count", "selected_supplier_ids", "selected_mcn_count",
       "coverage_scope", "selected_mcn_covered_creator_count",

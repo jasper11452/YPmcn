@@ -97,6 +97,13 @@ describe("Spec governance", () => {
       resultSource: "actual fields returned by the select_inquiry_form_fields webpage callback",
       reopenSelectorAfterToolResult: false,
     });
+    assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.requirementClarification, {
+      maxQuestions: 5,
+      minOptionsPerQuestion: 2,
+      maxOptionsPerQuestion: 6,
+      exposeInternalPriceFieldNames: false,
+      contentFormImpliesDuration: false,
+    });
     assert.deepEqual(mediaAssistant.toolPolicy.interactionPolicy.manualSourcingResultTable, {
       format: "markdown-table",
       columns: [
@@ -122,9 +129,15 @@ describe("Spec governance", () => {
     });
     assert.deepEqual(mediaAssistant.toolPolicy.preconditions.manual_source_creators, [
       "validate_requirement_succeeded_immediately_before_this_call",
-      "requirement_id_equals_the_fresh_id_returned_by_that_validation",
+      "requirement_id_equals_the_fresh_32_character_data_id_returned_by_that_validation",
+      "same_session_context_is_available_to_the_before_tool_hook",
       "fresh_requirement_id_receipt_is_consumed_by_this_call",
       "size_is_a_positive_integer_decimal_string",
+    ]);
+    assert.deepEqual(mediaAssistant.toolPolicy.preconditions.search_creators, [
+      "id_is_the_32_character_data_id_from_the_latest_same_session_successful_validation",
+      "numeric_data_demand_id_and_demand_version_are_rejected_without_revalidation",
+      "missing_before_tool_session_context_never_uses_global_state_as_authorization",
     ]);
     assert.equal(
       existsSync(join(repoRoot, mediaAssistant.implementation)),
@@ -461,8 +474,11 @@ describe("Spec governance", () => {
       /数据库字段名：字段备注/,
     );
     assert.deepEqual(mcp.outputContracts.search_creators.successSchema.properties.data.required, [
-      "demand_count", "eligible_creator_count", "supply_ratio",
+      "total_matched", "supply_assessment",
     ]);
+    assert.equal(mcp.outputContracts.search_creators.compatibility.primary, "supply-assessment-v2");
+    assert.equal(mcp.outputContracts.search_creators.compatibility.legacyAcceptedIn, "3.4.9-only");
+    assert.equal(mcp.outputContracts.search_creators.compatibility.conflictBehavior, "fail-closed");
     assert.deepEqual(mcp.outputContracts.rank_mcns.successSchema.properties.data.required, [
       "inquiry_id", "demand_count", "selected_supplier_ids", "selected_mcn_count",
       "coverage_scope", "selected_mcn_covered_creator_count",

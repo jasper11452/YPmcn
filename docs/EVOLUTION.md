@@ -19,11 +19,12 @@
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:4d506724ff93bc14b1fc9e96787ed495aa2d24e99521705a65cd249b819b84df`
-变更记录摘要：`sha256:703e57f848a42ea4d66ea87bfd350aabba53f4a7588f2049a091472912483246`
+当前 Spec：`mvp-v2` · `sha256:1a351d952a57937eef2ae3d53c19c0ea06c0a848e4a906ee8da09dc32d1d8d2f`
+变更记录摘要：`sha256:5a58de5dc749e4937982e3c19f47f93aa2409460111e8304b9517a9e8c7fa488`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-019 | `IMPLEMENTED_LOCAL_HOST_BLOCKED` | [修复需求主键、Brief 绑定与搜索供给契约](../changes/CHG-2026-019-runtime-id-and-supply-contract.md) |
 | CHG-2026-018 | `IMPLEMENTED_LOCAL_PROVIDER_UNVERIFIED` | [手扒调用绑定当次新需求 ID](../changes/CHG-2026-018-fresh-manual-requirement.md) |
 | CHG-2026-017 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [字段选择后直接手扒并导出](../changes/CHG-2026-017-direct-manual-export.md) |
 | CHG-2026-016 | `IMPLEMENTED_LOCAL_PROVIDER_BLOCKED` | [赛后决定精确手扒补量](../changes/CHG-2026-016-post-race-manual-sourcing.md) |

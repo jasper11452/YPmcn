@@ -260,12 +260,33 @@ function validateSemanticRequirements(
   tool: string,
   params: Record<string, unknown>,
 ): ValidationIssue[] {
+  if (
+    tool === "search_creators" && hasOwn(params, "id") &&
+    (typeof params.id !== "string" || !/^[0-9a-f]{32}$/i.test(params.id.trim()))
+  ) {
+    return [issue(
+      "INVALID_INPUT",
+      "$.id",
+      "id must be the 32-character hexadecimal data.id returned by validate_requirement; demand_id is not accepted.",
+    )];
+  }
   if (tool === "manual_source_creators" || tool === "create_submission_batch") {
     if (
       hasOwn(params, "requirement_id") &&
       (typeof params.requirement_id !== "string" || params.requirement_id.trim().length === 0)
     ) {
       return [issue("INVALID_INPUT", "$.requirement_id", "requirement_id must be a non-empty string.")];
+    }
+    if (
+      tool === "manual_source_creators" && hasOwn(params, "requirement_id") &&
+      typeof params.requirement_id === "string" &&
+      !/^[0-9a-f]{32}$/i.test(params.requirement_id.trim())
+    ) {
+      return [issue(
+        "INVALID_INPUT",
+        "$.requirement_id",
+        "requirement_id must be the 32-character hexadecimal data.id returned by validate_requirement; demand_id is not accepted.",
+      )];
     }
     if (hasOwn(params, "size") && (typeof params.size !== "string" || !/^[1-9]\d*$/.test(params.size))) {
       return [issue("INVALID_INPUT", "$.size", "size must be a positive-integer decimal string.")];

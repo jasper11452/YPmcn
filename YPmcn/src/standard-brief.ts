@@ -118,10 +118,7 @@ export function extractStandardBrief(input: string): string {
   }, undefined);
   const firstField = new RegExp(`${FIELD_LABEL}\\s*[：:]`, "i").exec(input);
   const value = selected?.value ?? (firstField ? input.slice(firstField.index) : input);
-  return value
-    .trim()
-    .replace(/[。！？!?]+$/g, "")
-    .trim();
+  return value.trim();
 }
 
 function labeledFieldPattern(label: string, flags = "g"): RegExp {
