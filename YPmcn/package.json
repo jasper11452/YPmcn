@@ -1,6 +1,6 @@
 {
   "name": "ypmcn-media-assistant",
-  "version": "3.4.15",
+  "version": "3.4.16",
   "description": "YPmcn 媒介助手：媒介工作流提示与企微外发一次性确认",
   "type": "module",
   "main": "./dist/index.js",

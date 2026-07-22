@@ -57,10 +57,25 @@
             ],
             "batchRequirementQuestions": true,
             "askBeforeHumanDecisionPause": true,
+            "nonterminalOutputMode": "tool-calls-only",
+            "finalTextPolicy": "concise declarative result only at an allowed stop; no questions, offers, or invitations to continue",
+            "allowedStops": [
+              "next_action_null_terminal",
+              "waiting_for_provider",
+              "terminal_failure_without_safe_recovery",
+              "ask_cancelled_denied_closed_or_timed_out"
+            ],
+            "forbiddenStops": [
+              "non_null_next_action_with_waiting_for_null_or_assistant",
+              "waiting_for_user_before_AskUserQuestion",
+              "submitted_answer_before_selected_action_executes",
+              "unfinished_explicit_platform_or_requirement_unit"
+            ],
             "multilineNonOptionPromptRequired": true,
+            "postRankMaxUnicodeCharactersPerLine": 40,
             "hostProvidedCustomInputPerPopup": true,
             "submittedAnswer": "execute_the_selected_safe_action_in_the_same_assistant_turn",
-            "cancelBehavior": "stop_without_a_following_business_write",
+            "cancelBehavior": "stop_without_a_following_business_write_and_wait_for_a_new_user_message_before_deciding_whether_to_reopen_AskUserQuestion",
             "continueMessageRequired": false
           },
           "requirementClarification": {
@@ -74,7 +89,9 @@
             "askExecutionOrder": false,
             "defaultExecutionOrder": "first appearance in the exact original Brief",
             "clarification": "collect all unresolved values in one AskUserQuestion popup and ask one question per shared value instead of duplicating it per platform",
-            "completion": "process every explicit platform without asking whether to continue the remaining platform"
+            "completion": "process every explicit platform without asking whether to continue the remaining platform",
+            "samePlatformSplit": "inherit shared fields into each independent requirement and split only on differing field combinations",
+            "localUnitLifecycle": "active -> suspended -> resumed or completed, with per-unit next_action and event history independent of Provider workflow state"
           },
           "fieldSelection": {
             "resultSource": "actual fields returned by the select_inquiry_form_fields webpage callback",
@@ -130,12 +147,13 @@
             "number_is_a_positive_integer_decimal_string"
           ],
           "create_with_distributions": [
-          "local_orchestration_state_has_confirmed_supply_mcn_and_columns",
-          "request_identity_resolves_one_requirement",
-          "description_is_plain_text_wechat_message_from_confirmed_user_requirement_not_json",
-          "wechat_notification_message_is_exactly_identical_to_description",
-          "ask_user_question_prompt_and_followup_input_fingerprints_current_and_one_time"
-        ],
+            "local_orchestration_state_has_confirmed_supply_mcn_and_columns",
+            "request_identity_resolves_one_requirement",
+            "description_is_plain_text_wechat_message_from_confirmed_user_requirement_not_json",
+            "wechat_notification_message_is_exactly_identical_to_description",
+            "ask_user_question_prompt_and_followup_input_fingerprints_current_and_one_time",
+            "missing_session_context_requires_exactly_one_unexpired_matching_local_confirmation_receipt_or_fails_closed"
+          ],
         "ingest_mcn_submissions": [
           "server_allowed_action_ingest_mcn_submissions",
           "inquiry_identity_and_ownership_current",

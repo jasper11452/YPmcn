@@ -6,6 +6,7 @@ import {
   denyStructured,
   fingerprint,
   globalStore,
+  sessionStores,
   type ConfirmationStatus,
   type GuardStore,
   type Json,
@@ -57,6 +58,12 @@ const REQUIREMENT_PRIMARY_KEY = /^[0-9a-f]{32}$/i;
 const REQUIREMENT_BRIEF_TTL_MS = 30 * 60 * 1_000;
 const PREFLIGHT_DENIAL_TTL_MS = 5 * 60 * 1_000;
 const SEARCH_REQUIREMENT_RECEIPT_KEY = "search_requirement_receipt";
+const WORKFLOW_EVENT_LIMIT = 200;
+const UNIT_SCOPED_ROOT_KEYS = [
+  "manual_sourcing_requirement_receipt",
+  SEARCH_REQUIREMENT_RECEIPT_KEY,
+  "wecom_send_inquiry_id_history",
+];
 
 type PreflightDenialReason =
   | "brief_mismatch"
@@ -132,6 +139,7 @@ export function recordRequirementBriefReceipt(brief: string, rootDir: string): v
 export function recordPostValidationIntent(intent: "manual" | "search", rootDir: string): void {
   const current = store(rootDir);
   const workflow = current.data.workflow as Json;
+  current.data.pending_post_validation_intent = intent;
   workflow.post_validation_intent = intent;
   workflow.post_validation_actions = [intent === "manual" ? "manual_source_creators" : "search_creators"];
   workflow.next_action = "validate_requirement";
@@ -1327,9 +1335,181 @@ function clearMcnRecipientDirectory(workflow: Json): void {
 }
 
 function appendWorkflowEvent(data: Json, event: Json): void {
+  const unitId = text(data.active_execution_unit_id) ? data.active_execution_unit_id.trim() : undefined;
+  const taggedEvent = unitId ? { execution_unit_id: unitId, ...event } : event;
   const events = Array.isArray(data.workflow_events) ? data.workflow_events : [];
-  events.push(event);
-  data.workflow_events = events.slice(-50);
+  events.push(taggedEvent);
+  data.workflow_events = events.slice(-WORKFLOW_EVENT_LIMIT);
+  const unit = unitId && data.execution_units?.[unitId];
+  if (unit && typeof unit === "object" && !Array.isArray(unit)) {
+    const unitEvents = Array.isArray(unit.events) ? unit.events : [];
+    unitEvents.push(taggedEvent);
+    unit.events = unitEvents.slice(-WORKFLOW_EVENT_LIMIT);
+    unit.updated_at_ms = event.at_ms ?? Date.now();
+  }
+}
+
+function initialExecutionWorkflow(): Json {
+  return {
+    phase: "requirement_draft",
+    next_action: "validate_requirement",
+    waiting_for: null,
+    transition_seq: 0,
+    updated_at_ms: null,
+  };
+}
+
+function executionUnitDraftId(input: Json): string {
+  return `draft:${fingerprint(input.payload ?? {})}`;
+}
+
+function inputRequirementId(tool: string, input: Json): string | undefined {
+  if (tool === "validate_requirement") return undefined;
+  return [input.requirement_id, input.id].find(text)?.trim();
+}
+
+function stashUnitScopedRootState(data: Json, unit: Json): void {
+  unit.local_state ??= {};
+  for (const key of UNIT_SCOPED_ROOT_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) unit.local_state[key] = data[key];
+    else delete unit.local_state[key];
+    delete data[key];
+  }
+}
+
+function restoreUnitScopedRootState(data: Json, unit: Json): void {
+  for (const key of UNIT_SCOPED_ROOT_KEYS) delete data[key];
+  for (const key of UNIT_SCOPED_ROOT_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(unit.local_state ?? {}, key)) data[key] = unit.local_state[key];
+  }
+}
+
+export function activateExecutionUnitForTool(
+  current: GuardStore,
+  tool: string,
+  input: Json,
+  result?: unknown,
+): void {
+  const data = current.data;
+  data.execution_units ??= {};
+  data.requirement_execution_unit_ids ??= {};
+  const requirementId = inputRequirementId(tool, input) ??
+    (tool === "validate_requirement" ? validationRequirementId(result) : undefined);
+  const requirementHash = requirementId ? sha256Text(requirementId) : undefined;
+  const draftId = tool === "validate_requirement" ? executionUnitDraftId(input) : undefined;
+  let targetId = requirementHash ? data.requirement_execution_unit_ids[requirementHash] : undefined;
+  if (requirementHash && !targetId) {
+    targetId = Object.values<Json>(data.execution_units).find((unit) =>
+      unit.requirement_id_sha256 === requirementHash
+    )?.id;
+    if (!targetId && text(data.workflow?.requirement_id) &&
+      sha256Text(data.workflow.requirement_id.trim()) === requirementHash) {
+      targetId = data.active_execution_unit_id;
+    }
+    // An unrecognized downstream ID is validated against the active unit. It must
+    // not create or switch local state before its lineage has been established by
+    // a successful validate_requirement result.
+    if (!targetId && tool !== "validate_requirement") return;
+  }
+  targetId ??= draftId;
+  targetId ??= data.active_execution_unit_id;
+  if (!text(targetId)) return;
+
+  const now = Date.now();
+  let target = data.execution_units[targetId];
+  if (!target || typeof target !== "object" || Array.isArray(target)) {
+    target = {
+      id: targetId,
+      status: "active",
+      platform: text(input.payload?.platform) ? input.payload.platform.trim() :
+        text(input.platform) ? input.platform.trim() : undefined,
+      requirement_payload_sha256: draftId ? draftId.slice("draft:".length) : undefined,
+      requirement_id_sha256: requirementHash,
+      workflow: initialExecutionWorkflow(),
+      events: [],
+      local_state: {},
+      created_at_ms: now,
+      updated_at_ms: now,
+    };
+    data.execution_units[targetId] = target;
+  }
+  if (requirementHash) {
+    data.requirement_execution_unit_ids[requirementHash] = targetId;
+    target.requirement_id_sha256 = requirementHash;
+  }
+
+  const previousId = text(data.active_execution_unit_id) ? data.active_execution_unit_id.trim() : undefined;
+  if (previousId && previousId !== targetId) {
+    const previous = data.execution_units[previousId];
+    if (previous && typeof previous === "object" && !Array.isArray(previous)) {
+      previous.workflow = data.workflow;
+      stashUnitScopedRootState(data, previous);
+      if (previous.status !== "completed") {
+        previous.status = "suspended";
+        previous.suspended_at_ms = now;
+        previous.suspend_reason = "switched_execution_unit";
+      }
+      appendWorkflowEvent(data, {
+        kind: "execution_unit_suspended",
+        status: previous.status,
+        next_execution_unit_id: targetId,
+        phase: previous.workflow?.phase,
+        next_action: previous.workflow?.next_action,
+        at_ms: now,
+      });
+    }
+  }
+
+  data.active_execution_unit_id = targetId;
+  data.workflow = target.workflow;
+  if (previousId !== targetId) restoreUnitScopedRootState(data, target);
+  if (tool === "validate_requirement" && ["manual", "search"].includes(data.pending_post_validation_intent)) {
+    target.workflow.post_validation_intent = data.pending_post_validation_intent;
+    target.workflow.post_validation_actions = [
+      data.pending_post_validation_intent === "manual" ? "manual_source_creators" : "search_creators",
+    ];
+    delete data.pending_post_validation_intent;
+  }
+  if (target.status === "suspended") {
+    target.status = "active";
+    target.resumed_at_ms = now;
+    delete target.suspended_at_ms;
+    delete target.suspend_reason;
+    appendWorkflowEvent(data, {
+      kind: "execution_unit_resumed",
+      status: "active",
+      previous_execution_unit_id: previousId,
+      phase: target.workflow?.phase,
+      next_action: target.workflow?.next_action,
+      at_ms: now,
+    });
+  } else if (target.status !== "completed") {
+    target.status = "active";
+  }
+  target.updated_at_ms = now;
+  save(current.path, data);
+}
+
+function finalizeActiveExecutionUnit(data: Json, now: number): void {
+  const unitId = text(data.active_execution_unit_id) ? data.active_execution_unit_id.trim() : undefined;
+  const unit = unitId && data.execution_units?.[unitId];
+  if (!unit || typeof unit !== "object" || Array.isArray(unit)) return;
+  const wasCompleted = unit.status === "completed";
+  unit.workflow = data.workflow;
+  stashUnitScopedRootState(data, unit);
+  restoreUnitScopedRootState(data, unit);
+  unit.status = data.workflow?.next_action == null ? "completed" : "active";
+  if (unit.status === "completed" && !unit.completed_at_ms) unit.completed_at_ms = now;
+  unit.updated_at_ms = now;
+  if (unit.status === "completed" && !wasCompleted) {
+    appendWorkflowEvent(data, {
+      kind: "execution_unit_completed",
+      status: "completed",
+      phase: data.workflow?.phase,
+      next_action: null,
+      at_ms: now,
+    });
+  }
 }
 
 function authorizeInquirySync(event: Json, input: Json, current: GuardStore): Json | undefined {
@@ -1423,11 +1603,27 @@ function updateWorkflowForDecision(event: Json, input: Json, rootDir: string): v
     FIELD_CONFIRMATION_HEADER,
     MCN_RETURN_CONFIRMATION_HEADER,
   ].includes(header ?? "")) return;
-  const answer = answerForQuestion(event, input);
-  if (!answer) return;
-
   const current = store(rootDir);
   const workflow = current.data.workflow as Json;
+  const answer = answerForQuestion(event, input);
+  if (!answer) {
+    const now = Date.now();
+    workflow.user_pause_status = "ask_cancelled_closed_timed_out_or_failed";
+    workflow.user_pause_at_ms = now;
+    workflow.updated_at_ms = now;
+    appendWorkflowEvent(current.data, {
+      kind: "user_gate_stopped",
+      header,
+      status: "waiting_for_new_user_message",
+      phase: workflow.phase,
+      next_action: workflow.next_action,
+      at_ms: now,
+    });
+    save(current.path, current.data);
+    return;
+  }
+  delete workflow.user_pause_status;
+  delete workflow.user_pause_at_ms;
   workflow.last_user_command = answer;
   workflow.updated_at_ms = Date.now();
 
@@ -1503,6 +1699,7 @@ function updateLocalWorkflow(
   rootDir: string,
   preflightDenial?: PreflightDenialReason,
   externalSendConfirmed = false,
+  currentOverride?: GuardStore,
 ): void {
   const stateChangingTools = new Set([
     "validate_requirement", "search_creators", "rank_mcns", "select_inquiry_form_fields",
@@ -1512,7 +1709,8 @@ function updateLocalWorkflow(
   ]);
   if (!stateChangingTools.has(tool)) return;
 
-  const current = store(rootDir);
+  const current = currentOverride ?? store(rootDir);
+  activateExecutionUnitForTool(current, tool, input, event.result);
   const workflow = current.data.workflow as Json;
   if (preflightDenial) {
     const now = Date.now();
@@ -1559,6 +1757,7 @@ function updateLocalWorkflow(
       next_action: workflow.next_action,
       at_ms: now,
     });
+    finalizeActiveExecutionUnit(current.data, now);
     save(current.path, current.data);
     return;
   }
@@ -2089,16 +2288,42 @@ function updateLocalWorkflow(
     next_action: workflow.next_action,
     at_ms: now,
   });
+  finalizeActiveExecutionUnit(current.data, now);
   save(current.path, current.data);
 }
 
 export function renderLocalWorkflowContext(rootDir: string): string {
-  const workflow = store(rootDir).data.workflow as Json;
+  const data = store(rootDir).data;
+  const workflow = data.workflow as Json;
+  const executionUnits = Object.values<Json>(data.execution_units ?? {}).map((unit) => ({
+    id: unit.id,
+    status: unit.status,
+    platform: unit.platform ?? unit.workflow?.platform,
+    requirement_id_sha256: unit.requirement_id_sha256,
+    phase: unit.workflow?.phase,
+    next_action: unit.workflow?.next_action,
+    waiting_for: unit.workflow?.waiting_for,
+    suspended_at_ms: unit.suspended_at_ms,
+    completed_at_ms: unit.completed_at_ms,
+  }));
+  const stopDisposition = workflow.user_pause_status === "ask_cancelled_closed_timed_out_or_failed"
+    ? "allowed_wait_for_new_user_message"
+    : workflow.next_action == null
+      ? "allowed_terminal"
+      : workflow.waiting_for === "provider"
+        ? "allowed_provider_wait"
+        : workflow.waiting_for === "integration"
+          ? "allowed_terminal_integration_failure"
+          : workflow.waiting_for === "user"
+            ? "ask_user_question_required_before_stop"
+            : "continue_same_turn_required";
   return [
     "YPmcn authoritative local orchestration state (state/confirmation_guard.json):",
-    JSON.stringify(workflow),
+    JSON.stringify({ active_execution_unit_id: data.active_execution_unit_id, stop_disposition: stopDisposition, workflow, execution_units: executionUnits }),
     "Use this local phase/next_action instead of Provider workflow_state/allowed_actions for orchestration. Actual Tool results remain the authority for business facts and identifiers.",
+    "Each inherited shared-field plus differing-field combination is an independent execution unit. Switching units suspends the previous unfinished unit locally; resume from the recorded unit next_action instead of Provider state.",
     "Human-in-the-loop rule: waiting_for=user requires an immediate native AskUserQuestion gate (or reflects an explicit user-selected pause), never a prose question. A deterministic next_action with no Ask gate continues in the same assistant turn without asking for 继续.",
+    "Output rule: use Tool calls only until an allowed stop. Final text is allowed only for a terminal result, provider wait, terminal failure without safe recovery, or a user-cancelled popup; it must not ask, offer, or invite continuation.",
   ].join("\n");
 }
 
@@ -2237,11 +2462,46 @@ function projectExternalConfirmation(
   workflow.wecom_confirmation_user_prompted = receipt.user_prompted === true;
   workflow.wecom_confirmation_user_approved = receipt.user_confirmed === true;
   workflow.wecom_confirmation_updated_at_ms = Date.now();
+  if (status === "denied") {
+    workflow.user_pause_status = "ask_cancelled_closed_timed_out_or_failed";
+    workflow.user_pause_at_ms = workflow.wecom_confirmation_updated_at_ms;
+  } else {
+    delete workflow.user_pause_status;
+    delete workflow.user_pause_at_ms;
+  }
 }
 
-function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
+function confirmationStoreCandidates(rootDir: string, current: GuardStore): GuardStore[] {
+  const stores = [current, globalStore(rootDir), ...sessionStores(rootDir)];
+  return [...new Map(stores.map((candidate) => [candidate.path, candidate])).values()];
+}
+
+function uniqueConfirmationStore(
+  rootDir: string,
+  current: GuardStore,
+  predicate: (receipt: Json) => boolean,
+): GuardStore | undefined {
+  const matches = confirmationStoreCandidates(rootDir, current).filter((candidate) =>
+    Object.values<Json>(candidate.data.confirmations).some(predicate)
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function authorizeExternalSend(
+  input: Json,
+  rootDir: string,
+  toolCallId?: string,
+  allowNewConfirmation = true,
+): Json | undefined {
   const requestFingerprint = fingerprint(input);
-  const current = store(rootDir);
+  let current = store(rootDir);
+  const matchesRequest = (receipt: Json) =>
+    receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
+    receipt.request_fingerprint === requestFingerprint &&
+    ["pending", "approved", "in_flight"].includes(receipt.status);
+  if (!Object.values<Json>(current.data.confirmations).some(matchesRequest)) {
+    current = uniqueConfirmationStore(rootDir, current, matchesRequest) ?? current;
+  }
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
     receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
     receipt.status === "in_flight" && receipt.request_fingerprint === requestFingerprint &&
@@ -2290,6 +2550,13 @@ function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string
     pending[1].resolution = "prompt-changed";
     pending[1].updated_at_ms = Date.now();
     current.data.confirmations[pending[0]] = pending[1];
+  }
+
+  if (!allowNewConfirmation) {
+    return denyStructured(
+      "INTEGRATION_REQUIRED",
+      "The host omitted session context and no unique matching local confirmation receipt was found. Reopen the confirmation from a stable session before sending.",
+    );
   }
 
   const now = Date.now();
@@ -2377,29 +2644,34 @@ export function guardWorkflowTool(
   if (tool === "sync_mcn_inquiry_status") return authorizeInquirySync(event, input, _current);
   if (tool === "create_submission_batch") return authorizeSubmissionBatch(event, input, _current);
   if (tool === "create_with_distributions") {
-    if (!scopeAvailable) {
-      return denyPreflight(
-        event, tool, input, "missing_session_context", "INTEGRATION_REQUIRED",
-        "The host omitted session context from before_tool_call, so external-send confirmation cannot be verified safely. Stop and upgrade the host integration before sending.",
-      );
-    }
     return authorizeExternalSend(input, rootDir, text(event.toolCallId)
       ? event.toolCallId.trim()
       : text(event.callID)
         ? event.callID.trim()
-        : undefined);
+        : undefined, scopeAvailable);
   }
   return undefined;
 }
 
-function recordExternalSendResult(event: Json, input: Json, rootDir: string): boolean {
-  const current = store(rootDir);
+function recordExternalSendResult(event: Json, input: Json, rootDir: string): GuardStore | undefined {
+  let current = store(rootDir);
   const requestFingerprint = fingerprint(input);
   const afterToolCallId = text(event.toolCallId)
     ? event.toolCallId.trim()
     : text(event.callID)
       ? event.callID.trim()
       : undefined;
+  const matchesInFlight = (receipt: Json) => {
+    if (
+      receipt.kind !== "external_send" ||
+      !EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) ||
+      receipt.status !== "in_flight" || receipt.input_fingerprint !== requestFingerprint
+    ) return false;
+    return !(afterToolCallId && text(receipt.tool_call_id)) || receipt.tool_call_id === afterToolCallId;
+  };
+  if (!Object.values<Json>(current.data.confirmations).some(matchesInFlight)) {
+    current = uniqueConfirmationStore(rootDir, current, matchesInFlight) ?? current;
+  }
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) => {
     if (
       receipt.kind !== "external_send" ||
@@ -2409,9 +2681,9 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): bo
     if (afterToolCallId && text(receipt.tool_call_id)) return receipt.tool_call_id === afterToolCallId;
     return true;
   });
-  if (!inFlight) return false;
+  if (!inFlight) return undefined;
   const [id, receipt] = inFlight;
-  if (receipt.user_prompted !== true || receipt.user_confirmed !== true) return false;
+  if (receipt.user_prompted !== true || receipt.user_confirmed !== true) return undefined;
   const now = Date.now();
   const unboundRejection = distributionUnboundRejectionEvidence(
     event,
@@ -2490,7 +2762,7 @@ function recordExternalSendResult(event: Json, input: Json, rootDir: string): bo
     projectExternalConfirmation(current, id, receipt, receipt.status);
   }
   save(current.path, current.data);
-  return true;
+  return current;
 }
 
 function recordExternalSendDecision(event: Json, input: Json, rootDir: string): void {
@@ -2526,13 +2798,14 @@ function recordExternalSendDecision(event: Json, input: Json, rootDir: string): 
   let current = store(rootDir);
   let matched = matchPending(current);
   if (!matched) {
-    const fallback = globalStore(rootDir);
-    if (fallback.path !== current.path) {
-      const fallbackMatch = matchPending(fallback);
-      if (fallbackMatch) {
-        current = fallback;
-        matched = fallbackMatch;
-      }
+    const matches = confirmationStoreCandidates(rootDir, current).flatMap((candidate) => {
+      if (candidate.path === current.path) return [];
+      const candidateMatch = matchPending(candidate);
+      return candidateMatch ? [{ current: candidate, matched: candidateMatch }] : [];
+    });
+    if (matches.length === 1) {
+      current = matches[0].current;
+      matched = matches[0].matched;
     }
   }
   if (!matched) return;
@@ -2565,9 +2838,9 @@ export function recordWorkflowToolResult(
   }
   if (!tool) return;
   const preflightDenial = takePreflightDenial(event, tool, input);
-  const externalSendConfirmed = tool === "create_with_distributions"
+  const externalSendStore = tool === "create_with_distributions"
     ? recordExternalSendResult(event, input, rootDir)
-    : false;
-  updateLocalWorkflow(event, tool, input, rootDir, preflightDenial, externalSendConfirmed);
+    : undefined;
+  updateLocalWorkflow(event, tool, input, rootDir, preflightDenial, Boolean(externalSendStore), externalSendStore);
   recordRequirementReceipts(event, tool, rootDir, preflightDenial);
 }

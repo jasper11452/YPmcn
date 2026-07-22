@@ -1,5 +1,5 @@
 {
-  "schema_version": 20,
+  "schema_version": 21,
   "confirmations": {},
   "workflow": {
     "phase": "requirement_draft",
@@ -8,5 +8,23 @@
     "transition_seq": 0,
     "updated_at_ms": null
   },
+  "execution_units": {
+    "legacy": {
+      "id": "legacy",
+      "status": "active",
+      "workflow": {
+        "phase": "requirement_draft",
+        "next_action": "select_inquiry_form_fields",
+        "waiting_for": null,
+        "transition_seq": 0,
+        "updated_at_ms": null
+      },
+      "events": [],
+      "local_state": {},
+      "created_at_ms": null,
+      "updated_at_ms": null
+    }
+  },
+  "active_execution_unit_id": "legacy",
   "workflow_events": []
 }
