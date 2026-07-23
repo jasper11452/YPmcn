@@ -12,6 +12,7 @@ const DEFAULT_SESSION_KEY = "ypmcn-native-hooks-default";
 const DEFAULT_CONTEXT = { sessionKey: DEFAULT_SESSION_KEY };
 const defaultSessionHash = createHash("sha256").update(DEFAULT_SESSION_KEY).digest("hex").slice(0, 24);
 const stateFile = join(tempDir, "state", "sessions", defaultSessionHash, "confirmation_guard.json");
+const globalStateFile = join(tempDir, "state", "confirmation_guard.json");
 const hooks = new Map();
 const UNRESOLVED_BRIEF = "找5位小红书达人，单达人预算口径待确认，明天提报。";
 const contract = JSON.parse(readFileSync(new URL("../../spec/mcp.json", import.meta.url), "utf8"));
@@ -971,15 +972,65 @@ describe("YP Action native hooks", () => {
     ), undefined);
   });
 
-  it("fails closed when external-send before_tool_call has no session context", async () => {
+  it("keeps the confirmation gate usable when the host omits session context", async () => {
+    const params = distributionParams();
     const blocked = await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__create_with_distributions",
-      params: distributionParams(),
+      params,
       toolCallId: "call-unscoped-send",
     }, {});
-    assert.equal(blocked.block, true);
-    assert.equal(blocked.errorCode, "INTEGRATION_REQUIRED");
-    assert.match(blocked.blockReason, /omitted session context/);
+    const askInput = askInputFrom(blocked);
+    await recordTool("AskUserQuestion", askInput, {
+      content: [{ type: "text", text: `${askInput.questions[0].question}: 确认发送` }],
+    }, {});
+
+    const executionToolCallId = "call-unscoped-send-execute";
+    assert.equal(await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params,
+      toolCallId: executionToolCallId,
+    }, {}), undefined);
+    await recordTool(
+      "mcp__ypmcn__create_with_distributions",
+      params,
+      {
+        success: true,
+        data: {
+          project_id: "project-unscoped-send",
+          created: [{ supplier_id: "supplier-1", notification_status: "sent" }],
+        },
+        error: null,
+      },
+      {},
+      executionToolCallId,
+    );
+
+    const state = JSON.parse(readFileSync(globalStateFile, "utf8"));
+    assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "consumed");
+    assert.equal(state.workflow.distribution_send_evidence_status, "valid");
+    assert.equal(state.workflow.project_id, "project-unscoped-send");
+  });
+
+  it("never reuses a session-scoped confirmation when the host omits session context", async () => {
+    const prepared = await requestConfirmation(
+      distributionParams(),
+      DEFAULT_CONTEXT,
+      "call-sessionless-handoff-popup",
+    );
+    await answerExternalConfirmation(prepared);
+    const sessionState = JSON.parse(readFileSync(stateFile, "utf8"));
+    const sessionReceiptId = sessionState.latest_external_confirmation_id;
+
+    const unscoped = await hooks.get("before_tool_call")({
+      toolName: "mcp__ypmcn__create_with_distributions",
+      params: prepared.params,
+      toolCallId: "call-sessionless-handoff-execute",
+    }, {});
+    askInputFrom(unscoped);
+
+    const globalState = JSON.parse(readFileSync(globalStateFile, "utf8"));
+    assert.equal(globalState.confirmations[globalState.latest_external_confirmation_id].status, "pending");
+    assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).confirmations[sessionReceiptId].status, "approved");
   });
 
   it("keeps the full multiline WeCom message in the scrollable AskUserQuestion body", async () => {

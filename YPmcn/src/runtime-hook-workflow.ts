@@ -2239,9 +2239,17 @@ function projectExternalConfirmation(
   workflow.wecom_confirmation_updated_at_ms = Date.now();
 }
 
-function authorizeExternalSend(input: Json, rootDir: string, toolCallId?: string): Json | undefined {
+function authorizeExternalSend(
+  input: Json,
+  rootDir: string,
+  toolCallId?: string,
+  scopeAvailable = true,
+): Json | undefined {
   const requestFingerprint = fingerprint(input);
-  const current = store(rootDir);
+  // Webchat does not currently provide a stable before_tool_call session key.
+  // Keep that confirmation entirely in the plugin-owned global store instead of
+  // treating a session-scoped receipt as proof for an unscoped invocation.
+  const current = scopeAvailable ? store(rootDir) : globalStore(rootDir);
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
     receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
     receipt.status === "in_flight" && receipt.request_fingerprint === requestFingerprint &&
@@ -2377,17 +2385,11 @@ export function guardWorkflowTool(
   if (tool === "sync_mcn_inquiry_status") return authorizeInquirySync(event, input, _current);
   if (tool === "create_submission_batch") return authorizeSubmissionBatch(event, input, _current);
   if (tool === "create_with_distributions") {
-    if (!scopeAvailable) {
-      return denyPreflight(
-        event, tool, input, "missing_session_context", "INTEGRATION_REQUIRED",
-        "The host omitted session context from before_tool_call, so external-send confirmation cannot be verified safely. Stop and upgrade the host integration before sending.",
-      );
-    }
     return authorizeExternalSend(input, rootDir, text(event.toolCallId)
       ? event.toolCallId.trim()
       : text(event.callID)
         ? event.callID.trim()
-        : undefined);
+        : undefined, scopeAvailable);
   }
   return undefined;
 }
