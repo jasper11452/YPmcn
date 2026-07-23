@@ -1,126 +1,118 @@
-# SearchCreators / RankCreators 向量融合实施方案
+# Qdrant 向量检索与排序：待验收实施计划
 
-## 结论
+> 状态：设计和验收计划，不是“代码已经接入”的证明。
+> 更新：2026-07-23。当前算法契约为 `shadow`，模型、维度、RRF、Top-K、权重和 rerank 均未批准为生产默认值。
 
-Qdrant 保持服务端内部能力，不进入插件包，也不新增 Agent 可见 Tool。`SearchCreators` 负责“真实需求硬筛 → Qdrant 双路召回 → rerank → MySQL 回源 → 候选池”；`RankCreators` 只在已回收/达人拓展的合法候选集合内复用向量与 rerank 相关性，作为业务精排的软特征。两处都必须使用 rerank，任何向量分不得覆盖硬条件。
+## 目标：让语义能力帮忙，但不改变业务规则
 
-当前口径：Qdrant 已部署且达人数据已向量化，这是业务方确认；代码和配置曾看到 `content/commercial` 双向量与 embedding/rerank 模块，但本机 2026-07-18 无法连开发机 MCP，因此本方案不能把“两个 Tool 已实际调用并返回正确结果”写成通过。上线前必须用真实 Brief 证实调用链。
+向量能力只能提高“内容是否相关”的排序质量，不能替代价格、地域、粉丝量、档期、合规等业务判断。
 
-## 现有代码评估
+拟议的安全顺序是：
 
-仓库的 `vector-mcp` 只能作为服务端迁移素材，不能原样挂到业务 Tool：
+```text
+需求与硬条件
+→ MySQL 先筛出合格账号
+→ （可选）Qdrant 只在合格账号中做语义召回
+→ MySQL 回源并再次核验
+→ （可选）rerank 重排
+→ 候选池 / 推荐结果
+```
 
-- `LocalVectorPipeline` 没有被 `search_creators` 或 `rank_creators` 调用；公开业务面也已正确排除独立 Vector MCP。
-- 当前 `mergeHits()` 只按两路中的最好名次排序，不是 RRF；应改为 Qdrant Query API 的真实 RRF，或使用已有正确的 RRF 实现并保存融合参数。
-- Point ID 当前包含 `sourceSnapshotDate`，同一 `(platform,kwUid)` 在新快照会生成新点；业务集合必须改为稳定账号 ID，快照时间只放 payload，并在同步时清理/覆盖旧点。
-- 真实 Qdrant 查询目前只过滤 `platform`，还没有接收 SQL 硬筛允许集合；硬筛也只覆盖少量 region/follower 字段，没有读取 `field_match_mapping`。
-- content/commercial 查询目前对同一 query 文本重复 embedding；接入时必须按本文分别构造两段查询文本。
-- rerank client 已存在，但只有完整真实链路返回模型版本、分数和 provenance 后，才能算已启用。
+例如，需求是“广州、报价不超过 1 万、擅长母婴内容”。即使语义检索认为某个北京达人非常像，也必须在第一步被排除；向量分数不能把他排回结果中。
 
-因此最小工作不是另起一个 Vector Tool，而是把这些内部模块修正后嵌入远程业务 MCP 的 Search/Rank handler。
+## 已批准的边界
 
-## 真实数据库边界
+| 边界 | 约定 |
+| --- | --- |
+| 事实源 | MySQL。向量结果返回前必须回源、重新校验当前记录。 |
+| 索引 | Qdrant 是可重建的派生索引，不保存业务最终结论。 |
+| 对外接口 | 不新增公开向量 Tool；普通 Agent 只通过 `search_creators`、`rank_creators` 获得业务结果。 |
+| Search 的职责 | 硬筛、候选召回与结果来源说明。 |
+| Rank 的职责 | 只把向量相关性当作软特征，且只处理合法候选。 |
+| 失败语义 | 明确 `sql-only`，不能用本地 JSON 或伪造分数冒充向量结果。 |
 
-2026-07-18 直连开发 MySQL：`customer_demands=0`、`field_match_mapping=110`、`xhs_creator_accounts=619`、`dy_creator_accounts=2373`、`creator_candidate_pool=17291`、`recommendation_runs=4`。
+当前契约定义了 `content` 与 `commercial` 两类命名向量的治理边界；这不等于它们已在远程服务运行。是否采用双路召回、怎样融合和是否启用 rerank，都要通过固定样本评估后再决定。
 
-`customer_demands` 与 `field_match_mapping` 是硬筛权威。当前 110 条映射全部为 `已匹配`、三元组无重复，且每个 `source_field_name` 都能在 61 列需求表中找到。Agent 已把范围值落成 `"[min,max]"`；Search 后端按 `(platform,source_field_name,match_status='已匹配')` 读取映射，再交给现有平台筛选适配器。Agent 和向量模块都不得自行改写目标 Min/Max 名称。
+## 不应当声称已经完成的事
 
-Qdrant 只保存可重建索引。最终达人身份、价格、机构、返点、档期和合规结论必须回源 MySQL。
+仓库不保留远程向量服务的实现，因此不能从本地文件证明：
 
-## SearchCreators 最小实现
+- `search_creators` 已调用 Qdrant；
+- `rank_creators` 已使用 rerank；
+- 某个模型、维度、Collection 或 RRF 参数已上线；
+- 向量结果已经比 SQL-only 更好；
+- 索引与 MySQL 已经同步且可恢复。
 
-### 1. 编译硬筛
+这些结论必须来自真实远程调用、服务端日志和验收数据，而不是旧代码片段或文档。
 
-读取 `customer_demands.id` 对应的唯一行，拒绝非 ready、多行或平台非法状态。对每个非空需求字段：
+## 未来服务端的最小实现
 
-1. 范围字段严格解析 `"[min,max]"`，失败直接 `INVALID_REQUIREMENT_RANGE`；
-2. 按平台读取 `field_match_mapping` 的已匹配行；
-3. 交给已确认的目标参数适配器生成硬筛；
-4. 未映射但属于软内容的字段进入语义查询；既非可执行硬筛也非可保留软条件的字段返回 `FIELD_MAPPING_REQUIRED`，不得静默忽略。
+### 1. 先编译并执行硬筛
 
-SQL 先得到通过硬条件的 `(platform,kwUid)` 集合。该集合是向量召回的允许范围；硬筛结果为 0 时直接返回 0，不用向量“救回”不合格达人。
+服务端读取需求及其已批准字段映射，使用 MySQL 得到合格的 `(platform, kwUid)` 集合。
 
-### 2. 生成两段查询文本
+- 硬筛结果为 0 时，直接返回 0；不要让语义检索“救回”不合格账号。
+- 映射不完整、范围无法解析或需求本身无效时，返回清楚的业务错误；不要悄悄忽略。
+- 内容标签、场景等不能作硬筛的文字，才可以作为后续的软语义输入。
 
-- content query：`contentTag`、`description`、内容/人物/达人类型标签及 `rawMessagesJson` 中的正向软约束；
-- commercial query：品牌、产品、商业场景、卖点及明确可公开给模型的商业语义；
-- 参考 URL、手机号、邮箱、客户身份和纯数值硬筛字段不进 embedding；负向要求单独传给 rerank 约束，不混成正向 query。
+### 2. 仅在允许集合中做候选召回
 
-两段都为空时走 `sql-only`，不生成无意义向量。
+若启用 Qdrant，查询范围必须受第一步的账号集合限制。随后可评估 `content` 与 `commercial` 两类语义是否都有价值。
 
-### 3. 在硬筛集合内做 Qdrant 双路召回
+如果要尝试双路融合，RRF 可以是一个候选方法，但不是默认事实。融合公式、候选数量和阈值必须在同一冻结样本上比较；不可直接把不同模型的原始分数相加。
 
-使用稳定 Point ID 把 SQL 允许集合传为 Qdrant `has_id` filter。当前两张达人表合计约 2992 个账号，第一版先用完整允许 ID 集，测量请求体大小和 P95，不为这一级数据量提前复制整套硬筛字段。随后：
+### 3. 回源复核，再考虑 rerank
 
-1. 对 `content` named vector prefetch；
-2. 对 `commercial` named vector prefetch；
-3. 使用 Qdrant Query API 的 RRF 融合两路；
-4. `prefetch K`、最终 K 和 RRF 参数只从固定真实样本评测决定，不在 Skill 写死；不同召回分数不可直接线性相加，第一版以 RRF 为基线，任何权重都必须用冻结样本调参。
+向量命中后，按业务身份回源 MySQL，重新验证账号是否仍存在、当前价格和供给信息是否有效、所有硬条件是否满足。
 
-如果允许集合增长到 `has_id` 请求不可接受，不能改成“先全库取较小 Top-K、再与 SQL 集合求交”，那会静默丢掉合格达人。届时只把高选择性、稳定、真实查询会用到的字段补为 Qdrant payload index；不要给所有字段建索引。索引若在现有数据入库后才创建，需要按当前 Qdrant 版本完成 HNSW 重建，才能获得 filter-aware 路径；版本不支持所选 Query/RRF 参数时保持显式 `sql-only`，不做兼容猜测。
+rerank 仅能重排已经合格的有限候选，不能新增候选或越过硬条件。当前 reranker 的提供方和版本未批准；若依赖不可用，保留已核验的 SQL-only 结果并说明原因。
 
-### 4. 强制 rerank
+### 4. 让结果可解释、可降级
 
-RRF 后的有限候选使用服务端已部署的 rerank 模型做 cross-encoder 重排。输入包含原始语义需求、负向条件和脱敏后的达人文本；输出保存 raw score、rerank rank、模型与版本。rerank 只能重排召回集，不能新增不在 SQL 允许集合的达人。
+未来真实响应需要能说明：
 
-### 5. MySQL 回源和持久化
+- 本次是 `sql-only` 还是已启用向量召回；
+- 若降级，原因是配置无效、embedding/reranker 不可用、Qdrant 不可用还是索引过期；
+- 哪一个 MySQL 快照、索引/算法版本参与了本次结果；
+- 向量相关性只是哪个候选的软特征，而不是硬条件结论。
 
-按 `(platform,kwUid)` 回源当前达人表、供给关系和供应商；再次执行全部硬筛并去重。使用现有字段即可，无需新列：
+下例只是目标语义，不是对当前 Provider 输出的断言：
 
-- `creator_candidate_pool.content_match_score` 保存规范到 0–100 的本次语义分；
-- `matched_json.score_detail` 保存 dense/RRF/rerank 原始分与名次；
-- `source_detail_json.retrieval` 保存 `retrieval_mode`、embedding/rerank/collection/vector 版本、查询 hash 和降级原因；
-- 不保存完整向量、密钥或未脱敏客户 Brief。
+```json
+{
+  "retrieval_mode": "sql-only",
+  "degraded_reason": "vector_index_stale",
+  "provenance": {
+    "authoritative_source": "mysql",
+    "revalidated": true
+  }
+}
+```
 
-候选池写入仍使用已有未锁定唯一约束，重复同一 search generation 必须幂等。
+## 推荐的交付顺序
 
-### 6. 固定响应
+1. **确定服务端负责人和接口位置**：不在插件包中补一个本地向量服务；先明确远程业务服务由谁实现和运维。
+2. **建立可复现数据集**：使用脱敏的冻结需求及人工相关性标注，覆盖两平台、无结果、负向条件和价格/地域边界。
+3. **先跑影子链路**：记录 SQL-only 与候选向量方案的差异，但不改变用户看到的排序。
+4. **加特性开关和观测**：向量召回、rerank 都可以独立关闭；记录错误、延迟、成本、索引新鲜度和回源淘汰数。
+5. **逐步放量**：先让媒介可见，再小流量影响 Search；只有 Search 稳定后，再评估是否让 Rank 使用软特征。
+6. **保留 SQL-only 回退**：任何阶段失败都关闭服务端能力，不改 MySQL，不要求用户调整插件或本地环境。
 
-成功响应至少返回：
+## 验收门槛
 
-- `retrieval_mode`: `vector-rerank` 或 `sql-only`；
-- `degraded_reason`: 正常时 null，降级时固定错误码；
-- `provenance`: MySQL 快照、Qdrant collection/vector、embedding/rerank/algorithm 版本；
-- 去重候选摘要；
-- 现有十个 `supply_plan` 字段，包括按达人账号数计算的 `mcn_manual_creator_ratio`。
+至少应同时满足：
 
-Qdrant/embedding/rerank 任一故障只能显式降级 `sql-only`。降级结果仍需 MySQL 硬筛；不得返回假向量分。
+- 全部测试中硬条件违规为 0；
+- 比较 SQL-only、单路和候选双路/重排方案时，使用同一批冻结样本；
+- 业务确认质量指标和允许的延迟、成本、降级率；
+- MySQL 与 Qdrant 的同步、去重、失效处理和回源复核都有记录；
+- 真实远程响应能证明检索模式与来源；
+- 模型、参数、Collection 和回滚策略有可追溯的发布记录。
 
-## RankCreators 最小实现
+在通过这些门槛前，继续将 Qdrant 视为服务端影子能力。
 
-`RankCreators` 不重新全库召回。输入集合只来自当前 requirement 的有效 MCN 回填和已验证达人拓展候选：
+相关文档：
 
-1. 按 MySQL 重新执行价格、平台、档期、授权、合规等硬条件；失败者淘汰并记录原因；
-2. 取 SearchCreators 已保存的 query hash 与语义特征；需求或模型版本变化时创建新 run，不能覆盖旧 run；
-3. 对当前合法候选集合查询 Qdrant 相关性；Qdrant 中缺失的新回填达人使用当前脱敏文本进入同一 rerank 批次，并标记 `vector_missing=true`；
-4. 对整个有限集合再次执行 cross-encoder rerank，确保 MCN 新回填与旧库候选在同一需求下可比；
-5. 把 rerank 相关性规范成 run 内 0–100 的“内容匹配子分”，再与价格、返点、机构质量、效果、风险等业务分组合；具体权重由真实样本评测决定；
-6. 0 是观测值，NULL 是缺失值；缺失不自动当 0，也不自动判最差；
-7. 写 `recommendation_runs.embedding_model/algorithm_version/ranking_strategy/ranking_weights_json/parameters_json`，每个推荐项保存分项、理由、风险和缺失标记。
-
-Rank 响应固定返回 `run_id`、候选数量、淘汰数量、模型/算法版本、每个候选的硬筛结论、最终分、分项、理由、风险及数据来源。
-
-## 服务端最小改动位置
-
-不改插件、不改 Tool 名、不加数据库列。远程业务 MCP 只需：
-
-1. 把现有范围映射编译器接到 SearchCreators 的硬筛入口；
-2. 把现有 Qdrant query 模块作为 SearchCreators 内部函数调用；
-3. 把现有 rerank client 从“代码存在”接到 Search 和 Rank 的真实路径；
-4. 用现有 JSON 字段保存 provenance；
-5. 增加 `VECTOR_RECALL_ENABLED`、`VECTOR_RERANK_ENABLED` 两个服务端 feature flag；任一关闭即明确 SQL-only。
-
-## 真实评测与上线门禁
-
-先用 20–50 条脱敏真实 Brief 建独立样本，每条由媒介标注期望/可接受/不相关达人，并覆盖两平台、内容、品牌、价格边界、地域、无结果、机构重复、达人拓展新增和负向要求。至少比较：
-
-1. SQL-only；
-2. 单路 dense；
-3. content+commercial RRF；
-4. RRF+rerank。
-
-必须同时记录硬条件违规数（必须为 0）、ANN Recall@K、NDCG@K、Top-K 媒介接受率、无结果率、重复率、向量缺失率、SQL-only 降级率、P50/P95 延迟与单次成本。三个待选模型均按同一冻结样本评测，满意率达到既定 80% 门槛后才定模型和参数。
-
-上线顺序：shadow 记录 → 媒介可见但不影响排序 → 小流量 SearchCreators → 真实回归通过后进入 RankCreators。任一阶段失败，关闭 feature flag 回到 SQL-only，MySQL 与旧 Qdrant collection 不回滚。
-
-实现遵循 Qdrant 官方 [RRF / Hybrid Queries](https://qdrant.tech/documentation/search/hybrid-queries/)、[Payload Indexing](https://qdrant.tech/documentation/manage-data/indexing/)、[Filtering](https://qdrant.tech/documentation/search/filtering/) 和 [Hybrid Search with Reranking](https://qdrant.tech/documentation/tutorials-basics/reranking-hybrid-search/)。
+- [远程向量能力现状](REMOTE_VECTOR_DATABASE_STATUS_2026-07-17.md)
+- [向量能力的使用与部署边界](VECTOR_QUERY_TOOL_MIGRATION_GUIDE.md)
+- [Qdrant Cloud 接入指南](QDRANT_CLOUD_MIGRATION_GUIDE.md)

@@ -1,117 +1,109 @@
 # MCP + 数据库最小幂等与状态修正方案
 
-## 结论
+> 状态：**目标方案，尚未作为当前远端 Provider 能力验收通过。**
+>
+> 当前事实见 [MCP 现状与排障指南](mcp-runtime-gaps-and-debugging.md)：mcp_tool_call_ledger 在契约中是“表结构已存在、当前 Tool 未使用”，外发未知结果也没有可安全调用的 Provider 恢复查询。
 
-最小方案先只改服务端中间层：所有 MCP 写 Tool 复用现有 `mcp_tool_call_ledger`；本地数据库写与 ledger 同事务；`create_with_distributions` 把同一个幂等键传给外部 API；`sync_mcn_inquiry_status` 直接读取同库发送方权威状态并 upsert 现有 `mcn_inquiries`。不新建 workflow 大表，也不预先改业务表；只有外部 API 明确不消费幂等键时，才给其项目表补一个请求标识。
+## 这份方案解决什么
 
-当前独立后端工作树已完成“不改表”部分：10 个本地写入口和外部创建入口共 11 个写入口接入 ledger；本地业务写与 ledger 终态同事务；外部创建转发稳定 `Idempotency-Key`，网络未知结果持久化为 `unknown`；sync 读取 `core_project/core_distribution/core_notificationlog` 并按已推荐 MCN 的 `mcn_recommendation_id + attempt_no` upsert inquiry；`get_workflow_state` 可按需求身份或 trace 聚合。上述内容已通过本地测试和真实库只读 ORM 校验，但尚未部署到远程开发机。
+同一笔业务操作可能因为网络重试被发出两次。最危险的例子是：Provider 已经创建企微项目，但客户端在收到响应前断线；如果客户端立刻再发一次外发请求，就可能重复建项目或重复通知机构。
 
-## 2026-07-18 真实开发库证据
+目标不是把所有调用都“自动重试”，而是让服务端能区分下面四种情况：
 
-本方案已从当前机器直连 `ypmcn` MySQL 8.0.36 只读核对，不基于 Mock：
+| 情况 | 期望处理 |
+| --- | --- |
+| 同一操作、同一参数，已经成功 | 返回第一次的结果，不再执行。 |
+| 同一操作、参数被改过 | 拒绝并提示参数冲突。 |
+| 第一次还在执行 | 返回处理中，不并发再跑。 |
+| 外部调用结果不明 | 先对账；无法对账就保持阻断，绝不盲发第二次。 |
 
-- `mcp_tool_call_ledger` 已存在且当前 0 行；`idempotency_key`、`trace_id` 各有唯一索引；另有 `tool_name`、`parent_type/parent_id`、`request_summary_json`、`response_summary_json`、`status`、开始/结束时间。
-- ledger 的 `demand_id` 是 bigint，与当前 `customer_demands.demandId varchar(255)` / `id char(32)` 不一致；实现已保持该列为 NULL，统一用 `parent_type='requirement' + parent_id=<customer_demands.id>`。
-- `core_project` 当前 50 行，没有客户端请求标识；`core_distribution` 当前 61 行，`(project_id,supplier_id)` 已唯一，并有 `status`、`row_count`、`last_saved_at`、`submitted_at`、`distributed_at`。
-- `mcn_inquiries`、`mcn_inquiry_status_syncs`、`mcn_submission_items` 当前均 0 行，尚无真实回收链证据。
-- `customer_demands` 当前 0 行；只有主键、`demandId` 普通索引和 `status` 普通索引，没有 `(demandId,demandVersion)` 唯一约束。
+## 当前状态与目标边界
 
-## 1. 现有 ledger 直接承担 11 个写 Tool 幂等
+| 项目 | 当前状态 | 本方案的目标 |
+| --- | --- | --- |
+| 本地写 Tool 的统一幂等账本 | 未作为当前 Provider 能力启用 | 让业务写入和账本终态在同一数据库事务里提交。 |
+| 插件端的外发确认 | 已在本地生效：每次实际外发前先弹精确 AskUserQuestion，确认回执只放行下一次调用一次 | 保持人为授权，但不能替代服务端幂等或外部结果对账。 |
+| create_with_distributions | 会写外部 API，但不会把项目/分发 ID 写进本地 ledger | 传递稳定操作键，并能在响应丢失后按该键对账。 |
+| sync_mcn_inquiry_status | 当前只记录同步事实，不查询权威发送状态或 upsert inquiry | 从权威发送数据恢复同步，重复同步不造重复记录。 |
+| get_workflow_state | 远端入参和批准恢复身份不兼容，运行时阻断 | Provider 发布批准恢复契约后，按已提交事实恢复状态。 |
 
-不新增 ledger 列。统一约定：
+这份文档不声称上述目标已经部署。只有隔离环境的真实写入、断线和重复调用测试通过后，才能把某一行改为“已验证”。
 
-```text
-idempotency_key = v1:<tool_name>:<client_operation_id>
-request_hash    = sha256(canonical_json(actual_arguments))
-```
+## 最小设计
 
-`client_operation_id` 由 YP Action/MCP 调用中间层在一次业务意图开始时生成，通过请求 metadata 传递，并在同一次自动网络重试、结果对账时复用；不让用户或 Agent 填写，也不能使用会在重新调用时变化的 JSON-RPC request id。若当前 Gateway 已有稳定的 tool-call operation ID，直接复用，不给 11 个 Tool 各加一个业务参数。`request_hash` 放进 `request_summary_json.request_hash`；响应资源 ID 放进 `response_summary_json.resources`。状态只用 `in_progress/succeeded/failed/unknown`。
+### 1. 用一个稳定的操作键描述“一次业务意图”
 
-服务端统一包装器规则：
+服务端为每个业务意图生成并沿用操作键，例如：
 
-1. 原子 INSERT ledger；唯一键冲突后读取原行。
-2. 同 key、同 hash、`succeeded`：直接返回原资源，不再执行 handler。
-3. 同 key、不同 hash：返回 `IDEMPOTENCY_CONFLICT`。
-4. `in_progress`：返回处理中，不并发执行。
-5. `unknown`：只返回对账动作，禁止重放。
-6. 只有确认事务未提交的失败才是 `failed`。
+~~~text
+v1:create_with_distributions:op_20260723_abc
+~~~
 
-`validate_requirement` 首次还没有需求 ID，因此先以 `parent_type='brief_intake'`、`parent_id=client_operation_id` 认领；成功后同事务把 parent 改为 `customer_demand/<id>` 并在响应摘要保存 `demandId/demandVersion`。其余写 Tool 使用当前业务主键和快照/批次 ID 组成稳定 operation identity。
+它必须在同一次受控恢复、结果查询和重新提交中保持不变；不能使用每次请求都会变的 JSON-RPC request ID，也不应让 Agent 或用户手填。这里的“重新提交”仍需经过当前的人为外发确认，不能让操作键变成客户端自动重试的通行证。账本同时保存参数的规范化哈希：
 
-本地 MySQL 写必须把“业务写 + ledger succeeded/响应摘要”放在同一事务。commit 响应丢失时先查 ledger；不得再次执行 handler。
+~~~text
+request_hash = sha256(canonical_json(actual_arguments))
+~~~
 
-## 2. 外部 create-with-distributions 的最小边界
+这样能分清“网络重试同一次发送”和“用户改了机构列表后的新发送”。
 
-现有文档确认 `POST /api/projects/create-with-distributions/` 会在一个事务里创建项目与全部分发，重复供应商只会 skipped；但接口没有请求幂等键，所以“响应丢失后再次 POST”仍可能重复创建项目。
+### 2. 本地写入与账本在同一事务里完成
 
-当前零迁移实现先把同一个稳定键放入外部请求 `Idempotency-Key`；HTTP 明确拒绝记 failed，连接超时或响应丢失记 unknown 且后续同 key 只返回对账要求，不再 POST。这能做到 fail-closed，但外部 API 文档未承诺消费该请求头，因此不能宣称跨系统 exactly-once。
+对于只写本地数据库的 Tool，推荐流程是：
 
-若外部 API 后续确认不支持该请求头，完整 exactly-once 的最小数据库改动才是给 `core_project` 增加一个可空客户端请求 ID 和唯一索引，历史行不受影响：
+1. 尝试创建 ledger 记录；
+2. 若已有同键成功记录且哈希相同，返回旧结果；
+3. 若哈希不同，返回 IDEMPOTENCY_CONFLICT；
+4. 执行业务写入，并在**同一个事务**里记录成功结果；
+5. 提交后再回复调用方。
 
-```sql
-ALTER TABLE core_project
-  ADD COLUMN client_request_id varchar(255) NULL;
+例如，用户点击“生成推荐”后网络重试两次，三次请求都带同一个操作键；数据库应只有一份推荐 run，三次响应指向同一个 run ID。
 
-CREATE UNIQUE INDEX uq_core_project_client_request_id
-  ON core_project (client_request_id);
-```
+### 3. 外部外发要把“不知道”当成真正状态
 
-最小 API 改动：`create-with-distributions` 接受 `clientRequestId/client_request_id`；MCP 固定传 ledger 的 `idempotency_key`。API 在创建事务内写 `core_project.client_request_id`：
+当前插件已经有一层**本地人为授权**，但它不是 Provider 幂等：每次要实际调用 `create_with_distributions` 前，Hook 先给出精确的 `AskUserQuestion`；用户明确确认后，最新未过期回执可跨 turn 放行下一次调用一次。该回执消费后即失效；取消、拒绝、关闭或超时都不发送。没有 host session 时，插件只使用自己的全局 fallback 回执。
 
-- 新 key：正常创建并返回 project/distributions；
-- 已有 key：API 直接返回原 project 和 distributions，HTTP 200，不再创建；同 key 不同 hash 已由 MCP ledger 在发出 HTTP 请求前拒绝；
-- API commit 后连接中断：MCP 按 `client_request_id` 查询 `core_project`，再按 project ID 查询 `core_distribution`，补齐 ledger 为 succeeded；查不清才保持 unknown。
+有一个容易混淆的细节：为兼容宿主跨 turn 重建参数，当前回执放行下一次调用时**不再核对参数等价性**。所以它证明的是“用户刚刚确认了一次外发动作”，不是“服务端已经以某组参数完成了唯一一次写入”。不能拿本地回执替代 `Idempotency-Key`、项目 ID 或逐机构发送结果。
 
-API 不需要读取 MCP ledger，也不需要新增第二张表；只需在原创建事务中按 `client_request_id` 先查后建，并依赖唯一索引处理并发。若当前外部 API 不能接受并持久化 `clientRequestId`，只能做到 at-most-once/fail-closed，不能宣称完整幂等。
+create_with_distributions 跨越 MCP、外部项目 API 和企微，不能靠本地事务得到 exactly-once。最低安全线是：
 
-## 3. 企微发送与回收直接读现有权威表
+- 向外部 API 传递同一个稳定操作键，例如 Idempotency-Key；
+- 明确 HTTP 拒绝才记为失败；
+- 超时、连接断开或响应丢失记为 unknown；
+- unknown 只允许按操作键查询外部项目，**禁止自动再 POST**；若业务决定另行重试，必须重新取得明确的本地外发确认。
 
-发送 API 的响应已有 project ID、distribution ID、supplier、token 和 status。MCP 成功后把这些安全资源引用写入 ledger 的响应摘要，不保存 API Key 或完整客户 Brief。
+要达到跨系统可验证的幂等，外部项目表还需要持久化这个键并建立唯一约束。届时“已提交但响应丢失”的恢复动作是“按键找到已有项目和分发”，不是“再创建一次”。在外部 API 明确支持并完成该持久化之前，最多只能做到 fail-closed，不能宣称 exactly-once。
 
-当前公开 Provider 输入为 `sync_mcn_inquiry_status({requirement_id, project_id, supplierIds})`；服务端再把 `supplierIds` 逐个解析为内部机构身份。其最小实现：
+### 4. 工作流状态从事实推导，不复制聊天状态
 
-1. 用成功的 create ledger 证明 project 属于当前 requirement；
-2. 对每个 `supplierId` 读取 `core_project` 和唯一 `(project_id,supplier_id)` 对应的 `core_distribution`；
-3. 用 `mcn_recommendation_item_id + attempt_no` 现有唯一键 upsert `mcn_inquiries`，写发送时间、截止、状态、提交时间和行数；
-4. 用 `(requirement_id,project_id,mcn_id)` 现有内部唯一键更新 `mcn_inquiry_status_syncs` 的最后同步时间；`mcn_id` 不是公开 Tool 参数；
-5. 相同 distribution 状态重复同步汇总返回同一组正整数 `inquiry_ids`，不新增记录。
+恢复时应读取已提交的业务事实，例如需求、候选池、MCN 推荐、外发项目/分发、回填、排序和导出记录；本地会话 JSON 只承担编排投影，不能替代 Provider 或数据库事实。
 
-`core_distribution` 就是发送方数据库状态，不需要再建复制表。只有读取不到唯一 recommendation item、ledger 关联断裂或 distribution 不唯一时返回 `state_conflict/integration_required`，不得挑“最近一条”。
+恢复逻辑要特别保守：多个版本、关联断裂、ledger 为 in_progress 或 unknown 时，清空后续写动作并给出一个明确阻断原因。当前 get_workflow_state 还不能承担这个职责，因为其远端入参不兼容；不要用猜出来的 ID 绕过它。
 
-## 4. get_workflow_state 不建状态表
+## 建议的账本状态机
 
-按需求主键或唯一的 `demandId+demandVersion` 聚合：
+~~~text
+in_progress
+  ├─ 本地事务提交成功 → succeeded
+  ├─ 明确未提交 / 明确被拒绝 → failed
+  └─ 外部结果或提交结果无法确认 → unknown
+~~~
 
-```text
-customer_demands
-→ creator_candidate_pool
-→ mcn_recommendation_items
-→ mcp_tool_call_ledger
-→ core_project/core_distribution
-→ mcn_inquiries/mcn_submission_items
-→ recommendation_runs/creator_recommendation_items
-→ submission_batches/creator_submissions
-```
+- succeeded：同键同参可直接返回原结果；
+- failed：只有能确认没有提交时才允许按产品规则再试；
+- unknown：必须先对账；
+- in_progress：返回处理中，避免并发重复执行业务写。
 
-只根据已提交事实推导 phase 和 `allowed_actions`。关联断裂、多个版本、ledger `in_progress/unknown` 或状态互相冲突时清空写动作并返回唯一阻塞原因。这样跨 session 只需要需求身份，不依赖聊天记录或本地 Hook 状态。
+## 上线前必须验证的场景
 
-## 5. 当前数据库最大问题与最小修正
+以下测试必须在独立、可回收环境执行，且保存脱敏的请求、响应和资源 ID：
 
-按风险排序：
+1. 同键同参并发两次：只产生一份业务记录；
+2. 同键改参：得到 IDEMPOTENCY_CONFLICT；
+3. 本地事务提交后响应丢失：能从 ledger 找回原结果；
+4. 外发 API 响应丢失：能按稳定键找到原项目，而不是二次 POST；
+5. 重复同步：不新增重复 inquiry，状态与权威分发记录一致；
+6. 新会话恢复：仅依赖批准的恢复身份和已提交事实得到同一阶段；
+7. 任意 unknown 或关联冲突：流程停住且没有额外外发。
 
-1. **外部 API 未承诺请求唯一键**：当前先转发 header 并对 unknown 禁止重发；API 若不消费该键，再执行上面的 `core_project.client_request_id` 单列迁移。
-2. **线上 ledger 仍为空**：表不改；统一包装器已在本地源码接入，待部署后做并发/断线测试。
-3. **线上回收实现未更新**：本地源码已实现从发送方三表同步，待部署后用真实 distribution 验证。
-4. **跨域 ID 类型不统一**：ledger 的 `demand_id`、`submission_batches.demand_id` 是 bigint，而需求主键/业务 ID 是字符串。最小方案在新链路统一使用 ledger 的 `parent_type + parent_id` 和各业务表已有字符串键，不为此改动已经敲定的 `customer_demands`。
-
-`customer_demands` 的字段、类型、Null 规则，以及 `field_match_mapping` 的 110 条已匹配映射均按业务方确认视为权威；本方案不修改这两张表，也不建议为了幂等新增它们的列或索引。
-
-## 验收
-
-- 同 key 并发两次只产生一份业务记录，并返回同一资源 ID；
-- 同 key 改参数得到 `IDEMPOTENCY_CONFLICT`；
-- 本地 commit 响应丢失可从 ledger 恢复；
-- 外部 API 响应丢失后按 `client_request_id` 找回原 project，POST 只发生一次；
-- 重复 sync 不新增 inquiry，状态与 `core_distribution` 一致；
-- 新 session 只给需求身份即可恢复相同 phase、关键 ID 和唯一下一动作；
-- 任一断链或 unknown 都 fail closed。
+在这些测试完成前，当前的实际约束仍然有效：业务写和外发不盲重试、每次外发先经本地精确确认、外发只以逐机构 `sent` 明细作为成功证据，`sync_mcn_inquiry_status` 不能倒推出发送成功，批次导出与 Provider 状态恢复继续 fail-close。

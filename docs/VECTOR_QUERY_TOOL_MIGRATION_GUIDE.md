@@ -1,294 +1,96 @@
-# 向量能力服务端迁移指南
+# 向量能力的使用与部署边界
 
-## 1. 目标
+> 更新：2026-07-23
+> 这是一份给插件使用者、产品和服务端同学看的说明：它解释当前能做什么、不能做什么，以及为什么不需要在本地“迁移向量库”。
 
-将当前仓库中的本地 `vector-mcp` 从“随 YPmcn 插件打包、在用户设备运行”的形态，迁移为由 YP 服务端统一托管、由业务 Tool 内部调用的向量能力。
+## 先记住三件事
 
-迁移完成后，用户只需安装 YPmcn 插件并连接远程 MCP，不需要安装 Qdrant、连接 MySQL，也不需要配置 DashScope 或数据库密钥。
+1. **普通用户不需要安装 Qdrant、配置数据库或申请模型 API Key。**
+2. **普通 Agent 不会调用向量 Tool。** 公开业务入口仍是 `search_creators`、`rank_creators`，并由 Skill 按业务流程使用。
+3. **Qdrant 目前是服务端影子能力。** 它是否参与某一次搜索，必须由真实远程响应和服务端证据确认，不能只看插件配置或旧文档。
 
-目标架构：
-
-```text
-用户安装 YPmcn 插件
-        ↓
-插件连接统一的远程 MCP
-        ↓
-服务端 `search_creators` / `rank_creators` 调用内部向量能力
-        ↓
-MySQL 只读数据 → DashScope → Qdrant → MySQL 回源 → Rerank
-```
-
-## 2. 当前状态
-
-### 2.1 `vector-mcp` 是独立 MCP Server
-
-当前 `vector-mcp`：
-
-- 使用 stdio transport；
-- 从 YP MySQL 的 `xhs_mz`、`dy_mz` 读取达人数据；
-- 调用 DashScope `text-embedding-v4` 生成 1024 维向量；
-- 向 Qdrant 写入和查询 `content`、`commercial` 双命名向量；
-- 使用 DashScope `qwen3-rerank` 精排；
-- 查询命中后回源 MySQL 执行硬条件过滤。
-
-### 2.2 当前安装包已移除本地 Vector MCP
-
-旧打包脚本曾复制：
+## 当前链路长什么样
 
 ```text
-vector-mcp/dist/
+用户 / Agent
+→ YPmcn 插件
+→ 统一远程 MCP（SSE）
+→ search_creators / rank_creators 等业务 Tool
+→ 服务端内部：MySQL 硬筛
+→ （待验收时才可能）Qdrant 语义召回与可选 rerank
+→ MySQL 回源复核
+→ 业务结果
 ```
 
-相关位置：
+插件配置文件 [`YPmcn/mcp.json`](../YPmcn/mcp.json) 只保存统一远程 MCP 的地址。它没有也不应该包含 Qdrant、MySQL、embedding 或 rerank 的密钥。
 
-- `scripts/prepare-package.mjs`；
-- `YPmcn/package.json`。
+换句话说，安装插件不等于在用户电脑上启动了向量数据库；它只是让插件能与远程业务服务通信。
 
-当前插件的 `YPmcn/mcp.json` 和 `YPmcn/.mcp.json` 只保留：
+## 一次正常使用的例子
 
-```text
-https://mcp.eshypdata.com/sse
-```
+媒介提出：“找 10 位适合护肤新品、预算在范围内的小红书达人。”
 
-本地 `vector-mcp` 没有被注册为 MCP Server，安装包也没有完整包含其独立依赖和运行配置。即使继续打包，用户设备也无法安全获得 MySQL、Qdrant 和 DashScope 凭据。
+1. Skill 先按当前工作流解析和校验需求；
+2. 服务端业务 Tool 根据需求做候选处理；
+3. 无论内部是否启用语义召回，价格、平台、地域等硬条件都以 MySQL 当前记录为准；
+4. 返回的候选才进入后续的排序、提报或人工判断。
 
-`vector-mcp/dist` 已从终端包移除。YP Action/OpenClaw 本身支持远程 SSE；当前未证明的是安装器能否把包内 `{ "mcpServers": ... }` 自动转换为 OpenClaw 的 MCP 注册 entry。源码 Headless 通过显式 `openclaw mcp set` 完成注册，因此不能把“协议可连接”和“tgz 自动导入配置”混成同一结论。
+若向量依赖不可用，正确行为是服务端明确采用 `sql-only`，继续给出 MySQL 硬筛结果，而不是要求用户安装本地工具、改环境变量或反复重试。
 
-另一个必须消除的冲突是公开 Tool 边界：`spec/database.json` 当前明确 `publicToolAvailable: false`，内部消费者是 `search_creators` 和 `rank_creators`；《SearchCreators / RankCreators 向量融合实施方案》也采用这一边界。旧设计中让 Agent 直接调用 `search_creator_tag_vectors` 的文字已经过时。当前代码只能证明本地向量 pipeline 存在，尚不能证明远程两个业务 Tool 已实际接入或经过真实需求评测。
+## 哪些操作不该做
 
-## 3. 迁移原则
+- 不要把 `vector-mcp`、`search_creator_tag_vectors`、同步或健康检查工具暴露给普通 Agent；
+- 不要在插件包、`mcp.json`、Skill、Prompt、日志或聊天里放 Qdrant/MySQL/模型密钥；
+- 不要用本地 JSON、旧缓存或未经回源的向量点当作生产结果；
+- 不要因为旧文档提到 DashVector，就新建第二套向量数据库；
+- 不要把“远程 MCP 可连接”误写成“向量检索已验收”。
 
-### 3.1 插件只做客户端
+## 给服务端和运维同学的边界
 
-YPmcn 插件负责：
+若未来要启用 Qdrant，密钥、同步、索引和监控都只部署在远程业务服务一侧。服务端必须：
 
-- 提供 Skill、Hook 和用户交互流程；
-- 连接 YP 托管的远程 MCP；
-- 调用公开业务 Tool `search_creators` / `rank_creators`；
-- 展示经过业务权限控制的查询结果。
+- 使用 MySQL 只读权限和受控密钥管理；
+- 让 Qdrant 只保存可重建的、脱敏后的派生索引；
+- 在返回结果前按 MySQL 重新验证；
+- 把检索模式、降级原因和来源信息写入真实响应/审计记录；
+- 在 Qdrant、embedding、rerank 或索引过期时可立刻切回 `sql-only`。
 
-插件不负责：
+具体接入和验收步骤见 [Qdrant Cloud 接入指南](QDRANT_CLOUD_MIGRATION_GUIDE.md) 与 [向量检索与排序实施计划](VECTOR_SEARCH_RERANK_IMPLEMENTATION_PLAN.md)。
 
-- 连接生产 MySQL；
-- 保存 Qdrant API Key；
-- 保存 DashScope API Key；
-- 在用户设备生成或维护生产向量；
-- 执行全量或增量数据同步。
+## 如何判断当前是否真的启用了向量
 
-### 3.2 基础设施密钥只保留在服务端
+以下证据强度不同：
 
-以下配置必须通过服务端 Secret Manager、部署平台密钥配置或受限环境变量注入：
+| 看到的现象 | 能证明什么 | 不能证明什么 |
+| --- | --- | --- |
+| 插件能连接 SSE | 远程 MCP 地址可被配置 | 向量服务已部署或已启用 |
+| `tools/list` 里没有 vector Tool | 对外工具边界没有暴露向量运维能力 | `search_creators` 已跑向量 |
+| 本地测试通过 | 契约和插件逻辑符合预期 | 远程数据、性能和质量已验收 |
+| 真实响应有检索模式和来源信息，加上服务端日志 | 某次真实调用走了哪条链路 | 长期质量、成本和容量一定达标 |
+| 冻结样本评测与故障演练完成 | 可以讨论灰度或上线 | 后续无需持续监控 |
 
-```text
-QDRANT_URL
-QDRANT_API_KEY
-QDRANT_COLLECTION
-QDRANT_VECTOR_SIZE
-VECTOR_VERSION
+当前远程 MCP 的工具输出没有广告 `outputSchema`；因此“向量已启用”的最终证据只能来自真实调用留存和服务端观测。可先阅读 [MCP 运行时审计](MCP_TOOL_RUNTIME_AUDIT_2026-07-23.md)。
 
-DASHSCOPE_API_KEY
-DASHSCOPE_WORKSPACE_ID
-DASHSCOPE_EMBEDDING_MODEL
-DASHSCOPE_RERANK_MODEL
+## 常见问题
 
-YP_MYSQL_HOST
-YP_MYSQL_PORT
-YP_MYSQL_USER
-YP_MYSQL_PASSWORD
-YP_MYSQL_DATABASE
-```
+### 我需要在自己的电脑上启动 Qdrant 吗？
 
-禁止把这些密钥：
+不需要。当前插件包不携带本地向量运行时，也不应获得数据库或模型凭据。
 
-- 写入 Git；
-- 写入插件配置；
-- 打进 npm 包；
-- 放入 Skill、Prompt 或日志；
-- 交给终端用户；
-- 通过 MCP Tool 返回。
+### 我可以让 Agent 直接搜索向量吗？
 
-终端用户如需鉴权，应使用 YP 用户账号对应的用户级 Token、Session 或 OAuth，不得使用基础设施密钥。
+不可以。这样会绕开需求校验、MySQL 硬筛、候选快照、权限和审计。Agent 应使用现有业务流程，而不是向量基础设施。
 
-### 3.3 MySQL 是事实源
+### 结果里显示 `sql-only` 是失败吗？
 
-MySQL 是达人业务数据的唯一事实源，Qdrant 只保存可重建的派生向量索引。
+不一定。它表示本次按 MySQL 的权威数据处理，没有使用向量能力。只要降级原因和来源信息清楚，这比返回未经验证的“看起来相关”的结果更安全。
 
-不得在 Qdrant 中手工维护完整达人资料。查询命中后必须回源 MySQL 校验当前记录、业务权限和硬过滤条件。
+### 能否按旧 DashVector 方案继续做？
 
-## 4. 目标部署方案
+不能。该方案已经归档为历史资料；当前只保留 Qdrant 路线。若要重新评估 DashVector，必须走新的 Change Proposal 和同样的质量/安全验收。
 
-推荐将向量能力合并进现有远程 MCP：
+## 进一步阅读
 
-```text
-https://mcp.eshypdata.com/sse
-```
-
-也可以独立部署为新的远程 MCP，但会增加服务发现、鉴权、监控和故障处理成本。没有明确隔离需求时，优先复用现有远程 MCP。
-
-目标服务端组件：
-
-```text
-YP 远程 MCP
-├── search_creators（公开业务 Tool）
-├── rank_creators（公开业务 Tool）
-├── 内部向量召回 / rerank 模块
-├── MySQL 只读连接
-├── DashScope Client
-└── Qdrant Client
-```
-
-Qdrant 当前测试配置：
-
-```text
-QDRANT_URL=https://vs.eshypdata.com
-QDRANT_COLLECTION=creator_vectors_v1_202607
-QDRANT_VECTOR_SIZE=1024
-VECTOR_VERSION=creator-v1
-```
-
-Collection schema：
-
-```json
-{
-  "vectors": {
-    "content": { "size": 1024, "distance": "Cosine" },
-    "commercial": { "size": 1024, "distance": "Cosine" }
-  }
-}
-```
-
-Payload index：
-
-```json
-{
-  "field_name": "platform",
-  "field_schema": "keyword"
-}
-```
-
-## 5. 公开业务 Tool 与内部运维边界
-
-普通 Agent 的公开入口保持为 `search_creators` 和 `rank_creators`。前者在服务端完成硬条件候选范围、向量召回、rerank、MySQL 回源和候选快照；后者只消费冻结候选快照及已保存的语义特征，生成最终 recommendation run。两者必须返回检索模式、模型/向量版本和降级原因等 provenance，但不能返回基础设施密钥或完整向量。
-
-`search_creator_tag_vectors`、`health_check_vector_store`、`sync_creator_tag_vectors` 可以继续作为服务端内部函数名、独立内部 MCP 或受控运维入口，但不能出现在普通用户/Agent 的 `tools/list` 中。若部署为独立内部 MCP，只允许业务 MCP 以服务身份调用；健康检查只给运维，sync 只给后台任务或管理员。这样不会出现 Agent 绕过 `search_creators` 的硬条件、候选持久化、供给方案与权限审计，直接拿一份向量结果继续工作的第二条业务链。
-
-内部 sync 的职责仍是从 MySQL 读取、脱敏投影、生成 embedding 并写入 Qdrant。正式全量同步前必须解决：
-
-1. 将单一 `update_time` 游标改为 `(update_time, kwUid)` 复合游标；
-2. 明确稳定 Point ID 或历史快照隔离策略；
-3. 实现下线达人和 stale Point 删除；
-4. 增加 MySQL 与 Qdrant 对账；
-5. 确保整批 upsert 成功后才推进游标。
-
-## 6. 实施步骤
-
-### 阶段一：服务端接入
-
-1. 将 `vector-mcp` 的 runtime、查询 pipeline 和依赖作为内部模块部署到 YP 服务端；
-2. 使用服务端环境变量注入 Qdrant、DashScope 和 MySQL 凭据；
-3. MySQL 使用只读账号；
-4. 固定使用 HTTPS Qdrant URL；
-5. 只在业务 MCP 注册公开的 `search_creators` / `rank_creators`；内部健康检查和同步入口放在运维权限面；
-6. 为内部同步增加管理员权限和调用审计，并禁止普通 Agent 发现这些入口。
-
-### 阶段二：远程 MCP 联调
-
-1. 由运维面调用内部 `health_check_vector_store`；
-2. 确认 Qdrant、MySQL、embedding、reranker 可用；
-3. 分别验证 `xiaohongshu`、`douyin` 查询；
-4. 从 `search_creators` 返回的 provenance 确认查询模式、版本和是否降级；
-5. 验证 Qdrant 故障时可以降级为 SQL-only；
-6. 确认日志不包含密钥、完整向量或敏感达人原文。
-
-### 阶段三：调整插件打包
-
-插件打包当前执行：
-
-1. `scripts/prepare-package.mjs` 不构建或复制 `vector-mcp/dist`；
-2. `YPmcn/package.json` 不声明 `vector-mcp/dist/`；
-3. 保留 `YPmcn/mcp.json` 和 `YPmcn/.mcp.json` 中的远程 MCP 配置；
-4. 确认 Skill 只调用远程 MCP 暴露的 `search_creators` / `rank_creators`，不调用 vector 专用 Tool；
-5. 重新执行打包和密钥扫描；
-6. 在干净环境安装包并完成查询冒烟测试。
-
-## 7. 用户开箱即用流程
-
-迁移完成后的用户流程：
-
-```text
-安装 YPmcn 插件
-→ 安装器/宿主注册包内声明的远程 ypmcn-mcp
-→ 用户登录或使用已有 YP 身份
-→ 用户提出达人筛选需求
-→ Skill 调用 search_creators
-→ 服务端内部完成硬筛、向量召回、MySQL 回源和 rerank
-→ 后续由 rank_creators 消费冻结候选快照
-→ 返回业务候选
-```
-
-用户不需要：
-
-- 安装 Qdrant；
-- 配置数据库；
-- 申请 DashScope Key；
-- 理解 Collection；
-- 手工同步向量；
-- 维护本地 MCP 进程。
-
-## 8. 运维与版本管理
-
-### 日常检查
-
-至少监控：
-
-- MCP 请求成功率和延迟；
-- Qdrant Collection 状态；
-- 各平台 Point 数量；
-- MySQL 与 Qdrant 对账差异；
-- embedding、rerank 错误率；
-- SQL-only 降级率；
-- 同步批次、游标和失败记录。
-
-### 模型或投影升级
-
-Embedding 模型、向量维度、文本投影规则或 `VECTOR_VERSION` 变化时，必须新建版本化 Collection，例如：
-
-```text
-creator_vectors_v2_...
-```
-
-不得把不同模型或不同投影规则生成的向量混入同一 Collection。新 Collection 完成回填和评测后，通过配置或 alias 切流，并保留旧 Collection 作为短期回滚路径。
-
-### 数据恢复
-
-Qdrant 是可重建索引，不复制本地 Qdrant volume 作为迁移方式。发生数据损坏时，应从 MySQL 重新投影和生成向量。
-
-## 9. 验收标准
-
-迁移完成必须同时满足：
-
-- 用户安装包不包含基础设施密钥；
-- 用户安装包不依赖本地 `vector-mcp` 进程；
-- 远程 MCP 可以发现并调用 `search_creators` / `rank_creators`，普通 Agent 的 `tools/list` 不暴露 vector 专用 Tool；
-- `xiaohongshu`、`douyin` 真实检索均成功；
-- `search_creators` 查询结果经过 MySQL 回源、当前硬条件复核并带可追溯 provenance；
-- `rank_creators` 只消费冻结候选快照，模型/向量/策略版本可追溯；
-- 同步 Tool 对普通用户不可见或不可调用；
-- Qdrant、DashScope 或 reranker 故障时有明确降级；
-- 日志和错误不泄露密钥、完整向量或敏感原文；
-- 打包产物通过密钥扫描；
-- 干净环境安装后无需用户配置基础设施即可完成查询。
-
-## 10. 回滚
-
-迁移期间保留当前插件版本和旧 Collection，不直接删除。
-
-如果远程向量查询出现问题：
-
-1. 将查询切回 SQL-only；
-2. 停止新的向量同步任务；
-3. 保留 MySQL 业务流程；
-4. 修复服务端后重新验证；
-5. 不要求用户修改本地密钥或数据库配置。
-
-回滚不应依赖用户重新安装 Qdrant 或恢复本地 `vector-mcp`。
+- [远程向量能力现状](REMOTE_VECTOR_DATABASE_STATUS_2026-07-17.md)
+- [Qdrant Cloud 接入指南](QDRANT_CLOUD_MIGRATION_GUIDE.md)
+- [历史 DashVector 方案（不执行）](VECTOR_SERVER_MIGRATION_AND_TOOL_DESIGN.md)

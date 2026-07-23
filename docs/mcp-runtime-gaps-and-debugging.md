@@ -1,75 +1,96 @@
-# 开发 MCP 现状、修复清单与联合调试
+# MCP 现状与排障指南
 
-基线：开发与生产 Provider 统一使用 `https://mcp.eshypdata.com/sse`，正式契约要求 15 个业务工具，MySQL 数据库为 `ypmcn`。当前 endpoint 的写行为、幂等和恢复链仍需真实联调验证；Skill、Hook 和 Spec 不得把未验证源码写成线上能力。
+> 适用版本：3.4.25。本文只写现在能确认的事实；未来服务端方案请看 [MCP + 数据库最小幂等与状态修正方案](MCP_DB_MINIMAL_IDEMPOTENCY_PLAN.md)。
 
-## 当前问题与后果
+## 先看结论
 
-### 1. 询价状态没有真正同步
+插件连接的是 https://mcp.eshypdata.com/sse。2026-07-23 的只读审计确认，远端有 15 个业务 Tool，但只公布了入参 Schema，**没有公布稳定的成功出参 Schema**。因此：
 
-远程已部署版本尚未复核。独立后端工作树现已读取 `core_project/core_distribution/core_notificationlog`，先验证机构属于当前需求与平台的 MCN 推荐，再按 `mcn_recommendation_item_id + attempt_no` 创建或更新 `mcn_inquiries`，并幂等更新 `mcn_inquiry_status_syncs`。重复 sync 单测保持同一 inquiry；外部显示 submitted 但行尚未 ingest 时，工作流停在 `returned_not_ingested`。
+- 本地契约和 Tool reference 负责说明“可以传什么、何时能传”；
+- 每次真实调用的返回值才是这一次业务结果的证据；
+- 不能因为看到 success: true，就假定项目、企微消息或导出已经真的完成。
 
-剩余验收：部署后用真实 project/supplier 执行首次 sync、回收、ingest、再次 sync，并在新 session 仅凭需求身份恢复；不能用本地单测替代。
+完整的实测入参、负向探测和差异记录在 [远程 MCP 工具运行时审计（2026-07-23）](MCP_TOOL_RUNTIME_AUDIT_2026-07-23.md)。
 
-### 2. 幂等账本没有启用
+## 现在能走到哪里
 
-真实开发库的 `mcp_tool_call_ledger` 仍为 0 行，说明部署态尚未产生证据。独立后端工作树已把 10 个本地写入口和 1 个外部创建入口接入统一包装器：同 key/hash 重放原结果，不同 hash 冲突，本地失败回滚业务写，外部响应未知持久化为 unknown 并禁止重发。
+| 场景 | 当前行为 | 使用时要注意 |
+| --- | --- | --- |
+| 需求校验、搜索、MCN 排序 | 已有本地顺序和 ID 约束 | 只使用刚刚返回的 data.id，不要把 demand_id 当 Tool ID。 |
+| 企微外发 create_with_distributions | 每次要实际外发前，先由本地 Hook 给出精确的 AskUserQuestion；确认后才一次性放行下一次调用 | 只有逐机构、可关联的明确 sent 状态才算发送成功；同步不能倒推出发送成功。 |
+| 询价同步 sync_mcn_inquiry_status | 当前只能记录同步事实和实际返回的 inquiry ID | 它不能反过来证明企微已发送，也还不能代替完整回收链。 |
+| 手工拓展 manual_source_creators | 支持 requirement_id + 字符串 size | 成功必须有非空达人数组；只有 Excel 路径不能作为“已拿到达人”的证据。 |
+| 排序后的批次导出 | 当前阻断 | 远端和本地批准入参不一致，不能猜字段绕过。 |
+| 用 Provider 恢复工作流 | 当前阻断 | 远端要 requirement_id，本地批准恢复身份却是 trace_id 或 demand_id + demand_version。 |
 
-剩余验收：MCP 中间层必须在同一业务意图及自动重试中转发稳定 `Idempotency-Key`；外部 API 还需明确持久化该键或提供按键查询。状态 sync 没有显式 key 时允许重新读取最新快照，因为其业务写本身按唯一键 upsert；这不能推广到其他写 Tool。
+## 两个必须保持阻断的契约差异
 
-### 3. “审计”并未真正启用
+### 1. create_submission_batch
 
-`audit_manual_adjustment` 目前直接修改推荐 item 的 JSON、reason/status，没有 append-only 审计事件。后果是无法证明修改前值、修改人、时间、原因和关联调用，历史值可被覆盖，不能用于合规追责或可靠回滚。
+本地批准的目标输入是：
 
-修复：新增不可变 `audit_events`，至少记录 actor、toolCallId、entity、entity_id、before、after、reason、trace_id、created_at；业务更新与事件写入同一事务。读取历史只查事件，禁止 update/delete 审计行。
+~~~json
+{"requirement_id":"<id>","size":"20","number":"1"}
+~~~
 
-### 4. 需求范围必须在 Agent 调用前规范化
+远端实际要求的是 requirement_id、整数 size、submission_batche_page 和 columns。这里不只是字段改名：批次语义和列定义都缺少可靠映射。因此当前正确行为是返回 integration_required，而不是替 Agent 补一个 columns 或把 number 猜成页码。
 
-`customer_demands` 与 `field_match_mapping` 已确认是权威。Agent 调 `validate_requirement` 前，把范围字段统一为无空格字符串 `"[min,max]"`；上限条件例如“不超过 50%”写 `"[0,0.5]"`。内部单达人预算字段仍为 `kolOfficialPriceL1/L2/L3`，但用户侧只说小红书图文/视频或抖音对应时长，小红书不得使用第三档；项目总预算没有专用列，只在 `rawMessagesJson` 保留原文。
+### 2. get_workflow_state
 
-Skill 负责规范化自然语言范围，MCP/Provider 负责拒绝数组、倒序、比例大于 1、虚构字段和缺少报价档位的请求；Hook 不再重复校验 requirement payload。后端只按 `(platform,source_field_name,match_status='已匹配')` 拆成已确认的目标 Min/Max，Agent 不生成目标字段名。
+本地恢复设计使用 trace_id，或 demand_id + demand_version；远端实际只接受 requirement_id。例如，手里只有 demand_id=1784... 时，不能凭猜测拼出 32 位 requirement ID 去查询。当前应保留本地状态并报告集成等待，等 Provider 发布批准的恢复入参后再启用。
 
-### 5. 广告参数有名无实
+## 外发：先确认，再调用；调用也不等于送达
 
-- `get_creator_detail.include_vector_text`
-- `get_creator_detail.include_recent_metrics`
-- `get_recommendation_run_detail.include_creator_detail`
-- `get_recommendation_run_detail.include_feedback`
+`create_with_distributions` 是当前唯一的外发面。它不能用 shell、curl 等方式绕过；并且在真正调用 Provider 前，本地 Hook 会先拦住调用、返回**原样的** `AskUserQuestion` 参数。宿主必须直接展示这一个问题、换行和选项，不能自行改写或用一段普通文字代替。
 
-当前实现未使用这些参数。Skill 已停止发送，但开发 MCP 的 `tools/list` 仍会广告。修复方式二选一：实现并增加返回测试，或从 input schema 删除；不要继续保留“看似可用”的参数。
+一次外发的正确顺序是：
 
-### 6. 供应商返点事实源写错
+1. 首次调用 `create_with_distributions` 被本地拦截，Provider 此时尚未被调用；宿主展示“企微外发确认”。首次批量发送和每个逐机构 fallback 都各自需要这一步。
+2. 用户明确选择“确认发送”后，最新且未过期的本地回执会跨 `AskUserQuestion` 的用户回调保留 10 分钟。
+3. 回执只放行**下一次** `create_with_distributions` 一次，随后立即消费。当前实现不会再核对下一次调用的参数是否与弹窗时完全相等；这是为了兼容跨 turn 后宿主重建参数，不能把它理解成“以后都已获授权”。
+4. 用户取消、拒绝、关闭弹窗、超时或回调失败时，Provider 不会被调用。没有宿主 session 上下文时，插件只使用自己的全局 fallback 回执，不会读取或借用别的 session 回执。
+5. 调用返回后，再逐机构核对真实发送证据；只有明确 `sent` 的机构可进入后续 `sync_mcn_inquiry_status`。
 
-`creator_supply_offers` 没有持久化价格/返点列；当前供应商返点事实源是 `core_supplier.default_rebate_rate`，通过 `creator_supply_offers.supplier_id` 关联。需求中的 `customer_demands.rebate` 只是客户原始要求，不能当作供应商实际返点。
+举例：准备向 A、B 两家机构发询价时，先出现包含 A、B、回填字段和消息正文的确认弹窗。用户点“确认发送”后，即使回调发生在下一轮 assistant turn，最新未过期回执仍只允许一次 Provider 调用；第二次发送或对未绑定机构的逐个 fallback，都会重新弹确认。响应只写“发送成功”或返回聚合名单，仍不足以证明 A 已发送；必须有能与 A 对上的逐机构 `sent` 事实。若网络中断、响应丢失或状态不明，停止并保留证据，**不要盲目重发**。
 
-## 逐工具数据库事实
+## 手工拓展的当前规则
 
-| 工具 | 当前实际读写 |
-|---|---|
-| `validate_requirement` | 写 `customer_demands` |
-| `search_creators` | 读需求、平台达人、offer、supplier；写 `creator_candidate_pool` |
-| `rank_mcns` | 读需求/候选/offer/supplier；写 `mcn_recommendation_items`；返回 `mcn_run_id` |
-| `select_inquiry_form_fields` | 本地网页/回调，不读写业务库 |
-| `create_with_distributions` | 写外部项目 API，不写开发 MySQL |
-| `sync_mcn_inquiry_status` | 本地待部署源码读发送方三表，upsert `mcn_inquiries` 与同步元数据 |
-| `ingest_mcn_submissions` | 读 inquiry/demand/supplier；写 submissions/offers/candidates/平台达人 |
-| `manual_source_creators` | 写 candidates/offers/平台达人 |
-| `rank_creators` | 读 candidates/offers/平台达人/MCN 推荐；写 runs/items |
-| `create_submission_batch` | 读推荐/提报；写 batches/submissions |
-| `record_client_feedback` | 写反馈相关提交/批次，必要时复制需求版本 |
-| `get_recommendation_run_detail` | 读 run/items/submissions |
-| `get_creator_detail` | 读平台达人/offers/supplier |
-| `audit_manual_adjustment` | 修改推荐 item；当前无独立审计流水 |
-| `get_workflow_state` | 跨多表浅层查询工作流事实 |
+当前 Tool 入参是：
 
-## 不打包的高效联合调试
+~~~json
+{"requirement_id":"<刚校验得到的32位 data.id>","size":"12"}
+~~~
 
-日常开发固定走四层，只有发布候选才打包：
+其中 size 是正整数字符串，不是旧文档里的 target_count，也不是 JSON 数字 12。
 
-1. `npm run test:fast`：源码 Plugin/Hook/契约回归，验证非外发 Tool 放行、本地 JSON 状态转换与企微外发 AskUserQuestion 两阶段确认。
-2. `npm run verify:provider`：直接对开发 SSE 做 `initialize + tools/list` 契约快照，发现工具/参数漂移。
-3. Hook 响应回放：用脱敏外发参数验证 AskUserQuestion 输入指纹、外发请求指纹、参数变化及 unknown 后重新确认，不需要启动桌面端。
-4. `npm run test:openclaw`：从源码加载 Plugin/Skill，使用隔离配置检查宿主装载。
+有两条入口：
 
-联调建议新增服务端测试接口或脚本：用测试 demand 调 15 个工具中的只读工具和可回滚写工具；MySQL 写测试放事务后 rollback，外部写使用 sandbox/fake adapter。每次 MCP 修改自动导出 `tools/list` 和脱敏响应 fixture，仓库 CI 对比 Spec、Tool 文档与 Hook 回放。
+- 尚未开始 search_creators：可以直接走“校验需求 → 手工拓展”。
+- 已经开始搜索：不能插队。必须先完成 MCN 排序、用户网页选字段、企微外发确认后的发送和与发送绑定的同步，之后才可手工拓展。
 
-发布候选才运行 `npm run pack:yp` 并在 YP Action/OpenClaw 做安装器冒烟，随后必须按《高效联调测试指南》用真实需求完成 Agent → MCP → 开发库 → 测试企微 → 回收 → CSV → 新 session 恢复的 Live E2E。当前包写入统一远程 SSE；只读契约检查不能替代远程写行为与 Live E2E。宿主对 bundle remote SSE 的自动注册仍需在干净 YP Action 安装环境验证。
+每次拓展前都要重新执行 validate_requirement，只把本次成功响应的 data.id 紧邻地用于一次 manual_source_creators 调用。成功后还要有非空的 creators、creator_list 或 manual_sourced_creators；只有 excel_file_path 时，不应报告“达人已入池”。
+
+## 常见问题怎么查
+
+| 现象 | 先查什么 | 不要怎么做 |
+| --- | --- | --- |
+| Tool 报缺少字段 | 对照远端 tools/list 和对应 references/tools/<tool>.json | 不要照旧文档补 target_count、run_id 等字段。 |
+| success: false 但 MCP 请求本身没报错 | 看业务 envelope 的 error.code 和 trace_id | 不要把 MCP 通道成功当业务成功。 |
+| 外发结果不明 | 保存实际响应、项目/机构关联信息，停止写入 | 不要自动重发外发 Tool。 |
+| 想恢复旧会话 | 先看本地 JSON 编排状态 | 不要调用当前不兼容的 get_workflow_state，也不要由其他 ID 猜 requirement_id。 |
+| Provider 对比失败 | 运行 npm run verify:provider，查看 schema diff | 不要为了让命令变绿而放宽本地批准契约。 |
+
+## 最小排障命令
+
+~~~bash
+# 只读：初始化 MCP 并比较 tools/list；当前已知两项硬差异会使它返回非零
+npm run verify:provider
+
+# 本地 Plugin、Hook 与契约回归
+npm run test:fast
+
+# 文档生成区块是否仍与 Spec 同步
+npm run verify:docs
+~~~
+
+如果需要写路径的成功样本，必须使用隔离测试需求、测试机构和可回收的企微通道，并在执行前确认清理方案。只读探测、Mock 或本地 Hook 回放都不能替代这类证据。

@@ -1,34 +1,59 @@
-# 远程向量能力现状（更新于 2026-07-18）
+# 远程向量能力现状（2026-07-23）
 
-## 结论
+> 本文件的日期沿用原文件名；内容已按当前仓库契约更新。它说明“我们能证实什么”，不把历史部署描述当成上线证据。
 
-Qdrant 已部署且达人数据已向量化，这是当前业务确认；远程代码也存在 embedding、`content/commercial` 双向量和 rerank 模块。但 `SearchCreators`、`RankCreators` 是否已经稳定调用这些能力并返回可追溯结果，尚未通过真实链路验收，因此正式状态仍是 `shadow / integration-unverified`，不能写成已上线。
+## 一句话结论
 
-## 已确认
+当前批准的路线是：**Qdrant 只能作为服务端内部的、可重建的召回索引；MySQL 才是达人数据和硬条件的事实源。**
 
-- 向量能力运行在服务端，不进入 YPmcn 插件包；
-- Qdrant 是 MySQL 的可重建派生索引，不是业务事实源；
-- 达人数据已经完成向量化；
-- 代码方向使用内容与商业双路向量；
-- rerank 模块已存在，但必须接入 Search 和 Rank 的实际业务路径并用真实 Brief 验证；
-- 普通 Agent 只调用 `search_creators` / `rank_creators`，不直接看到向量运维 Tool。
+它目前处于 `shadow`（影子能力）状态，而不是已验收的生产检索能力。普通用户和 Agent 不会看到独立的向量 Tool，只应通过 `search_creators`、`rank_creators` 走业务流程。
 
-## 尚未通过的证据
+## 已确认的边界
 
-当前统一远程 MCP 尚未完成向量业务链验收，所以不能证明：
+这些是仓库 `spec/` 已批准的内容：
 
-- 实际运行进程加载了哪一版向量配置；
-- 每个平台 Point 数与 MySQL 是否一致；
-- `search_creators` 是否真的执行 Qdrant 和 rerank，而不是 SQL-only；
-- `rank_creators` 是否消费相同语义特征和模型版本；
-- 真实需求的召回质量、延迟、费用和降级行为。
+| 事项 | 当前约定 | 对使用者意味着什么 |
+| --- | --- | --- |
+| 数据事实源 | MySQL | 价格、档期、合规等结论必须回源 MySQL，不能只信向量命中。 |
+| 向量索引 | Qdrant，且可从 MySQL 重建 | 索引损坏时重建，不拿它当业务主库。 |
+| 对外 Tool | 没有公开的向量 Tool | 不要让 Agent 直接调用 `vector-mcp`、同步或健康检查入口。 |
+| 内部消费者 | `search_creators`、`rank_creators` | 向量能力只能是这两个业务 Tool 的内部实现细节。 |
+| 故障处理 | 显式 `sql-only` | 向量不可用时仍可按 MySQL 硬筛找人，结果必须说明已降级。 |
 
-必须从统一 endpoint 的 Tool 响应 `retrieval_mode/degraded_reason/provenance` 和服务端日志同时确认，不能只看代码存在。
+例如，用户要“上海、预算 1 万以内的美妆达人”时，地区和预算先由 MySQL 判断；即使某个达人在语义上很像美妆内容，也不能因此越过预算或地区限制。
 
-## 当前统一路线
+## 尚不能证实的事
 
-近期只完善已经部署的 Qdrant，不再并行设计 DashVector 第二套实现。MySQL 先按 `customer_demands + field_match_mapping` 做硬筛；Qdrant 在允许集合内双路召回；rerank 重排；最后回源 MySQL 复核。完整改造和验收见 [VECTOR_SEARCH_RERANK_IMPLEMENTATION_PLAN.md](VECTOR_SEARCH_RERANK_IMPLEMENTATION_PLAN.md)。
+仓库不含本地 `vector-mcp` 或远程业务服务的运行实现；当前插件只配置远程 SSE 地址。因此下列说法都不能写成“已上线”：
 
-## 上线门禁
+- 远程 `search_creators` 现在确实执行了 Qdrant、双路召回或 rerank；
+- 某个 Qdrant 集群、Collection、模型、维度或 API Key 已被当前服务使用；
+- Qdrant 点数与 MySQL 当前达人数据已对齐；
+- 检索质量、延迟、费用和 SQL-only 降级已经用真实需求验收；
+- `rank_creators` 已使用某一版向量或 rerank 分数。
 
-至少用 20–50 条真实脱敏 Brief 比较 SQL-only、单路 dense、双路 RRF、RRF+rerank；硬条件违规必须为 0，三个候选模型按同一冻结样本达到既定 80% 媒介满意率后再定模型与参数。失败时关闭服务端 feature flag 回到 SQL-only，不改插件、不回滚 MySQL。
+`spec/algorithms.json` 也把模型、维度、Top-K、RRF 参数和 reranker 标为待评估或未启用。旧文档中出现的 DashScope、1024 维、具体 Collection 名等，最多是历史实施素材，**不是当前已批准的生产参数**。
+
+## 当前路线与非路线
+
+- 当前路线：完善一套 Qdrant 内部能力，先在 MySQL 硬筛出的允许集合内召回，回源复核后再返回业务候选。
+- 非路线：并行建设 DashVector。旧 DashVector 设计保留为历史资料，不能据此采购、开发或切流。
+
+相关说明：
+
+- [面向使用者的迁移说明](VECTOR_QUERY_TOOL_MIGRATION_GUIDE.md)
+- [Qdrant 接入前的实施与验收清单](VECTOR_SEARCH_RERANK_IMPLEMENTATION_PLAN.md)
+- [Qdrant Cloud 准备指南（待批准的运维方案）](QDRANT_CLOUD_MIGRATION_GUIDE.md)
+- [历史 DashVector 方案（不执行）](VECTOR_SERVER_MIGRATION_AND_TOOL_DESIGN.md)
+
+## 什么时候可以把状态改成“可用”
+
+至少要同时拿到以下证据：
+
+1. 从统一远程 endpoint 的真实 `search_creators` / `rank_creators` 响应中，看到 `retrieval_mode`、`degraded_reason` 和 MySQL 回源的 `provenance`；
+2. 用冻结的脱敏需求集比较 SQL-only 与候选向量方案，且硬条件违规为 0；
+3. 记录模型、Collection、索引版本、延迟、成本和降级原因；
+4. Qdrant、embedding 或 rerank 故障时，确认结果会明确退回 `sql-only`，而不是伪造向量结果；
+5. 由业务和运维共同确认上线阈值及回滚方式。
+
+在这些证据齐全前，产品状态应保持为“影子能力 / 待集成验收”。

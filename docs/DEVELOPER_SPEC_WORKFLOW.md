@@ -1,122 +1,121 @@
-# 人类开发者 Spec-Driven Development 使用手册
+# 开发者使用手册：怎样安全地改这个项目
 
-第一次了解项目先读 `docs/README.md`、`docs/PROJECT_MAP.md` 和 `docs/EVOLUTION.md`；本手册只说明如何安全修改。
+这份手册面向人工开发者。第一次接手时，建议按[文档导航](README.md) → [项目地图](PROJECT_MAP.md) → [集成与上线就绪](integration-readiness.md)的顺序读；需要判断字段或流程时，再回到根目录 `spec/`。
 
-## 1. 从哪里打开项目
+## 1. 先认识当前边界
 
-只把 Git 主工作树当作长期项目。`../YPmcn-worktrees/` 是临时隔离空间，里面每个目录对应某个任务分支；它们不是第二个项目，也不应成为发布或日常编辑入口。
+项目根目录是唯一长期入口。`YPmcn/` 是同一仓库内可发布的 OpenClaw/YP 插件组件，不是另一份项目；临时 worktree 只是隔离任务的工作空间，不能成为新的事实源或发布入口。
 
-`YPmcn/` 是仓库内的可发布 OpenClaw 插件组件，不是另一个 Git 项目。保留组件边界可以维持 npm 构建与发布结构，同时由根目录统一治理 Spec、测试和产物。
-
-## 2. 目录职责
+当前系统分三层：
 
 ```text
-project/
-├── spec/          # 唯一已批准机器契约
-├── changes/       # 需求、提案、影响分析和决策
-├── src/           # 根级共享边界，当前无独立运行时
-├── tests/         # 仓库级契约、集成和发布测试
-├── packages/      # staging 与 tgz 构建产物
-├── docs/          # 使用、架构和流程文档
-├── fix-logs/      # 重要故障根因与预防经验
-├── YPmcn/         # 可发布 Skill/Hook 插件组件
+已批准 Spec：定义应该怎样工作
+        ↓
+YPmcn 插件：提示、确定性校验、本地编排投影
+        ↓
+远端 MCP / MySQL：真实业务读写与外发结果
 ```
 
-| 目录 | 修改规则 |
-|---|---|
-| `spec/` | 仅通过已批准 Change Proposal 修改 |
-| `changes/` | 可创建和追加决策证据，不回写已发布历史 |
-| `src/`、组件源码 | 仅按已批准 Spec 和任务路径边界修改 |
-| `tests/` | 随变更同步更新，禁止弱化 |
-| `packages/` | 自动生成，不手工编辑 |
-| `fix-logs/` | 重要问题闭环后追加 |
+最重要的实践含义是：本地测试通过不代表远端可用；本地状态文件写入不代表业务写入成功。当前远端 Provider 与批准契约仍有两处硬差异，因此项目状态是 **NO-GO**，详见[集成与上线就绪](integration-readiness.md)和[运行时审计](MCP_TOOL_RUNTIME_AUDIT_2026-07-23.md)。
 
-`doc/` 只暂留 Algorithm Spec 引用的来源 Alias；它不是机器事实源。来源资料与 Spec 冲突时，先走 Change Proposal 更新 Spec，不让实现自行裁决。
+## 2. 目录应该怎样用
 
-## 3. 关键概念
+| 目录 | 用途 | 修改时的规则 |
+| --- | --- | --- |
+| `spec/` | 已批准的机器契约 | Tool/字段/阶段/错误/不变量改变时，先走 Change Proposal |
+| `changes/` | 需求、提案、影响分析与决策证据 | 新增或补充证据；不要改写已发布历史来伪造今天状态 |
+| `YPmcn/` | Skill、Hook、工具参考与插件构建 | 按已批准契约做最小实现，不把业务事实塞进本地状态 |
+| `tests/` | 契约、集成、发布测试 | 与行为同步；禁止通过删断言把测试变绿 |
+| `scripts/` | 验证、文档同步、打包 | 尽量确定性和只读；生产副作用需明确授权 |
+| `docs/` | 当前说明、审计快照、历史方案 | 写清证据时间与范围，避免把计划写成现状 |
+| `packages/` | 生成的安装包 | 不手工编辑 |
+| `fix-logs/` | 可复用的故障闭环 | 记录根因、影响、验证和预防，而不是临时聊天摘录 |
 
-- Spec：定义系统应该是什么，入口是 `spec/manifest.json`。
-- Change Proposal：回答为什么改、改什么、不改什么、兼容性、验证、回滚和负责人。
-- Impact Analysis：确认 Database、MCP、Skill、Hook、Workflow、Error、Algorithm 和测试的连锁影响。
-- Contract Test：证明多个实现层对同一契约理解一致，防止 Contract Drift。
+`doc/` 若仍被个别 Spec 作为来源别名引用，只是来源材料，不是机器事实源。来源与 Spec 冲突时，先更新 Spec，不让代码自行裁决。
 
-## 4. 日常变更流程
+## 3. 哪些改动要先走提案
+
+以下任何一项变化，都先写/批准 Change Proposal 和 Impact Analysis，再动实现：
+
+- Tool 参数、返回、错误码、权限、写入/外发副作用；
+- 数据库字段、唯一性、幂等、迁移或主键语义；
+- 工作流阶段、恢复条件、是否能跳步；
+- Hook 的阻断条件或它保存的状态；
+- 算法输入输出或向量治理规则。
+
+纯文档错字、代码内部重构、日志或补测通常不用改对外 Spec，但仍要说明范围、运行相关验证。举例说，把文档中的 `manual_source_creators(requirement_id, target_count)` 更新为 `manual_source_creators(requirement_id, size)` 是文档修正；把 `size` 改成数字类型则是 MCP 契约变化。
+
+## 4. 推荐的日常流程
 
 ```text
 需求
-→ Change Proposal
+→ Change Proposal（需要时）
 → Impact Analysis
-→ Spec Approval
-→ 按依赖与文件所有权拆任务
-→ 独立 worktree 实施
-→ 自动验证
-→ 独立 Review
-→ Package Gate
-→ Release
+→ Spec 批准
+→ 按依赖拆成小任务
+→ 隔离工作区实施
+→ 最小直接验证
+→ Review
+→ 打包与发布门禁
 ```
 
-涉及字段、Tool、错误码、权限、Hook 阻断、阶段或算法输入输出时，Change Proposal 未批准前不启动正式实现。内部重构、日志、测试补充或文档错字通常不改对外 Spec，但仍需有界任务和验证。
+开始修改前先检查 `git status`。已有改动可能属于别的任务；除非明确授权，不覆盖、不重置、不顺手格式化无关文件。并行任务要分到不重叠的文件；数据库 → MCP → Hook/Skill → 集成测试这条真实依赖链仍按顺序推进。
 
-根 `npm ci` 会自动启用版本化 pre-commit hook。Spec 或正式 Change Proposal 完整暂存后直接提交，hook 会同步并暂存三份人类文档；正常流程不需要手动执行同步命令。若相关来源存在部分暂存、未暂存或未跟踪内容，hook 会拒绝提交，避免扩大提交范围。
+## 5. 理解当前 Hook 和外发行为
 
-需要提交前即时预览或修复时才运行：
+插件目前只有四个 Hook：
+
+| Hook | 当前职责 | 不应误解为 |
+| --- | --- | --- |
+| `before_prompt_build` | 准备 Brief、提示和本地编排状态 | 完整业务状态机或数据库写入 |
+| `before_tool_call` | 对特定 Brief/ID 做确定性守卫，阻止 shell 绕过 | 通用 Provider 授权器 |
+| `after_tool_call` | 根据真实结果更新本地投影 | 替 Provider 认定写入/外发成功 |
+| `session_end` | 清理过期本地状态 | 自动恢复或补偿业务事务 |
+
+`create_with_distributions` 当前每次都会先被插件拦下，并展示本地 `AskUserQuestion` 确认。用户明确确认后，最新未过期回执可跨对话轮次放行**下一次**调用一次；取消、拒绝、关闭或超时都不调用 Provider。当前实现消费该回执时不再比较下一次调用的参数，因此不能把它误当作长期或通用授权，新的外发尝试仍应重新确认。这个确认只证明“允许发起”，不证明“已经送达”：开发或联调仍应使用隔离测试机构/群，并只把 Provider 返回的逐机构 `sent` 明细作为发送成功证据。`sync_mcn_inquiry_status` 仅是同步证据，不能反推消息已经发出。
+
+## 6. 验证命令怎么选
+
+```bash
+# 干净工作树首次安装
+npm ci
+
+# 离线总门禁：契约、插件、测试、打包等
+npm run verify
+
+# 文档自动事实区块是否与 Spec 一致
+npm run verify:docs
+
+# 插件快速回归
+npm run test:fast
+
+# 源码插件装载检查
+npm run test:openclaw
+
+# 生成并扫描安装包
+npm run pack:yp
+
+# 只读检查生产 Provider 的输入契约
+npm run verify:provider:prod
+```
+
+这些命令不是同一种“通过”。例如 `npm run verify` 通过，只能说明仓库离线门禁通过；`npm run verify:provider:prod` 当前发现 schema 不兼容时会失败，这正是阻止上线的有效证据。不要通过放宽本地 Schema、伪造响应或跳过检查来换取绿色结果。
+
+真实 E2E 还需要单独条件：隔离测试数据、不会误发给真实机构的通道、可回收方案、操作授权和原始响应的脱敏留存。缺任一项时，写 `BLOCKED`，不要把 Mock 成功写成生产成功。
+
+## 7. 文档和提交前检查
+
+完整暂存的 Spec 或正式 Change Proposal 会触发 pre-commit，同步 `docs/README.md`、`docs/PROJECT_MAP.md`、`docs/EVOLUTION.md` 中的机器事实区块。需要预览或修复时可执行：
 
 ```bash
 npm run docs:sync
+npm run verify:docs
 ```
 
-同步逻辑只更新三份人类文档中的机器事实区块。自动提交后仍要人工检查结构解释、原则和演进原因是否需要调整，再运行只读 `npm run verify:docs` 并进入完整验证。
+脚本只能检查自动区块；叙事是否过时仍要人工核对。尤其要检查版本号、远端兼容状态、外发确认语义、工具参数名和“计划/已完成”的措辞。
 
-## 5. 任务与并行
+## 8. 什么时候可以发布
 
-日常任务只需明确目标、允许/禁止路径、验收条件和最小验证命令，不创建额外任务状态文件。
+发布不是“构建成功”。最低顺序是：Spec 已批准 → 实现完成 → 相邻测试通过 → Review 完成 → 安装包通过 → 远端兼容与隔离 E2E 有证据 → 发布批准。
 
-- Fast 由 Claude Code 直接完成。
-- Standard 可将一个小而明确的实现任务交给 Codex，最终由 Claude Code 验收和提交。
-- Critical 使用隔离 worktree，并由 OpenCode 独立只读验证一次。
-
-只有以下条件全部满足才并行：
-
-- 基于同一已批准 Spec。
-- 不改同一文件或同一契约定义。
-- 一个任务的输出不是另一个任务的输入。
-- 各自有独立 worktree、分支和验证命令。
-
-Spec → Database → MCP → Hook/Skill → 集成测试 → Package 等真实依赖保持串行。普通开发不使用 Workflow、跨 Session 状态机、JSONL 或验证证据目录。
-
-## 6. 测试门禁
-
-每次变更评估 Unit、Contract、Integration、E2E、Regression 和 Migration Test。Bug 修复顺序固定为：复现 → 失败测试 → 最小修复 → 测试转绿 → 相邻回归 → Fix Log。
-
-联调遵循“首个失败层停止”的成本顺序：
-
-1. `npm run test:fast`：本地 Hook 与真实 stdio MCP 协议。
-2. `npm run test:openclaw`：YP 内置 OpenClaw 在临时状态目录中直接装载源码 Plugin/Skill。
-3. `npm run test:headless`：合并前串联前两层。
-4. `npm run pack:yp` 后进入 YP Action UI：只验证安装器、配置同步、桌面交互与重启持久化。
-
-前一层失败时直接修复，不通过重新打包或 UI 重试定位。Headless 测试不复用正式 YP Action 配置，不调用生产写 Tool。
-
-```bash
-# 从干净工作树一次安装根包、插件和向量 MCP 的锁定依赖
-npm ci
-
-# 仓库离线门禁
-npm run verify
-
-# 生成并扫描发布包
-npm run pack:yp
-
-# 生产 provider 只读兼容性门禁
-npm run verify:provider
-```
-
-根 `package.json` 将 `YPmcn` 声明为 npm workspace，根 `package-lock.json` 是统一安装图。`npm run verify` 不隐式安装依赖；全新工作树先执行一次根 `npm ci`。
-
-构建成功不等于工作流正确；契约、集成、发布包和生产外部证据是独立门禁。本地测试不能作为生产成功证据。
-
-## 7. Review 与发布
-
-Reviewer 检查 Change Proposal、Impact Analysis、Spec 同步、跨层一致性、兼容性、Migration、权限/数据风险、测试覆盖和无关修改。实现者与 Verifier 使用不同模型或上下文链路。
-
-发布必须依次满足：Spec Approved → Implementation Complete → Tests Passed → Reviewer Approved → Package Verified → Release Approved。任何关键门禁失败时保持阻断，不通过降低 Schema、跳过测试或恢复 Mock 成功来换取绿色状态。
+当前阶段不应把包发布到生产：Provider 输入契约尚未对齐、稳定成功出参和生产级恢复/并发证明不足，算法定义也尚未外部验证。若要解除 NO-GO，应逐条补证据，而不是降低门槛。
