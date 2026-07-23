@@ -1088,11 +1088,31 @@ describe("YP Action native hooks", () => {
     await recordTool("AskUserQuestion", askInput, {
       content: [{ type: "text", text: `${askInput.questions[0].question}: 确认发送` }],
     }, {});
+    const executionToolCallId = "call-unscoped-send-execute";
     assert.equal(await hooks.get("before_tool_call")({
       toolName: "mcp__ypmcn__create_with_distributions",
       params,
-      toolCallId: "call-unscoped-send-execute",
+      toolCallId: executionToolCallId,
     }, {}), undefined);
+    await recordTool(
+      "mcp__ypmcn__create_with_distributions",
+      params,
+      {
+        success: true,
+        data: {
+          project_id: "project-unscoped-send",
+          created: [{ supplier_id: "supplier-1", notification_status: "sent" }],
+        },
+        error: null,
+      },
+      {},
+      executionToolCallId,
+    );
+
+    const state = JSON.parse(readFileSync(globalStateFile, "utf8"));
+    assert.equal(state.confirmations[state.latest_external_confirmation_id].status, "consumed");
+    assert.equal(state.workflow.distribution_send_evidence_status, "valid");
+    assert.equal(state.workflow.project_id, "project-unscoped-send");
   });
 
   it("permits exactly one concurrent unscoped tool call for an approved global receipt", async () => {
@@ -1266,7 +1286,7 @@ describe("YP Action native hooks", () => {
       "call-unverified-recipient",
     );
     assert.equal(unknownRecipient.block, true);
-    assert.match(askInputFrom(unknownRecipient).questions[0].question, /1\. 星图文化\n2\. 名称未提供/);
+    assert.match(askInputFrom(unknownRecipient).questions[0].question, /1\. 星图文化\n2\. supplier-unverified/);
 
     const staleRequirement = await guard(
       "mcp__ypmcn__create_with_distributions",

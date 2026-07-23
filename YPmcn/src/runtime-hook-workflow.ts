@@ -2625,7 +2625,7 @@ export function renderLocalWorkflowContext(rootDir: string): string {
 
 function selectedRecipientNames(input: Json, workflow: Json): string[] | undefined {
   if (!Array.isArray(input.supplierIds) || input.supplierIds.length === 0) return [];
-  const unnamed = () => input.supplierIds.map(() => "名称未提供");
+  const unnamed = () => input.supplierIds.map((id: unknown) => String(id));
   if (!text(input.requirement_id) || !text(workflow.mcn_directory_requirement_id_sha256)) return unnamed();
   if (sha256Text(input.requirement_id.trim()) !== workflow.mcn_directory_requirement_id_sha256) return undefined;
   if (!Array.isArray(workflow.mcn_recipient_directory)) return unnamed();
@@ -2638,7 +2638,7 @@ function selectedRecipientNames(input: Json, workflow: Json): string[] | undefin
     }
   }
   return input.supplierIds.map((supplierId: unknown) =>
-    text(supplierId) ? namesBySupplierHash.get(sha256Text(supplierId.trim())) ?? "名称未提供" : "名称未提供"
+    text(supplierId) ? namesBySupplierHash.get(sha256Text(supplierId.trim())) ?? String(supplierId) : String(supplierId)
   );
 }
 
@@ -2709,7 +2709,7 @@ function externalSendQuestion(input: Json, summary: Json): string {
       ? recipientNames.map((name: string, index: number) => `${index + 1}. ${name}`)
       : Array.from(
           { length: Number(summary.supplier_count) || 0 },
-          (_, index) => `${index + 1}. 名称未提供`,
+          (_, index) => `${index + 1}. （未获取名称）`,
         )),
     "",
     "回填字段",
@@ -2791,6 +2791,9 @@ function authorizeExternalSend(
   toolCallId?: string,
   scopeAvailable = true,
 ): Json | undefined {
+  // Webchat does not currently provide a stable before_tool_call session key.
+  // Keep that confirmation entirely in the plugin-owned global store instead of
+  // treating a session-scoped receipt as proof for an unscoped invocation.
   const selected = scopeAvailable ? store(rootDir) : globalStore(rootDir);
   const locked = withStoreLock(selected.path, (current) =>
     authorizeExternalSendInStore(input, toolCallId, current, scopeAvailable)

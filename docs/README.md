@@ -1,25 +1,41 @@
-# 人类入口
+# 文档导航：先分清三件事
 
-这组文档只帮助人快速理解和检查项目，不替代根 [`spec/`](../spec/README.md)。
+这里的 `docs/` 是给参与项目的人看的说明书：它回答“现在是什么状态、为什么这样做、下一步怎么判断”。它不替代根目录的 [`spec/`](../spec/README.md)：Spec 才是字段、工具、流程和错误码的正式机器契约。
+
+阅读时请始终区分下面三层。很多误判都来自把其中两层混为一谈。
+
+| 层次 | 它回答的问题 | 当前例子 |
+| --- | --- | --- |
+| 批准契约 | 系统**应该**怎样工作？ | `mvp-v2` 已批准；Host 使用 `mcp__ypmcn__<tool>` 调业务工具。 |
+| 本地插件 | 仓库里的代码**已经做了什么**？ | 当前工作树的根和组件 manifest 都是 `3.4.25`；插件有 4 个 Node Hook，并保存本地编排投影。 |
+| 远端 Provider | MCP **实际发布了什么**？ | 2026-07-23 审计到 15 个工具，但两个关键入参契约不兼容，且未发布 outputSchema。 |
 
 ## 先看结论
 
-- YPmcn 是一个契约优先的媒介助手仓库：Host 业务工具只接受 `mcp__ypmcn__<contract-tool>`，provider `tools/list` 保持 bare tool name；插件负责 Skill/Hook，远程 provider 负责真实业务写入，并在 `search_creators` / `rank_creators` 内部消费向量能力；独立 Vector MCP 不进入插件包。
-- P0 与首批 P1 已收口为 Requirements、Database、MCP、Workflow、Error 和 JSON Schema 契约；这只是目标定义，不代表 provider、数据库或 Hook/Skill 已实现。
-- 离线仓库可验证，2026-07-18 开发 MySQL 已真实只读核对；独立后端工作树已实现 ledger、权威 inquiry sync 和 Search/Rank 向量融合并通过本地回归，但尚未部署到远程开发机，也没有真实 Agent E2E，因此当前仍是 **NO-GO**。
-- 唯一项目根就是当前 Git 仓库；`YPmcn/` 是组件，临时 worktree 不是第二个项目。
+- YPmcn 帮媒介人员把需求确认、达人搜索、机构询价、机构回填、达人排序和提报串起来。插件负责提示、确定性前置校验和本地流程记录；远端 MCP/数据库才负责业务事实与真实写入。
+- 正式契约 Profile 是 `mvp-v2`，状态是 `approved`。这表示“目标规则已经批准”，**不表示线上已经可发布**。
+- 当前仍是 **NO-GO**：数据库只有开发环境观察证据，算法契约仍是 `external-unverified`；更关键的是，远端 Provider 与批准契约在 `create_submission_batch`、`get_workflow_state` 上存在硬性入参差异。
+- 插件现在有 4 个生命周期 Hook，不是 4 套业务流程。它们只负责提示前准备、调用前守卫、调用结果记录和会话清理。业务顺序与业务成功不能只看本地状态文件。
+- `create_with_distributions` 是当前声明的直接外发调用：插件不再要求本地二次确认。只有 Provider 返回“逐机构明确已发送”的真实明细，才可以说企微已发出。
+
+一个实用判断：如果本地测试通过，但远端 Provider 的 schema 检查失败，那么本地改动可以说“已验证”，却不能说“已上线”。
 
 ## 1 分钟阅读顺序
 
 | 你想知道 | 先读 |
 | --- | --- |
-| 项目由什么组成、去哪改 | [项目地图](PROJECT_MAP.md) |
-| 为什么形成现在的结构 | [演进历程](EVOLUTION.md) |
-| 当前能否上线 | [集成与上线就绪](integration-readiness.md) |
-| 人工如何改项目 | [开发流程](DEVELOPER_SPEC_WORKFLOW.md) |
-| Agent 如何执行 | [Agent 流程](AGENT_SPEC_WORKFLOW.md) |
+| 项目由什么组成、代码/契约该去哪找 | [项目地图](PROJECT_MAP.md) |
+| 当前能否联调或上线、还缺什么 | [集成与上线就绪](integration-readiness.md) |
+| 远端 MCP 真实接受什么参数、哪些不能调用 | [远端 MCP 运行时审计](MCP_TOOL_RUNTIME_AUDIT_2026-07-23.md) |
+| 一次典型业务流程怎样走 | [高效联调测试指南](高效联调测试指南.md) |
+| 人工如何安全修改项目 | [开发者工作流](DEVELOPER_SPEC_WORKFLOW.md) |
+| 执行 Agent 的边界和验收方式 | [Agent 工作流](AGENT_SPEC_WORKFLOW.md) |
+| 为什么有这些历史方案、哪些已经失效 | [演进历程](EVOLUTION.md) |
+| 向量检索现在走哪条路线 | [向量当前状态](REMOTE_VECTOR_DATABASE_STATUS_2026-07-17.md) |
 
-## 当前事实
+## 当前机器事实
+
+下面这块由脚本从 Spec 生成。它适合快速发现契约漂移，但不能替代上面的“当前状态”判断：例如 `development-observed` 只说明开发库有观察证据，并不等于生产证明。
 
 <!-- human-docs:spec-summary:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
@@ -36,20 +52,34 @@
 | Spec 摘要 | `sha256:f3584e81f3a927b8113acd498a49c47b415ec08797788f1a25858c1c7ef93c45` |
 <!-- human-docs:spec-summary:end -->
 
-## 五条原则
+## 怎样把文档用在实际工作里
 
-1. 安全与数据完整性优先于所有规则。
-2. 已批准 Spec 优先于 Change Proposal、测试、实现和 Agent 推断。
-3. 契约变更先改 Spec，再按 Database → MCP → Hook/Skill → Test → Package 实施。
-4. 本地测试和模拟成功不是生产证据；provider 不兼容时保持 `integration_required`。
-5. 完整 Brief、payload、凭据、生成物和旧实现不进入长期源码。
+以“给某需求补一位达人”为例：
 
-## 人类最常用的命令
+1. 先在[远端 MCP 运行时审计](MCP_TOOL_RUNTIME_AUDIT_2026-07-23.md)和工具卡中确认 `manual_source_creators` 当前接受 `requirement_id` 与字符串 `size`，不要从旧方案里的 `target_count` 猜参数。
+2. 插件只接受刚刚由 `validate_requirement` 返回的 32 位 `data.id`；`demand_id` 和 `demand_version` 都不是这个 Tool 的替代品。
+3. 如果在这之前已经开始 `search_creators`，就必须先完成当前 MCN 分支，不能跳到人工拓展绕过证据链。
+4. 调用结果、Provider schema 检查和本地测试分别记录。它们回答的是不同问题，不能互相代替。
+
+历史计划、故障记录和迁移方案可以帮助理解来路，但标题中标有“历史”“待验证”或日期快照的内容，不能直接当作今天的操作说明。
+
+## 常用命令与含义
 
 ```bash
+# 首次进入干净工作树：安装根工作区依赖
 npm ci
+
+# 离线契约、插件和发布包检查
 npm run verify
+
+# 只检查 docs 中自动生成的事实区块是否与 Spec 一致
+npm run verify:docs
+
+# 只读检查远端 Provider 输入契约；当前发现差异时失败是预期证据，不可忽略
+npm run verify:provider:prod
+
+# 生成并扫描可安装包
 npm run pack:yp
 ```
 
-正常不需要手动同步：完整暂存 Spec 或正式 Change Proposal 后直接提交，pre-commit hook 会更新并纳入三份文档。`npm run docs:sync` 仅用于提交前即时预览或修复；完成前仍要人工扫一遍叙事，并执行只读 `npm run verify:docs` 和完整验证。
+正常提交时，完整暂存的 Spec 或正式 Change Proposal 会触发 pre-commit hook 更新三个自动事实区块。`npm run docs:sync` 仅用于提交前预览或修复；脚本无法判断一段中文叙述是否过时，所以仍要人工检查本页所说的三层证据。
