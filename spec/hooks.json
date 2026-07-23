@@ -42,7 +42,7 @@
     "owns": [
       "external_send_confirmation",
       "external_send_cross_turn_callback_receipt",
-      "external_send_request_fingerprint_binding",
+      "external_send_latest_approved_receipt_consumption",
       "provider_send_shell_bypass_blocking",
       "one_time_confirmation_fingerprints",
       "manual_sourcing_fresh_requirement_receipt_binding",

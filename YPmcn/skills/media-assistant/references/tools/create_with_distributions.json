@@ -39,7 +39,7 @@
     "wechat_notification_message 必须与 description 使用完全相同的字符串。requirement_id 必须沿用本执行单元已完成 search_creators 和 rank_mcns 的同一 32 位主键；字段选择 callback 后禁止重新 validate_requirement、替换新 ID 或回退旧 ID。",
     "requirement_ID 与 colums 是业务误拼，实际参数必须写 requirement_id 与 columns。",
     "首次调用只做本地预检；AskUserQuestion 必须使用 EXTERNAL_SEND_CONFIRMATION_REQUIRED 中的原始参数，以多行正文展示最近一次成功 rank_mcns 映射出的 MCN 名称、字段和完整消息；名称无法全部核对时不得发送。该本地一次性回执跨 AskUserQuestion 的用户响应边界保留 10 分钟，Provider 在此阶段不会被调用。",
-    "每次实际调用（包括每个逐机构 fallback）都必须先弹出本次参数对应的 AskUserQuestion；只有返回“确认发送”才可在回调到达时以完全相同参数调用。回调可以在后续 assistant turn 到达，必须消费同一未过期回执一次，不得因 turn 切换重开弹窗。宿主丢失会话上下文时，只能使用插件拥有的全局无会话回执，绝不得读取或授权会话回执。拒绝、关闭、超时、弹窗改写、参数变化或缺少已弹窗且已确认回执，均不得触达 Provider，也不得把 after-tool 结果记为发送成功。",
+    "每次实际调用（包括每个逐机构 fallback）都必须先弹出本次参数对应的 AskUserQuestion；返回“确认发送”后，最新未过期回执直接放行下一次调用一次，不再校验后续参数是否相同。回调可以在后续 assistant turn 到达，不得因 turn 或参数调整重开弹窗。宿主丢失会话上下文时，只能使用插件拥有的全局无会话回执，绝不得读取或授权会话回执。拒绝、关闭、超时、弹窗改写或缺少已弹窗且已确认回执，均不得触达 Provider，也不得把 after-tool 结果记为发送成功。",
     "多供应商调用返回失败只表示该批无法作为一次群聊匹配整体完成，不得据此宣称所有供应商均发送失败；必须保留回执中已有的逐供应商 sent/unbound 证据。",
     "若批次失败能够排除未知写入结果，则将已明确未绑定的机构记为 unbound，其余仍为 pending 的 supplierIds 拆成单项逐个发送，保持其他参数不变，并在每个单项发送前重新弹出最终确认；禁止将剩余机构再次组成多供应商批次。只发送 pending 机构，不得重发 sent 或 unknown 机构。",
     "成功回执必须逐机构返回可关联 supplier_id 的明确发送状态；只有逐机构状态 sent 证明已发送。Provider 返回的机构 ID 若错误包含连字符，读取时只删除 '-'，其他字符不变，再与请求 supplierIds 匹配。顶层 sent_supplier_ids/sent_suppliers 等汇总名单、通用 success 或请求名单都不是发送明细。pending 不算已发送，failed/skipped 仅在 notification_error 明确说明缺少群聊绑定时才算未绑定。",

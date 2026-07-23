@@ -17,7 +17,7 @@ description: "Use for YPmcn requirement parsing, manual creator sourcing, audita
 - 字段选择网页只允许用户操作。每轮 MCN 流程最多调用一次 `select_inquiry_form_fields`，调用后等待用户在网页选择并提交；禁止代选、预选、推断或提交字段，也禁止在等待、成功、取消、超时或无效 callback 后重复打开网页。
 - Split same-platform account directions into independent execution units; keep one `requirement_id` through search, rank, field selection, send, and sync. Follow the Tool references for mapping and message coverage.
 - `sync_mcn_inquiry_status` 只允许在本轮 `create_with_distributions` 实际成功响应逐机构返回匹配需求、项目和机构集合的 `sent` 明细后调用；状态机记录授权、阻断和完成顺序。sync 只证明询价同步，绝不证明企微已发送。
-- 每次 `create_with_distributions` 实际发送前（包括逐机构 fallback）都必须弹出原生“企微外发确认”，且仅在用户对完全相同参数明确选择“确认发送”后执行。状态机必须依次记录 `popup_required/approved/in_flight/consumed`；没有匹配的“已弹窗且已确认”回执时，即使收到 after-tool 成功结果也不得记为企微发送成功。If host context disappears, create and use only a plugin-owned global no-session receipt; never reuse a session receipt.
+- 每次 `create_with_distributions` 实际发送前（包括逐机构 fallback）都必须弹出原生“企微外发确认”；“确认发送”后放行下次调用一次，不校验参数。状态机必须依次记录 `popup_required/approved/in_flight/consumed`；没有匹配的已确认回执时，即使收到 after-tool 成功结果也不得记为企微发送成功。If host context disappears, create and use only a plugin-owned global no-session receipt; never reuse a session receipt.
 - 多平台按原文及差异字段拆单；共用 Ask，不问先后或中途停。
 - Endpoint schema 优先，并与根 `spec/manifest.json` 指向的正式契约核对；必需 Tool 缺失、契约冲突或证据不足即 `integration_required`，不得回退旧参数。
 - 每次调用前先读 `references/tools/<tool>.json`，只传其中字段；只有实际 MCP 成功响应才是后续证据。

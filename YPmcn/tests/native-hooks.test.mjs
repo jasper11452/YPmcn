@@ -696,7 +696,7 @@ describe("YP Action native hooks", () => {
     assert.equal(state.workflow.distribution_sent_detail_count, 2);
   });
 
-  it("keeps one external-send receipt valid across the AskUserQuestion turn boundary", async () => {
+  it("lets the latest approved external-send receipt authorize one changed next call across the AskUserQuestion turn boundary", async () => {
     const prepared = await requestConfirmation(
       distributionParams({ requirement_id: requirementId(92) }),
       DEFAULT_CONTEXT,
@@ -731,14 +731,25 @@ describe("YP Action native hooks", () => {
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     const receipt = state.confirmations[confirmationId];
     assert.equal(receipt.status, "approved");
+    assert.equal(state.latest_external_confirmation_id, confirmationId);
     assert.equal(typeof receipt.callback_received_at_ms, "number");
     assert.equal(typeof receipt.approved_at_ms, "number");
+    const approvedRequestFingerprint = receipt.request_fingerprint;
+    const changedParams = {
+      ...prepared.params,
+      description: "您好，这是用户确认后更新的企微消息。",
+      wechat_notification_message: "您好，这是用户确认后更新的企微消息。",
+    };
     assert.equal(await guard(
       "mcp__ypmcn__create_with_distributions",
-      prepared.params,
+      changedParams,
       "call-cross-turn-execute",
       prepared.context,
     ), undefined);
+    state = JSON.parse(readFileSync(stateFile, "utf8"));
+    assert.equal(state.confirmations[confirmationId].status, "in_flight");
+    assert.equal(state.confirmations[confirmationId].approved_request_fingerprint, approvedRequestFingerprint);
+    assert.notEqual(state.confirmations[confirmationId].execution_request_fingerprint, approvedRequestFingerprint);
   });
 
   it("refuses to record a successful send result without a matching final popup confirmation", async () => {
@@ -1291,7 +1302,7 @@ describe("YP Action native hooks", () => {
     assert.match(revisedQuestion, /修改后的企微消息/);
   });
 
-  it("does not authorize cancellation, host denial, tool error, a modified popup, or changed parameters", async () => {
+  it("does not authorize cancellation, host denial, tool error, or a modified popup", async () => {
     const cancelled = await requestConfirmation(distributionParams({ requirement_id: requirementId(22) }));
     await answerExternalConfirmation(cancelled, "取消发送");
     askInputFrom(await guard(
@@ -1332,35 +1343,6 @@ describe("YP Action native hooks", () => {
       "call-modified-retry",
     ));
 
-    rmSync(join(tempDir, "state"), { recursive: true, force: true });
-    const first = await requestConfirmation(distributionParams({
-      supplierIds: ["supplier-1", "supplier-2"],
-    }), DEFAULT_CONTEXT, "call-original", ["星图文化", "青禾传媒"]);
-    await answerExternalConfirmation(first);
-    await recordMcnRecipients(
-      { ...first.params, supplierIds: ["supplier-2"] },
-      DEFAULT_CONTEXT,
-      ["青禾传媒"],
-    );
-    const changed = await guard(
-      "mcp__ypmcn__create_with_distributions",
-      { ...first.params, supplierIds: ["supplier-2"] },
-      "call-changed",
-    );
-    const changedQuestion = askInputFrom(changed).questions[0].question;
-    assert.match(changedQuestion, /发送对象（1 家）\n1\. 青禾传媒/);
-    assert.doesNotMatch(changedQuestion, /1\. 星图文化/);
-    state = JSON.parse(readFileSync(stateFile, "utf8"));
-    assert.ok(Object.values(state.confirmations).some((item) =>
-      item.status === "denied" && item.resolution === "superseded"
-    ));
-    const staleOriginal = await guard(
-      "mcp__ypmcn__create_with_distributions",
-      first.params,
-      "call-stale-original",
-    );
-    assert.equal(staleOriginal?.block, true);
-    assert.match(staleOriginal.blockReason, /机构集合.*不一致/);
   });
 
   it("blocks blind resend after incomplete or unknown write evidence", async () => {

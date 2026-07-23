@@ -24,9 +24,9 @@ select_inquiry_form_fields(platform) → 网页选择字段
 - Hook 只保存完整客户 Brief 的短期哈希来拒绝重试前缀、静默改写和多平台拆单重构，不保存 Brief 正文。
 - 本地 JSON 是 Agent 编排状态权威；除上述一次性拓展达人 ID 与企微外发确认外，Hook 不对普通 Tool 做严格顺序/参数阻断。Provider 状态仅用于业务事实和未知写对账。
 - shell、PowerShell、curl 直连 provider 的企微外发接口会被阻断，避免绕过最终确认。
-- 宿主未向企微外发 Hook 传入会话上下文时，首次调用仍生成本地确认；确认后只允许唯一、未过期、参数指纹完全匹配的一次性回执继续执行，多个匹配保持阻断。
-- provider 发送调用会触发 Native Approval；“确认发送”回调可跨用户响应边界到达，Hook 保留同一未过期本地回执并只允许原参数继续一次，Reject/超时/取消不触达 Provider。
-- 参数变化、重放或未知写结果都必须产生新的 Native Approval；唯一例外是 Provider 明确无写入并指出未绑定机构时，只缩减这些机构的续发可继承原确认。
+- 宿主未向企微外发 Hook 传入会话上下文时，首次调用仍生成本地确认；确认后只允许最新、未过期的一次性全局无会话回执继续执行一次。
+- provider 发送调用会触发 Native Approval；“确认发送”回调可跨用户响应边界到达，Hook 保留最新未过期本地回执并直接允许下一次调用一次，不再校验后续参数，Reject/超时/取消不触达 Provider。
+- 重放或未知写结果都必须产生新的 Native Approval；参数调整在最新回执已 approve 时可直接消费该回执一次。Provider 明确无写入并指出未绑定机构时，只缩减这些机构的续发可继承原确认。
 - Hook 不记录客户 Brief、消息正文或完整 payload。
 
 ## Provider 状态

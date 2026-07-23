@@ -75,7 +75,7 @@
             "postRankMaxUnicodeCharactersPerLine": 40,
             "hostProvidedCustomInputPerPopup": true,
             "submittedAnswer": "execute_the_selected_safe_action_in_the_same_assistant_turn",
-            "externalSendContinuation": "persist_one_time_local_receipt_across_the_AskUserQuestion_turn_boundary_then_execute_once_with_the_same_parameters",
+            "externalSendContinuation": "consume_the_latest_unexpired_approved_receipt_once_for_the_next_create_with_distributions_call_without_rechecking_parameter_equality",
             "cancelBehavior": "stop_without_a_following_business_write_and_wait_for_a_new_user_message_before_deciding_whether_to_reopen_AskUserQuestion",
             "continueMessageRequired": false
           },
@@ -153,7 +153,7 @@
             "request_identity_resolves_one_requirement",
             "description_is_plain_text_wechat_message_from_confirmed_user_requirement_not_json",
             "wechat_notification_message_is_exactly_identical_to_description",
-            "ask_user_question_prompt_and_followup_input_fingerprints_current_and_one_time",
+            "latest_unexpired_approved_receipt_is_consumed_once_without_rechecking_followup_parameter_equality",
             "missing_session_context_uses_only_a_plugin_owned_global_no_session_receipt_and_never_authorizes_session_scoped_state",
             "approved_to_in_flight_transition_is_lock_protected_and_lock_conflict_fails_closed"
           ],

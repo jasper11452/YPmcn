@@ -141,7 +141,7 @@ describe("Spec governance", () => {
         "unfinished_explicit_platform_or_requirement_unit",
       ],
       submittedAnswer: "execute_the_selected_safe_action_in_the_same_assistant_turn",
-      externalSendContinuation: "persist_one_time_local_receipt_across_the_AskUserQuestion_turn_boundary_then_execute_once_with_the_same_parameters",
+      externalSendContinuation: "consume_the_latest_unexpired_approved_receipt_once_for_the_next_create_with_distributions_call_without_rechecking_parameter_equality",
       cancelBehavior: "stop_without_a_following_business_write_and_wait_for_a_new_user_message_before_deciding_whether_to_reopen_AskUserQuestion",
       continueMessageRequired: false,
     });

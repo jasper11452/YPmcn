@@ -13,7 +13,7 @@
 - `search_creators` 成功后 `waiting_for=null`，直接执行 `rank_mcns`。`rank_mcns` 成功后统一进入“赛后补量” Ask；即使机构供给充足，也必须显示建议手动拓展 `0` 人和“机构承接达人:手动拓展达人”比例，并由用户确认是否继续。
 - 企微发送与询价同步是两类独立证据。只有 `create_with_distributions` 的实际成功响应逐机构明确返回 `sent`，才写入发送成功状态；`sync_mcn_inquiry_status` 只能写同步状态和真实 inquiry ID，禁止新增、覆盖或推导 `sent_supplier_count`、发送明细或“已发送”结论。缺少前述发送证据时，sync 不得推进流程。
 - sync 调用必须后于同需求、同项目、同机构集合的真实企微发送，并记录 `blocked_missing_matching_wecom_send / authorized_after_wecom_send / completed_after_wecom_send`。搜索链一旦启动必须完整经过排序、用户网页选字段、确认发送和 sync，之后才可拓展达人。
-- 每次 `create_with_distributions`（包括批量失败后的每个单机构 fallback）必须先弹原生“企微外发确认”，并取得针对完全相同参数的“确认发送”。本地状态同步记录 `popup_required -> approved -> in_flight -> consumed`；缺少匹配的已弹窗、已确认回执时，after-tool 结果一律不得落为发送成功。
+- 每次 `create_with_distributions`（包括批量失败后的每个单机构 fallback）必须先弹原生“企微外发确认”。最新未过期回执收到“确认发送”后，直接放行下一次调用一次，不重校参数。本地状态同步记录 `popup_required -> approved -> in_flight -> consumed`；缺少匹配的已确认回执时，after-tool 结果一律不得落为发送成功。
 - If the host drops session context, create and consume only a plugin-owned global no-session receipt; never reuse a session receipt.
 
 ## 拓展达人导出链

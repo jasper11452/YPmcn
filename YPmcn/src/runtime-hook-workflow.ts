@@ -2618,7 +2618,7 @@ export function renderLocalWorkflowContext(rootDir: string): string {
     "Use this local phase/next_action instead of Provider workflow_state/allowed_actions for orchestration. Actual Tool results remain the authority for business facts and identifiers.",
     "Each inherited shared-field plus differing-field combination is an independent execution unit. Switching units suspends the previous unfinished unit locally; resume from the recorded unit next_action instead of Provider state.",
     "Human-in-the-loop rule: waiting_for=user requires an immediate native AskUserQuestion gate (or reflects an explicit user-selected pause), never a prose question. A deterministic next_action with no Ask gate continues in the same assistant turn without asking for 继续.",
-    "External-send exception: a confirmed 企微外发 AskUserQuestion callback may arrive in a later assistant turn. When the local receipt is approved and unexpired, call create_with_distributions once with the exact same parameters; do not reopen the popup because the turn changed.",
+    "External-send exception: a confirmed 企微外发 AskUserQuestion callback may arrive in a later assistant turn. When the latest local receipt is approved and unexpired, allow the next create_with_distributions call once without rechecking parameter equality; do not reopen the popup because the turn or parameters changed.",
     "Output rule: use Tool calls only until an allowed stop. Final text is allowed only for a terminal result, provider wait, terminal failure without safe recovery, or a user-cancelled popup; it must not ask, offer, or invite continuation.",
   ].join("\n");
 }
@@ -2757,7 +2757,7 @@ function confirmationRequiredResult(askInput: Json): Json {
       JSON.stringify(askInput),
       "</AskUserQuestionInput>",
       `AskUserQuestion 的提交回调可在后续 assistant turn 到达；本地一次性确认回执会在 ${EXTERNAL_SEND_RECEIPT_WINDOW} 内保持有效，切勿因回合切换重新生成确认。`,
-      `仅当回调结果为“${EXTERNAL_SEND_CONFIRM_LABEL}”时，立即用完全相同的 create_with_distributions 参数再调用一次；其他结果停止且不发送。`,
+      `仅当回调结果为“${EXTERNAL_SEND_CONFIRM_LABEL}”时，允许在 ${EXTERNAL_SEND_RECEIPT_WINDOW} 内直接执行下一次 create_with_distributions 一次；不因参数调整重开弹窗。其他结果停止且不发送。`,
     ].join("\n"),
   };
 }
@@ -2847,13 +2847,36 @@ function authorizeExternalSendInStore(
     );
   }
 
-  const approved = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
-    receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
-    receipt.status === "approved" && receipt.request_fingerprint === requestFingerprint &&
-    receipt.user_prompted === true && receipt.user_confirmed === true
+  const isApproved = (receipt: Json | undefined) => Boolean(
+    receipt &&
+    receipt.kind === "external_send" &&
+    EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
+    receipt.status === "approved" &&
+    receipt.user_prompted === true &&
+    receipt.user_confirmed === true
   );
+  const latestConfirmationId = text(current.data.latest_external_confirmation_id)
+    ? current.data.latest_external_confirmation_id.trim()
+    : undefined;
+  const latestConfirmation = latestConfirmationId
+    ? current.data.confirmations[latestConfirmationId] as Json | undefined
+    : undefined;
+  const approved = latestConfirmationId && isApproved(latestConfirmation)
+    ? [latestConfirmationId, latestConfirmation] as [string, Json]
+    : Object.entries<Json>(current.data.confirmations)
+      .filter(([, receipt]) => isApproved(receipt))
+      .sort(([, left], [, right]) => Number(right.approved_at_ms ?? 0) - Number(left.approved_at_ms ?? 0))
+      .at(0);
   if (approved) {
     const [id, receipt] = approved;
+    if (receipt.request_fingerprint !== requestFingerprint) {
+      receipt.approved_request_fingerprint ??= receipt.request_fingerprint;
+      receipt.execution_request_fingerprint = requestFingerprint;
+      receipt.execution_safe_summary = createSummary(input, current.data.workflow as Json);
+      receipt.approval_reused_for_changed_parameters = true;
+    }
+    receipt.request_fingerprint = requestFingerprint;
+    receipt.input_fingerprint = requestFingerprint;
     receipt.status = "in_flight" satisfies ConfirmationStatus;
     receipt.tool_call_id = toolCallId ?? null;
     receipt.updated_at_ms = Date.now();
@@ -3143,6 +3166,7 @@ function recordExternalSendDecisionInStore(event: Json, input: Json, current: Gu
   else delete receipt.approved_at_ms;
   receipt.updated_at_ms = now;
   current.data.confirmations[id] = receipt;
+  if (receipt.status === "approved") current.data.latest_external_confirmation_id = id;
   projectExternalConfirmation(current, id, receipt, receipt.status);
   save(current.path, current.data);
 }

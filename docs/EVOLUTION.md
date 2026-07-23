@@ -19,11 +19,12 @@
 <!-- human-docs:change-index:start -->
 <!-- 由 pre-commit hook 或 npm run docs:sync 生成；不要手工编辑本区块。 -->
 
-当前 Spec：`mvp-v2` · `sha256:5dc9605df9da867196b9dc45b6c16ebaaafc20c1323978661b0a80f70c7f9e57`
-变更记录摘要：`sha256:3b9ae0a79d8173e0812c021a4a63cc4b7eb166f70b8434ed5680c49b6c1e9141`
+当前 Spec：`mvp-v2` · `sha256:f3584e81f3a927b8113acd498a49c47b415ec08797788f1a25858c1c7ef93c45`
+变更记录摘要：`sha256:daf5e307afddc2d5a3dc3904f9dc402d9a96100fcbc78b063c45c33f1b3d1961`
 
 | 变更 | 状态 | 决策主题 |
 | --- | --- | --- |
+| CHG-2026-026 | `IMPLEMENTED_LOCAL_VERIFIED` | [企微外发最近确认直接续发](../changes/CHG-2026-026-last-approved-external-send.md) |
 | CHG-2026-025 | `IMPLEMENTED_LOCAL_VERIFIED` | [企微外发确认跨轮回执](../changes/CHG-2026-025-external-send-cross-turn-confirmation.md) |
 | CHG-2026-024 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.13 手动拓展证据链修正版](../changes/CHG-2026-024-release-3.4.13.md) |
 | CHG-2026-023 | `IMPLEMENTED_LOCAL_HOST_UNVERIFIED` | [发布 3.4.12 工具链路与状态机加固包](../changes/CHG-2026-023-release-3.4.12.md) |
