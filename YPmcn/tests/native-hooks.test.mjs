@@ -34,7 +34,7 @@ const manualCreatorResult = (suffix = "1") => ({
 
 const distributionParams = (overrides = {}) => {
   const description = overrides.description ??
-    "您好，现招募小红书达人参与测试项目。\n图文报价：5000元以内\n请协助推荐合适人选，谢谢。";
+    "项目：测试项目\n达人数量：1位\n图文报价：5000元以内\n提报截止：2026-07-30 18:00\n请协助推荐合适人选，谢谢。";
   return {
     requirement_id: requirementId(1),
     columns: [{ key: "creator_name", name: "达人名称" }],
@@ -73,7 +73,7 @@ async function recordMcnRecipients(params, context = DEFAULT_CONTEXT, recipientN
   const names = recipientNames ?? params.supplierIds.map((_, index) => `测试MCN ${index + 1}`);
   await recordTool(
     "mcp__ypmcn__validate_requirement",
-    { payload: { platform: "xiaohongshu", quantityTotal: 1 } },
+    { payload: { platform: "xiaohongshu" } },
     { success: true, data: { id: params.requirement_id }, error: null },
     context,
   );
@@ -101,6 +101,16 @@ async function recordMcnRecipients(params, context = DEFAULT_CONTEXT, recipientN
     },
     context,
   );
+  await recordTool(
+    "mcp__ypmcn__select_inquiry_form_fields",
+    { platform: "xiaohongshu" },
+    {
+      success: true,
+      data: { fields: params.columns },
+      error: null,
+    },
+    context,
+  );
 }
 
 function askInputFrom(result) {
@@ -122,6 +132,7 @@ async function requestConfirmation(
   toolCallId = "call-send",
   recipientNames,
 ) {
+  params = distributionParams(params);
   await recordMcnRecipients(params, context, recipientNames);
   const result = await guard("mcp__ypmcn__create_with_distributions", params, toolCallId, context);
   return { result, askInput: askInputFrom(result), params, toolCallId, context };
@@ -311,17 +322,18 @@ describe("YP Action native hooks", () => {
       ["mcp__ypmcn__validate_requirement", {
         payload: { rawMessagesJson: { originalBrief: UNRESOLVED_BRIEF } },
       }],
-      ["mcp__ypmcn__rank_mcns", { id: "any", platform: "xiaohongshu" }],
     ]) {
       assert.equal(await guard(toolName, params), undefined, toolName);
     }
+    const earlyRank = await guard("mcp__ypmcn__rank_mcns", { id: requirementId(99), platform: "xiaohongshu" });
+    assert.equal(earlyRank.errorCode, "INVALID_PHASE");
   });
 
   it("allows declared business Tools while guarding manual freshness and send confirmation", async () => {
     await hooks.get("before_prompt_build")({ prompt: UNRESOLVED_BRIEF, messages: [] }, DEFAULT_CONTEXT);
     for (const name of [...contract.requiredTools, ...contract.optionalTools]) {
       if ([
-        "select_inquiry_form_fields", "sync_mcn_inquiry_status", "rank_creators", "create_submission_batch",
+        "select_inquiry_form_fields", "rank_mcns", "sync_mcn_inquiry_status", "rank_creators", "create_submission_batch",
         "get_workflow_state",
       ].includes(name)) continue;
       let params = name === "create_with_distributions" ? distributionParams() : {};
@@ -374,12 +386,12 @@ describe("YP Action native hooks", () => {
     const sendExecutionId = "call-rank-warning-send-execute";
     assert.equal(await guard(
       "mcp__ypmcn__create_with_distributions",
-      sendParams,
+      preparedSend.params,
       sendExecutionId,
     ), undefined);
     await recordTool(
       "mcp__ypmcn__create_with_distributions",
-      sendParams,
+      preparedSend.params,
       {
         success: true,
         data: {
@@ -1266,6 +1278,7 @@ describe("YP Action native hooks", () => {
       ...prepared.params,
       supplierIds: ["supplier-2"],
       description: "您好，这是修改后的企微消息。",
+      wechat_notification_message: "您好，这是修改后的企微消息。",
     };
     await recordMcnRecipients(revisedParams, DEFAULT_CONTEXT, ["青禾传媒"]);
     const revised = await guard(
@@ -1350,12 +1363,12 @@ describe("YP Action native hooks", () => {
     assert.match(staleOriginal.blockReason, /机构集合.*不一致/);
   });
 
-  it("requires a fresh AskUserQuestion confirmation after success or unknown result", async () => {
+  it("blocks blind resend after incomplete or unknown write evidence", async () => {
     for (const [index, eventResult] of [
       [0, { success: true, data: {}, error: null }],
       [1, undefined],
     ]) {
-      const params = distributionParams({ requirement_id: `requirement-replay-${index}` });
+      const params = distributionParams({ requirement_id: requirementId(80 + index) });
       const prepared = await requestConfirmation(params, DEFAULT_CONTEXT, `call-replay-${index}`);
       await answerExternalConfirmation(prepared);
       const executionId = `call-replay-${index}-execute`;
@@ -1370,11 +1383,13 @@ describe("YP Action native hooks", () => {
           error: "connection lost",
         }, DEFAULT_CONTEXT);
       }
-      askInputFrom(await guard(
+      const retry = await guard(
         "mcp__ypmcn__create_with_distributions",
         params,
         `call-replay-${index}-next`,
-      ));
+      );
+      assert.equal(retry.block, true);
+      assert.match(retry.blockReason, /requires the active requirement|already in flight/);
       rmSync(join(tempDir, "state"), { recursive: true, force: true });
     }
   });
@@ -1787,6 +1802,15 @@ describe("YP Action native hooks", () => {
     await answerSupply("仍继续MCN赛马");
     await recordRankForManual();
     await answerPostRace("暂不补量，继续询价");
+    await recordTool(
+      "mcp__ypmcn__select_inquiry_form_fields",
+      { platform: "xiaohongshu" },
+      {
+        success: true,
+        data: { fields: [{ key: "creator_name", name: "达人名称" }] },
+        error: null,
+      },
+    );
     const mismatched = await guard(
       "mcp__ypmcn__create_with_distributions",
       distributionParams({ requirement_id: requirementId(2), supplierIds: ["supplier-1"] }),
@@ -1804,6 +1828,144 @@ describe("YP Action native hooks", () => {
       "call-selection-match",
     );
     askInputFrom(matched);
+  });
+
+  it("keeps the searched requirement ID through MCN send and rejects an abbreviated notification", async () => {
+    const activeRequirement = requirementId(90);
+    const brief = "项目：儿童牙刷；平台：小红书；内容方向：产品测评；账号方向1：专业妈妈；数据要求：CPE≤20；数量：1位达人；单达人图文报价：3000元以内；提报截止：2026-07-30 18:00";
+    const payload = {
+      projectName: "儿童牙刷",
+      platform: "xiaohongshu",
+      quantityTotal: 1,
+      kolOfficialPriceL1: "[0,3000]",
+      submissionDeadlineAt: "2026-07-30 18:00:00",
+      contentFeatureLabel: ["产品测评"],
+      kolPersonaLabel: ["专业妈妈"],
+      cpeL1: "[0,20]",
+      rawMessagesJson: {
+        originalBrief: brief,
+        atoms: [
+          ["项目：儿童牙刷", "projectName"],
+          ["数量：1位达人", "quantityTotal"],
+          ["单达人图文报价：3000元以内", "kolOfficialPriceL1"],
+          ["提报截止：2026-07-30 18:00", "submissionDeadlineAt"],
+          ["内容方向：产品测评", "contentFeatureLabel"],
+          ["账号方向1：专业妈妈", "kolPersonaLabel"],
+          ["CPE≤20", "cpeL1"],
+        ].map(([sourceText, targetField]) => ({ sourceText, targetField, disposition: "mapped" })),
+      },
+    };
+    await recordTool(
+      "mcp__ypmcn__validate_requirement",
+      { payload },
+      { success: true, data: { id: activeRequirement }, error: null },
+    );
+    const notificationSnapshot = JSON.parse(readFileSync(stateFile, "utf8")).workflow.notification_snapshot;
+    assert.equal(notificationSnapshot.schemaVersion, "ypmcn-notification-v1");
+    assert.equal(notificationSnapshot.required_facts.some((fact) => fact.label === "CPE≤20"), true);
+    assert.equal(Object.hasOwn(notificationSnapshot, "originalBrief"), false);
+    await recordTool(
+      "mcp__ypmcn__search_creators",
+      { id: activeRequirement },
+      { success: true, data: preRaceSupply({ candidate_count: 30, quantity_total: 1 }), error: null },
+    );
+
+    const wrongRank = await guard("mcp__ypmcn__rank_mcns", {
+      id: requirementId(91), platform: "xiaohongshu", minimum_mcn_count: 1,
+    }, "call-wrong-rank-requirement");
+    assert.equal(wrongRank.errorCode, "INVALID_INPUT");
+    assert.match(wrongRank.blockReason, /same requirement that successfully completed search_creators/);
+
+    const rankInput = { id: activeRequirement, platform: "xiaohongshu", minimum_mcn_count: 1 };
+    assert.equal(await guard("mcp__ypmcn__rank_mcns", rankInput, "call-correct-rank-requirement"), undefined);
+    await recordTool("mcp__ypmcn__rank_mcns", rankInput, {
+      success: true,
+      data: {
+        inquiry_id: "inquiry-90",
+        demand_count: 1,
+        selected_supplier_ids: ["supplier-90"],
+        selected_mcn_count: 1,
+        coverage_scope: "selected_institutions_deduplicated_union",
+        selected_mcn_covered_creator_count: 30,
+        selected_mcn_coverage_multiplier: 30,
+        selected_mcn_risk_level: "safe",
+        manual_sourcing_gap_count: null,
+        suppliers: [{ supplier_id: "supplier-90", supplier_name: "测试MCN 90" }],
+      },
+      error: null,
+    });
+    await recordTool("AskUserQuestion", {
+      questions: [{
+        header: "赛后补量",
+        question: "需求达人数量：1\n已选机构数量：1\n预估机构达人覆盖量：30\n供需倍数：30\n建议手动拓展达人数量：0\n机构承接达人与手动拓展达人比例：1:0",
+        options: ["确认机构方案，继续询价", "追加机构后重新计算"],
+      }],
+    }, { status: "submitted", answers: [{ selected_labels: ["确认机构方案，继续询价"] }] });
+    await recordTool("AskUserQuestion", {
+      questions: [{ header: "MCN确认", question: "MCN方案已确认。\n是否继续？", options: ["确认MCN方案"] }],
+    }, { status: "submitted", answers: [{ selected_labels: ["确认MCN方案"] }] });
+    const selectorInput = { platform: "xiaohongshu" };
+    assert.equal(await guard("mcp__ypmcn__select_inquiry_form_fields", selectorInput, "call-fields-90"), undefined);
+    await recordTool("mcp__ypmcn__select_inquiry_form_fields", selectorInput, {
+      success: true,
+      data: { fields: [{ key: "creator_name", name: "达人名称" }] },
+      error: null,
+    });
+
+    const completeMessage = [
+      "项目：儿童牙刷",
+      "达人数量：1位",
+      "预算报价：图文3000元以内",
+      "提报截止：2026-07-30 18:00",
+      "内容方向：产品测评",
+      "账号画像：专业妈妈",
+      "数据要求：CPE≤20",
+    ].join("\n");
+    const baseSend = distributionParams({
+      requirement_id: activeRequirement,
+      supplierIds: ["supplier-90"],
+      description: completeMessage,
+      wechat_notification_message: completeMessage,
+    });
+    const wrongSend = await guard("mcp__ypmcn__create_with_distributions", {
+      ...baseSend, requirement_id: requirementId(92),
+    }, "call-wrong-send-requirement");
+    assert.equal(wrongSend.errorCode, "INVALID_PHASE");
+    assert.match(wrongSend.blockReason, /same requirement that completed search_creators and rank_mcns/);
+
+    const abbreviated = "项目：儿童牙刷\n达人数量：1位\n预算报价：3000元以内\n提报截止：2026-07-30 18:00";
+    const abbreviatedSend = await guard("mcp__ypmcn__create_with_distributions", {
+      ...baseSend,
+      description: abbreviated,
+      wechat_notification_message: abbreviated,
+    }, "call-abbreviated-send");
+    assert.equal(abbreviatedSend.errorCode, "INVALID_INPUT");
+    assert.match(abbreviatedSend.blockReason, /内容方向、账号画像、数据要求/);
+
+    const missingMetric = completeMessage.replace("数据要求：CPE≤20", "数据要求：请按要求筛选");
+    const missingMetricSend = await guard("mcp__ypmcn__create_with_distributions", {
+      ...baseSend,
+      description: missingMetric,
+      wechat_notification_message: missingMetric,
+    }, "call-missing-notification-metric");
+    assert.equal(missingMetricSend.errorCode, "INVALID_INPUT");
+    assert.match(missingMetricSend.blockReason, /数据要求（CPE≤20）/);
+
+    askInputFrom(await guard(
+      "mcp__ypmcn__create_with_distributions", baseSend, "call-complete-send",
+    ));
+  });
+
+  it("rejects the Provider-excluded Xiaohongshu contentThemeLabel field", async () => {
+    const result = await guard("mcp__ypmcn__validate_requirement", {
+      payload: {
+        platform: "xiaohongshu",
+        contentThemeLabel: ["好物推荐", "产品测评"],
+        rawMessagesJson: { originalBrief: UNRESOLVED_BRIEF },
+      },
+    }, "call-xhs-content-theme");
+    assert.equal(result.errorCode, "INVALID_INPUT");
+    assert.match(result.blockReason, /contentThemeLabel is a Douyin-only search label/);
   });
 
   it("keeps failed Tool results from advancing the local phase", async () => {
@@ -2049,7 +2211,7 @@ describe("YP Action native hooks", () => {
     assert.deepEqual(openedUrls, []);
     const state = JSON.parse(readFileSync(stateFile, "utf8"));
     assert.equal(state.workflow.phase, "inquiry_fields_ready");
-    assert.equal(state.workflow.next_action, "validate_requirement");
+    assert.equal(state.workflow.next_action, "create_with_distributions");
     assert.equal(state.workflow.field_selection_attempted, true);
     const repeatedSelector = await guard("mcp__ypmcn__select_inquiry_form_fields", {
       platform: "xiaohongshu",
@@ -2169,9 +2331,10 @@ describe("YP Action native hooks", () => {
     assert.doesNotMatch(persisted, /should-not-be-stored/);
   });
 
-  it("still requests confirmation when provider arguments are incomplete because schema validation is not a Hook gate", async () => {
+  it("blocks incomplete external-send arguments before confirmation", async () => {
     const result = await guard("mcp__ypmcn__create_with_distributions", {}, "call-provider-validation");
-    askInputFrom(result);
+    assert.equal(result.block, true);
+    assert.match(result.blockReason, /same requirement|关键信息/);
   });
 
   it("recognizes OpenCode-style MCP tool names and session aliases", async () => {
@@ -2198,7 +2361,7 @@ describe("YP Action native hooks", () => {
 
     let state = JSON.parse(readFileSync(sessionStateFile("opencode-session"), "utf8"));
     assert.equal(state.workflow.phase, "inquiry_fields_ready");
-    assert.equal(state.workflow.next_action, "validate_requirement");
+    assert.equal(state.workflow.next_action, "create_with_distributions");
 
     const requirement = requirementId(50);
     await hooks.get("after_tool_call")({

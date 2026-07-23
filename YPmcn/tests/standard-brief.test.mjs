@@ -91,6 +91,50 @@ describe("deterministic standard Brief parser", () => {
     assert.ok(payloads.every((payload) => payload.rawMessagesJson.originalBrief === brief));
   });
 
+  it("splits account directions and maps shared measurable constraints to searchable fields", () => {
+    const brief = [
+      "项目：usmile儿童电动牙刷",
+      "平台：小红书",
+      "合作形式：红书报备视频+图文",
+      "单达人 L1 官方报价：3000元以内",
+      "数量：5位达人",
+      "提报截止：2026-07-24 12:00",
+      "图文主要分为这3类",
+      "🟡【伪好物分享】",
+      "🟡【单品实测】",
+      "账号方向1：【专业向人设细分】",
+      "①育婴师 /口腔专家/牙医：擅长儿童口腔护理。",
+      "②科学育儿妈妈：具备专业育儿理论储备。",
+      "账号方向2：【高端向人设细分】",
+      "①富养妈妈：聚焦品质育儿场景。",
+      "账号方向3：【宝宝形象】",
+      "年龄适配：出镜宝宝优选3-6岁萌娃。",
+      "数据要求：CPV≤1，CPE≤20，活跃粉丝占比＞60%，女性用户占比≥80%，25-34岁粉丝≥45%，流量来源发现页必须＞80",
+    ].join("\n");
+    const previews = parseStandardBriefRequirements(brief);
+
+    assert.equal(previews.length, 3);
+    assert.deepEqual(previews.map(({ projection }) => projection.kolPersonaLabel[0]), [
+      "专业向", "高端向", "宝宝形象",
+    ]);
+    for (const preview of previews) {
+      assert.equal(preview.gate, "ready");
+      assert.deepEqual(preview.projection.contentFeatureLabel, ["好物推荐", "产品测评"]);
+      assert.equal(preview.projection.contentThemeLabel, undefined);
+      assert.equal(preview.projection.cpmL1, "[0,1000]");
+      assert.equal(preview.projection.cpmL2, "[0,1000]");
+      assert.equal(preview.projection.cpeL1, "[0,20]");
+      assert.equal(preview.projection.cpeL2, "[0,20]");
+      assert.equal(preview.projection.femaleRate, "[0.8,1]");
+      assert.match(preview.projection.description, /活跃粉丝占比＞60%/);
+      assert.match(preview.projection.description, /25-34岁粉丝≥45%/);
+      assert.match(preview.projection.description, /发现页必须＞80/);
+      assert.ok(preview.atoms.filter((atom) =>
+        /CPV|CPE|活跃粉丝|25-34岁|发现页/.test(atom.sourceText ?? "")
+      ).every((atom) => atom.disposition === "mapped"));
+    }
+  });
+
   it("parses the exact semicolon-delimited Brief without greedily consuming fields", () => {
     assertExactPreview(parseStandardBrief(EXACT_BRIEF));
   });

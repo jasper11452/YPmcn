@@ -33,7 +33,7 @@
 | 数据库证明 | 6 项不变量，`development-observed` |
 | 算法定义 | `external-unverified` |
 | 兼容检测 | `legacy-1.9.4` |
-| Spec 摘要 | `sha256:f282c7fcbf386a9cb769a45224daeb187a5efc077b6835eef0b4dad03d01a480` |
+| Spec 摘要 | `sha256:5dc9605df9da867196b9dc45b6c16ebaaafc20c1323978661b0a80f70c7f9e57` |
 <!-- human-docs:spec-summary:end -->
 
 ## 五条原则

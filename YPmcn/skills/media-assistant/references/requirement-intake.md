@@ -23,9 +23,11 @@ Hook 剥离包装并哈希 Brief；Ask/JSON 不覆盖。无历史时仅回退明
 - 平台只用 `xiaohongshu|douyin`。用户侧只说“小红书图文价格/视频价格”或“抖音1–20秒/21–60秒/60秒以上视频价格”，绝不显示 L1/L2/L3。内部映射使用 `kolOfficialPriceL1`、`kolOfficialPriceL2`、`kolOfficialPriceL3`；小红书禁止 `kolOfficialPriceL3`。
 - 范围传无空格 `"[min,max]"`：只说预算单值 `x` 且无“以内/不超过”等上限词或区间端点时，按默认最大预算基准扩为 `[x*0.9,x*1.1]`；明确上限 `x→[0,x]`，闭区间 `a-b→[a,b]`。先换算元、万等单位再计算；比例先除以 100。仅下限除返点外必须询问；返点 `30%+→[0.3,1]`。
 - 粉丝年龄 `age1Rate..age6Rate` 直接传 0–1 JSON 数值（`20%→0.2`），不用范围。档位：小红书 `<18/18–23/24–29/30–39/40–49/50+`；抖音 `<18/18–23/24–30/31–40/41–50/50+`；跨档或错平台不映射。
+- Split explicit same-platform account directions into separate payloads. For Xiaohongshu, use `contentFeatureLabel`, never `contentThemeLabel`. Map CPE to its format tier and CPV to the equivalent CPM upper bound; put unsupported exact audience thresholds verbatim in searchable `description`.
 - `hasOrganization`、`hasOrder30day`、`hasSocial30day` 只传 JSON 布尔值 `true/false`，不用 `0/1` 或字符串。
 - 相对时间用宿主 `currentLocalDateTime + timeZone` 唯一换算为 `YYYY-MM-DD HH:mm:ss`；不能唯一确定即询问。
 - atom 只映射一个真实字段或逐字 preserved；`sourceText` 可来自原始 Brief 或明确补充答案。不得篡改 `originalBrief`；补充数量、形式/时长、截止时刻各成 atom。多平台需求共用完整 `originalBrief`，另一平台条款逐字 preserved；禁加“需求A”“快手”等标记。`rawMessagesJson` 的 atoms 非空、计数一致且 `unresolvedCount=0`。
+- On successful `validate_requirement`, create the WeCom notification-fact snapshot once from the accepted payload and mapped atoms. Later message construction consumes only that snapshot and never reparses `originalBrief`; headings without their exact values or metrics do not satisfy coverage.
 
 `ready` 时展示并原样调用 `{"payload": {..., "status": "ready"}}`。`search_creators.id` 和 `manual_source_creators.requirement_id` 只复制 `validate_requirement.data.id` 的 32 位主键，数字型 `data.demand_id` 只用于需求版本语义。主键格式错误直接从当前响应纠正，不得重新验证；宿主 Hook 未提供会话上下文时使用插件自有的一次性交接回执。每次拓展达人前都按新建需求处理并省略旧 `id/demandVersion`；仅实际成功响应新生成的需求主键可授权紧邻的一次拓展达人，禁止复用。非拓展达人的补充版本才沿用上一成功响应的 `demandId`。Provider `workflow_state/allowed_actions` 不覆盖本地 phase，未知写结果先对账。
 

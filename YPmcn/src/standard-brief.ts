@@ -36,7 +36,7 @@ const REQUIRED_FIELDS = ["platform", "quantityTotal", "submissionDeadlineAt", "c
 const PRICE_FIELD_LABEL = "(?:(?:单达人|达人)?[ \\t]*(?:L[ \\t]*[123][ \\t]*)?(?:官方)?(?:价格|单价|预算|报价))";
 const FAN_AGE_FIELD_LABEL = "(?:粉丝年龄(?:占比|要求)?|粉丝画像年龄)";
 const BOOLEAN_FIELD_LABEL = "(?:是否有机构|有无机构|机构情况|近30天(?:是否)?有订单|近30天(?:是否)?有(?:社交互动|发文))";
-const FIELD_LABEL = `(?:品牌|产品|项目|(?:发布|传播)?平台|档期|${PRICE_FIELD_LABEL}|返点(?:要求)?|返佣|内容|账号类型|达人类型|${FAN_AGE_FIELD_LABEL}|${BOOLEAN_FIELD_LABEL}|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?(?:时间)?)`;
+const FIELD_LABEL = `(?:品牌|产品|项目|(?:发布|传播)?平台|档期|合作形式|预算|${PRICE_FIELD_LABEL}|返点(?:要求)?|返佣|内容(?:类型|方向|要求)?|账号要求|账号方向\\s*\\d+|账号类型|达人类型|数据要求|账号数据要求|粉丝人群|${FAN_AGE_FIELD_LABEL}|${BOOLEAN_FIELD_LABEL}|数量|达人数量|预计定号数|招募|DDL|截止(?:时间)?|提报(?:截止)?(?:时间)?)`;
 const BRIEF_BLOCK_LABEL = `(?:${FIELD_LABEL}|合作形式|参考账号)`;
 
 type RequirementPlatform = "xiaohongshu" | "douyin";
@@ -117,7 +117,12 @@ export function extractStandardBrief(input: string): string {
     return best;
   }, undefined);
   const firstField = new RegExp(`${FIELD_LABEL}\\s*[：:]`, "i").exec(input);
-  const value = selected?.value ?? (firstField ? input.slice(firstField.index) : input);
+  let value = firstField ? input.slice(firstField.index) : input;
+  if (selected) {
+    value = input.slice(selected.start);
+    const closingFence = /\n```/.exec(value);
+    if (closingFence?.index !== undefined) value = value.slice(0, closingFence.index);
+  }
   return value.trim();
 }
 
@@ -178,6 +183,143 @@ function addFanAgeRateMatches(brief: string, matches: LocatedAtom[]): void {
         start,
         end,
       });
+    }
+  }
+}
+
+function performanceTierFields(
+  brief: string,
+  prefix: "cpe" | "cpm",
+): string[] {
+  const platform = requirementPlatform(brief);
+  if (platform === "xiaohongshu") {
+    const hasImage = /图文|图片笔记|图文笔记/.test(brief);
+    const hasVideo = /视频/.test(brief);
+    if (hasImage && hasVideo) return [`${prefix}L1`, `${prefix}L2`];
+    if (hasImage) return [`${prefix}L1`];
+    if (hasVideo) return [`${prefix}L2`];
+    return [];
+  }
+  if (platform === "douyin") {
+    if (/60\s*(?:秒|s)?\s*(?:以上|及以上|\+)/i.test(brief)) return [`${prefix}L3`];
+    if (/(?:21\s*[-~～—至到]\s*60|21\s*至\s*60)\s*(?:秒|s)/i.test(brief)) return [`${prefix}L2`];
+    if (/(?:1\s*[-~～—至到]\s*20\s*(?:秒|s)|20\s*(?:秒|s)?\s*(?:以内|以下))/i.test(brief)) {
+      return [`${prefix}L1`];
+    }
+  }
+  return [];
+}
+
+function addMappedAtoms(
+  matches: LocatedAtom[],
+  sourceText: string,
+  start: number,
+  end: number,
+  targetFields: string[],
+  value: unknown,
+  inferred = false,
+): void {
+  for (const targetField of targetFields) {
+    matches.push({
+      sourceText,
+      field: targetField,
+      resolution: "mapped",
+      disposition: "mapped",
+      targetField,
+      value,
+      confidence: 1,
+      inferred,
+      start,
+      end,
+    });
+  }
+}
+
+function addSearchableDescriptionAtom(
+  matches: LocatedAtom[],
+  sourceText: string,
+  start: number,
+  end: number,
+  field: string,
+): void {
+  matches.push({
+    sourceText,
+    field,
+    resolution: "mapped",
+    disposition: "mapped",
+    targetField: "description",
+    value: sourceText.trim(),
+    confidence: 1,
+    inferred: false,
+    start,
+    end,
+  });
+}
+
+function addPerformanceMetricMatches(brief: string, matches: LocatedAtom[]): void {
+  const pattern = /\b(?<metric>CPV|CPE)\s*(?<operator>≤|<=|＜|<|不高于|不超过|低于|以内)\s*(?<upper>\d+(?:\.\d+)?)/gi;
+  for (const match of brief.matchAll(pattern)) {
+    const upper = Number(match.groups?.upper);
+    if (!Number.isFinite(upper) || upper < 0 || match.index === undefined) continue;
+    const sourceText = match[0];
+    const start = match.index;
+    const end = start + sourceText.length;
+    const metric = match.groups?.metric.toUpperCase();
+    const fields = performanceTierFields(brief, metric === "CPV" ? "cpm" : "cpe");
+    if (fields.length === 0) {
+      addSearchableDescriptionAtom(matches, sourceText, start, end, metric === "CPV" ? "cpvConstraint" : "cpeConstraint");
+      continue;
+    }
+    // CPV is cost per one view; CPM is the same cost normalized to one thousand views.
+    const normalizedUpper = metric === "CPV" ? upper * 1_000 : upper;
+    addMappedAtoms(matches, sourceText, start, end, fields, JSON.stringify([0, normalizedUpper]), metric === "CPV");
+  }
+}
+
+function addAudienceMetricMatches(brief: string, matches: LocatedAtom[]): void {
+  addMatch(
+    brief,
+    matches,
+    /(?:女性(?:用户|粉丝)?占比|女粉(?:丝)?占比)\s*(?:≥|>=|＞|>|不低于|至少)\s*(\d+(?:\.\d+)?)\s*%/gi,
+    (match) => {
+      const lower = Number(match[1]) / 100;
+      if (!Number.isFinite(lower) || lower < 0 || lower > 1) return undefined;
+      return {
+        field: "femaleRate",
+        resolution: "mapped",
+        disposition: "mapped",
+        targetField: "femaleRate",
+        value: JSON.stringify([lower, 1]),
+        confidence: 1,
+        inferred: false,
+      };
+    },
+  );
+
+  for (const [field, pattern] of [
+    ["activeFanRateConstraint", /活跃粉丝占比\s*(?:≥|>=|＞|>|不低于|至少)\s*\d+(?:\.\d+)?\s*%/gi],
+    ["fanAgeCompositeConstraint", /\d{1,2}\s*[-~～—至到]\s*\d{1,2}\s*岁?\s*(?:粉丝)?(?:占比)?\s*(?:≥|>=|＞|>|不低于|至少)\s*\d+(?:\.\d+)?\s*%/gi],
+    ["discoveryPageRateConstraint", /(?:流量来源)?发现页(?:占比)?(?:必须)?\s*(?:≥|>=|＞|>|不低于|至少)\s*\d+(?:\.\d+)?\s*%?/gi],
+    ["unsupportedCostConstraint", /\b(?:CPUV|CPC|CPR)\s*(?:≤|<=|＜|<|不高于|不超过|低于|以内)\s*\d+(?:\.\d+)?/gi],
+  ] as const) {
+    for (const match of brief.matchAll(pattern)) {
+      if (match.index === undefined) continue;
+      addSearchableDescriptionAtom(matches, match[0], match.index, match.index + match[0].length, field);
+    }
+  }
+}
+
+function addContentFeatureMatches(brief: string, matches: LocatedAtom[]): void {
+  const platform = requirementPlatform(brief);
+  if (!platform) return;
+  const targetField = platform === "xiaohongshu" ? "contentFeatureLabel" : "contentThemeLabel";
+  for (const [label, pattern] of [
+    ["好物推荐", /【\s*伪?好物分享\s*】|(?:内容类型|内容方向)\s*[：:][^\n；;]{0,40}好物推荐/gu],
+    ["产品测评", /【\s*(?:单品实测|横测(?:（[^】\n]*）)?)\s*】|(?:内容类型|内容方向)\s*[：:][^\n；;]{0,40}(?:产品测评|单品实测|横测)/gu],
+  ] as const) {
+    for (const match of brief.matchAll(pattern)) {
+      if (match.index === undefined) continue;
+      addMappedAtoms(matches, match[0], match.index, match.index + match[0].length, [targetField], [label]);
     }
   }
 }
@@ -370,6 +512,9 @@ export function parseStandardBrief(
     });
   }
 
+  addContentFeatureMatches(brief, matches);
+  addPerformanceMetricMatches(brief, matches);
+  addAudienceMetricMatches(brief, matches);
   addFanAgeRateMatches(brief, matches);
 
   addMatch(brief, matches, /(?:预计定号数|达人数量|数量|招募)[ \t]*[：:]?[ \t]*(\d+)[ \t]*(?:位|名|个)?(?:达人|博主)?/gi, (match) => {
@@ -569,10 +714,7 @@ export function parseStandardBrief(
     });
   }
 
-  const projection: Record<string, unknown> = {};
-  for (const atom of atoms) {
-    if (atom.resolution === "mapped" && atom.targetField) projection[atom.targetField] = atom.value;
-  }
+  const projection = projectionFromAtoms(atoms);
   const missingRequired = atoms.filter((atom) => atom.resolution === "missing_required").map((atom) => atom.field);
   const semanticAmbiguities = atoms.filter((atom) => atom.resolution === "semantic_ambiguity").map((atom) => atom.field);
   const mappedCount = atoms.filter((atom) => atom.resolution === "mapped").length;
@@ -597,6 +739,13 @@ type SamePlatformVariant = {
   followerFloor: number;
 };
 
+type AccountDirectionVariant = {
+  sourceText: string;
+  headingSource: string;
+  bodySource?: string;
+  labels: string[];
+};
+
 const FOLLOWER_RANGE_MAX = 999_999_999;
 
 function samePlatformVariants(brief: string): SamePlatformVariant[] {
@@ -618,6 +767,111 @@ function samePlatformVariants(brief: string): SamePlatformVariant[] {
 
 function normalizedSource(value: string | undefined): string {
   return (value ?? "").trim().replace(/^[，,；;。.!！？?]+|[，,；;。.!！？?]+$/gu, "").trim();
+}
+
+function projectionFromAtoms(atoms: StandardBriefPreviewAtom[]): Record<string, unknown> {
+  const projection: Record<string, unknown> = {};
+  for (const atom of atoms) {
+    if (atom.resolution !== "mapped" || !atom.targetField) continue;
+    const existing = projection[atom.targetField];
+    if (atom.targetField === "description" && typeof atom.value === "string") {
+      const parts = typeof existing === "string" ? existing.split("；") : [];
+      if (!parts.includes(atom.value.trim())) parts.push(atom.value.trim());
+      projection[atom.targetField] = parts.filter(Boolean).join("；");
+    } else if (Array.isArray(atom.value)) {
+      const values = Array.isArray(existing) ? existing : [];
+      projection[atom.targetField] = [...new Set([...values, ...atom.value])];
+    } else {
+      projection[atom.targetField] = atom.value;
+    }
+  }
+  return projection;
+}
+
+function accountDirectionVariants(brief: string): AccountDirectionVariant[] {
+  const variants: AccountDirectionVariant[] = [];
+  const pattern = /(?:^|[\n；;])\s*(?<heading>账号方向\s*\d+\s*[：:]\s*[【[]?(?<label>[^】\]\n；;]+)[】\]]?)\s*(?<body>[\s\S]*?)(?=(?:[\n；;]\s*账号方向\s*\d+\s*[：:])|(?:[\n；;]\s*⚠*\s*(?:数据要求|账号数据要求))|$)/gu;
+  for (const match of brief.matchAll(pattern)) {
+    const headingSource = match.groups?.heading?.trim();
+    const rawLabel = match.groups?.label?.trim();
+    if (!headingSource || !rawLabel) continue;
+    const bodySource = match.groups?.body?.trim();
+    const labels = [rawLabel.replace(/人设细分$/u, "").trim()];
+    if (bodySource) {
+      for (const item of bodySource.matchAll(/(?:^|\n)\s*(?:[①②③④⑤⑥⑦⑧⑨⑩]|\d+[、.)）])\s*([^：:\n]{1,60})\s*[：:]/gu)) {
+        for (const label of item[1].split(/[、,/，]|\s*\/\s*/u)) {
+          const normalized = label.trim();
+          if (normalized) labels.push(normalized);
+        }
+      }
+    }
+    const sourceText = [headingSource, bodySource].filter(Boolean).join("\n");
+    variants.push({
+      sourceText,
+      headingSource,
+      ...(bodySource ? { bodySource } : {}),
+      labels: [...new Set(labels.filter(Boolean))],
+    });
+  }
+  return variants.length > 1 ? variants : [];
+}
+
+function atomBelongsToDirection(atom: StandardBriefPreviewAtom, variants: AccountDirectionVariant[]): boolean {
+  const source = normalizedSource(atom.sourceText);
+  return Boolean(source) && variants.some((variant) => normalizedSource(variant.sourceText).includes(source));
+}
+
+function previewForAccountDirection(
+  base: StandardBriefPreview,
+  variants: AccountDirectionVariant[],
+  selected: AccountDirectionVariant,
+): StandardBriefPreview {
+  const atoms = base.atoms.filter((atom) => !atomBelongsToDirection(atom, variants));
+  for (const variant of variants) {
+    if (variant === selected) {
+      atoms.push({
+        sourceText: variant.headingSource,
+        field: "accountDirectionPersona",
+        resolution: "mapped",
+        disposition: "mapped",
+        targetField: "kolPersonaLabel",
+        value: variant.labels,
+        confidence: 1,
+        inferred: false,
+      });
+      if (variant.bodySource) {
+        atoms.push({
+          sourceText: variant.bodySource,
+          field: "accountDirectionDescription",
+          resolution: "mapped",
+          disposition: "mapped",
+          targetField: "description",
+          value: `${variant.labels[0]}：${variant.bodySource}`,
+          confidence: 1,
+          inferred: false,
+        });
+      }
+    } else {
+      atoms.push({
+        sourceText: variant.sourceText,
+        field: "rawMessagesJson",
+        resolution: "preserved",
+        disposition: "preserved",
+        preservedText: variant.sourceText,
+        confidence: 1,
+        inferred: false,
+      });
+    }
+  }
+  const mappedCount = atoms.filter((atom) => atom.resolution === "mapped").length;
+  const preservedCount = atoms.filter((atom) => atom.resolution === "preserved").length;
+  const unresolvedCount = atoms.length - mappedCount - preservedCount;
+  return {
+    ...base,
+    atoms,
+    projection: projectionFromAtoms(atoms),
+    summary: { atomCount: atoms.length, mappedCount, preservedCount, unresolvedCount },
+  };
 }
 
 function previewForVariant(
@@ -666,11 +920,7 @@ function previewForVariant(
   return {
     ...base,
     atoms,
-    projection: {
-      ...base.projection,
-      contentTag: selected.contentTag,
-      followercount: JSON.stringify([selected.followerFloor, FOLLOWER_RANGE_MAX]),
-    },
+    projection: projectionFromAtoms(atoms),
     summary: { atomCount: atoms.length, mappedCount, preservedCount, unresolvedCount },
   };
 }
@@ -680,11 +930,14 @@ export function parseStandardBriefRequirements(
   now = new Date(),
   timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai",
 ): StandardBriefPreview[] {
-  const base = parseStandardBrief(brief, now, timeZone);
-  const variants = samePlatformVariants(extractStandardBrief(brief));
-  return variants.length > 1
-    ? variants.map((variant) => previewForVariant(base, variants, variant))
-    : [base];
+  const extracted = extractStandardBrief(brief);
+  const base = parseStandardBrief(extracted, now, timeZone);
+  const directions = accountDirectionVariants(extracted);
+  if (directions.length > 1) {
+    return directions.map((direction) => previewForAccountDirection(base, directions, direction));
+  }
+  const variants = samePlatformVariants(extracted);
+  return variants.length > 1 ? variants.map((variant) => previewForVariant(base, variants, variant)) : [base];
 }
 
 export function renderStandardBriefPreview(preview: StandardBriefPreview): string {

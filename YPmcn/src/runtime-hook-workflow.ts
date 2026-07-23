@@ -64,6 +64,28 @@ const CURRENT_PROVIDER_CONTRACT_BLOCKS: Record<string, string> = {
   get_workflow_state: "The current Provider requires requirement_id, but approved recovery uses trace_id or demand_id with demand_version. Do not synthesize a requirement_id or call this incompatible recovery tool; deploy the approved Provider input contract first.",
 };
 const WORKFLOW_EVENT_LIMIT = 200;
+const NOTIFICATION_SECTION_PATTERNS: Record<string, RegExp> = {
+  "项目信息": /(?:项目|品牌|产品)/u,
+  "招募数量": /(?:招募|达人)?数量\s*[：:]|\d+\s*(?:位|名|个)\s*(?:达人|博主)/u,
+  "预算报价": /(?:预算|报价|价格|单价)/u,
+  "提报截止": /(?:提报|截止|DDL)/iu,
+  "内容方向": /(?:内容方向|内容要求|内容类型|合作形式|图文|视频)/u,
+  "账号画像": /(?:账号画像|达人画像|账号方向|账号要求|人设|宝宝形象)/u,
+  "数据要求": /(?:数据要求|数据指标|量化要求|CPV|CPE|CPM|活跃粉丝|女性(?:用户|粉丝)?占比|发现页|粉丝年龄)/iu,
+};
+const REQUIREMENT_METRIC_FIELDS = new Set([
+  "interactionRate", "clickMedium", "viewMedium", "photoView", "videoInteract", "photoInteract",
+  "followercount", "userlikecount", "likeIncrement", "avgview", "avglike", "avgcomment",
+  "avgcollect", "avginteract", "femaleRate", "age1Rate", "age2Rate", "age3Rate", "age4Rate",
+  "age5Rate", "age6Rate", "cpeL1", "cpeL2", "cpeL3", "cpmL1", "cpmL2", "cpmL3",
+]);
+const NOTIFICATION_CONTENT_FIELDS = new Set(["contentTag", "contentFeatureLabel", "contentThemeLabel"]);
+const NOTIFICATION_PERSONA_FIELDS = new Set([
+  "kolPersonaLabel", "talentTypeLabel", "pgyBloggerTypeLabel", "xtTalentTypeLabel",
+]);
+const NOTIFICATION_PRICE_FIELDS = new Set([
+  "kolOfficialPriceL1", "kolOfficialPriceL2", "kolOfficialPriceL3",
+]);
 const UNIT_SCOPED_ROOT_KEYS = [
   "manual_sourcing_requirement_receipt",
   SEARCH_REQUIREMENT_RECEIPT_KEY,
@@ -129,6 +151,223 @@ function takePreflightDenial(event: Json, tool: string, input: Json): PreflightD
 
 function validRequirementPrimaryKey(value: unknown): value is string {
   return text(value) && REQUIREMENT_PRIMARY_KEY.test(value.trim());
+}
+
+type NotificationFact = {
+  section: string;
+  field: string;
+  label: string;
+  alternatives: string[];
+};
+
+function mappedRequirementAtoms(payload: Json): Json[] {
+  const atoms = payload.rawMessagesJson?.atoms;
+  return Array.isArray(atoms)
+    ? atoms.filter((atom): atom is Json =>
+      atom && typeof atom === "object" && atom.disposition === "mapped" &&
+      text(atom.targetField) && text(atom.sourceText)
+    )
+    : [];
+}
+
+function notificationSectionsForPayload(payload: Json): string[] {
+  const atoms = mappedRequirementAtoms(payload);
+  const descriptionSources = atoms
+    .filter((atom) => atom.targetField === "description")
+    .map((atom) => atom.sourceText.trim());
+  const sections: string[] = [];
+  if ([payload.projectName, payload.brandName, payload.product].some(text)) sections.push("项目信息");
+  if (Number.isInteger(payload.quantityTotal) && payload.quantityTotal > 0) sections.push("招募数量");
+  if ([...NOTIFICATION_PRICE_FIELDS].some((key) => text(payload[key]))) {
+    sections.push("预算报价");
+  }
+  if (text(payload.submissionDeadlineAt)) sections.push("提报截止");
+  if (
+    [...NOTIFICATION_CONTENT_FIELDS].some((key) =>
+      text(payload[key]) || Array.isArray(payload[key]) && payload[key].length > 0
+    ) ||
+    (atoms.length === 0 && text(payload.description)) ||
+    descriptionSources.some((source) => /^(?:内容|合作形式)/u.test(source))
+  ) sections.push("内容方向");
+  if (
+    [...NOTIFICATION_PERSONA_FIELDS]
+      .some((key) => Array.isArray(payload[key]) && payload[key].length > 0)
+  ) sections.push("账号画像");
+  if (
+    Object.keys(payload).some((key) => REQUIREMENT_METRIC_FIELDS.has(key)) ||
+    descriptionSources.some((source) =>
+      /(?:CPV|CPE|CPM|活跃粉丝|女性(?:用户|粉丝)?占比|发现页|粉丝年龄|\d{1,2}\s*[-~～—至到]\s*\d{1,2}\s*岁)/iu.test(source)
+    )
+  ) sections.push("数据要求");
+  return [...new Set(sections)];
+}
+
+function notificationList(value: unknown, split = false): string[] {
+  if (Array.isArray(value)) return value.filter(text).map((item: string) => item.trim());
+  if (!text(value)) return [];
+  return split ? value.split(/[,，、；;\n]+/u).map((item: string) => item.trim()).filter(Boolean) : [value.trim()];
+}
+
+function notificationRangeBoundary(value: unknown): string | undefined {
+  if (!text(value)) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.length !== 2) return undefined;
+    const [lower, upper] = parsed;
+    if (Number(lower) === 0 && Number.isFinite(Number(upper))) return String(upper);
+    if (Number(upper) === 1 && Number.isFinite(Number(lower))) return String(Number(lower) * 100);
+    if (Number.isFinite(Number(lower))) return String(lower);
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function notificationTierLabel(platform: unknown, field: string): string {
+  const tier = field.at(-1);
+  if (platform === "xiaohongshu") return tier === "1" ? "图文" : "视频";
+  if (platform === "douyin") {
+    if (tier === "1") return "1-20秒";
+    if (tier === "2") return "21-60秒";
+    return "60秒以上";
+  }
+  return "";
+}
+
+function notificationPriceAmounts(atoms: Json[], field: string): string[] {
+  const amounts = atoms
+    .filter((atom) => atom.targetField === field)
+    .flatMap((atom) => {
+      const tail = atom.sourceText.split(/(?:报价|价格|预算|单价)/u).at(-1) ?? "";
+      return [...tail.matchAll(/\d+(?:\.\d+)?\s*(?:万|千|[kKwW]|元)?/gu)].map((match) => match[0].trim());
+    });
+  return [...new Set(amounts.filter(Boolean))];
+}
+
+function addNotificationFact(
+  facts: NotificationFact[],
+  section: string,
+  field: string,
+  label: string,
+  alternatives: string[],
+): void {
+  const usable = [...new Set(alternatives.filter(text).map((item) => item.trim()))];
+  if (usable.length === 0) return;
+  const key = `${section}\u0000${field}\u0000${usable.join("\u0000")}`;
+  if (facts.some((fact) => `${fact.section}\u0000${fact.field}\u0000${fact.alternatives.join("\u0000")}` === key)) return;
+  facts.push({ section, field, label, alternatives: usable });
+}
+
+function notificationFactsForPayload(payload: Json): NotificationFact[] {
+  const atoms = mappedRequirementAtoms(payload);
+  if (atoms.length === 0) return [];
+  const mappedFields = new Set(atoms.map((atom) => atom.targetField.trim()));
+  const facts: NotificationFact[] = [];
+
+  for (const field of ["projectName", "brandName", "product"]) {
+    if (mappedFields.has(field) && text(payload[field])) {
+      addNotificationFact(facts, "项目信息", field, payload[field].trim(), [payload[field]]);
+    }
+  }
+  if (mappedFields.has("quantityTotal") && Number.isInteger(payload.quantityTotal) && payload.quantityTotal > 0) {
+    const quantity = String(payload.quantityTotal);
+    addNotificationFact(facts, "招募数量", "quantityTotal", `${quantity}位达人`, [
+      `数量${quantity}`, `招募${quantity}`, `${quantity}位`, `${quantity}名`, `${quantity}个达人`,
+    ]);
+  }
+  for (const field of NOTIFICATION_PRICE_FIELDS) {
+    if (!mappedFields.has(field)) continue;
+    const tier = notificationTierLabel(payload.platform, field);
+    const amounts = notificationPriceAmounts(atoms, field);
+    const expectedAmounts = amounts.length > 0
+      ? amounts
+      : [notificationRangeBoundary(payload[field])].filter(text);
+    for (const amount of expectedAmounts) {
+      addNotificationFact(facts, "预算报价", field, `${tier || "单达人"}报价${amount}`, [
+        `${tier}${amount}`, `报价${amount}`, `预算报价${amount}`, `价格${amount}`, `单价${amount}`,
+      ]);
+    }
+  }
+  if (mappedFields.has("submissionDeadlineAt") && text(payload.submissionDeadlineAt)) {
+    const deadline = payload.submissionDeadlineAt.trim();
+    addNotificationFact(facts, "提报截止", "submissionDeadlineAt", deadline, [
+      deadline,
+      deadline.replace(/:00$/u, ""),
+    ]);
+  }
+  for (const field of NOTIFICATION_CONTENT_FIELDS) {
+    if (!mappedFields.has(field)) continue;
+    for (const value of notificationList(payload[field], field === "contentTag")) {
+      addNotificationFact(facts, "内容方向", field, value, [value]);
+    }
+  }
+  for (const field of NOTIFICATION_PERSONA_FIELDS) {
+    if (!mappedFields.has(field)) continue;
+    for (const value of notificationList(payload[field])) {
+      addNotificationFact(facts, "账号画像", field, value, [value]);
+    }
+  }
+  if (mappedFields.has("description")) {
+    for (const value of notificationList(payload.description, true)) {
+      addNotificationFact(facts, "明确要求", "description", value, [value]);
+    }
+  }
+  for (const field of REQUIREMENT_METRIC_FIELDS) {
+    if (!mappedFields.has(field) || field === "description") continue;
+    const sources = atoms
+      .filter((atom) => atom.targetField === field)
+      .map((atom) => atom.sourceText.trim());
+    if (sources.length > 0) {
+      for (const source of sources) addNotificationFact(facts, "数据要求", field, source, [source]);
+      continue;
+    }
+    const boundary = notificationRangeBoundary(payload[field]);
+    if (boundary) addNotificationFact(facts, "数据要求", field, `${field}:${boundary}`, [`${field}${boundary}`]);
+  }
+  return facts;
+}
+
+function notificationSnapshotForPayload(payload: Json, requirementId?: string): Json {
+  return {
+    schemaVersion: "ypmcn-notification-v1",
+    ...(text(requirementId) ? { requirement_id_sha256: sha256Text(requirementId.trim()) } : {}),
+    payload_sha256: fingerprint(payload),
+    required_sections: notificationSectionsForPayload(payload),
+    required_facts: notificationFactsForPayload(payload),
+  };
+}
+
+function normalizedNotificationText(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function missingNotificationSections(input: Json, workflow: Json): string[] {
+  if (!text(input.description) || input.wechat_notification_message !== input.description) {
+    return ["description 与 wechat_notification_message 的同一份非空纯文本"];
+  }
+  const snapshot = workflow.notification_snapshot as Json | undefined;
+  const required = Array.isArray(snapshot?.required_sections)
+    ? snapshot.required_sections.filter(text)
+    : Array.isArray(workflow.notification_required_sections)
+      ? workflow.notification_required_sections.filter(text)
+      : [];
+  const missingSections = required.filter((section: string) => {
+    const pattern = NOTIFICATION_SECTION_PATTERNS[section];
+    return pattern ? !pattern.test(input.description) : false;
+  });
+  const facts = Array.isArray(snapshot?.required_facts)
+    ? snapshot.required_facts.filter((fact: unknown): fact is NotificationFact =>
+      Boolean(fact) && typeof fact === "object" && text((fact as NotificationFact).section) &&
+      text((fact as NotificationFact).label) && Array.isArray((fact as NotificationFact).alternatives)
+    )
+    : [];
+  const normalizedMessage = normalizedNotificationText(input.description);
+  const missingFacts = facts
+    .filter((fact) => !fact.alternatives.some((alternative) =>
+      normalizedMessage.includes(normalizedNotificationText(alternative))
+    ))
+    .map((fact) => `${fact.section}（${fact.label}）`);
+  return [...new Set([...missingSections, ...missingFacts])];
 }
 
 export function recordRequirementBriefReceipt(brief: string, rootDir: string): void {
@@ -672,6 +911,15 @@ function authorizeFreshSearchRequirement(event: Json, input: Json, current: Guar
 }
 
 function authorizeRequirementBrief(event: Json, input: Json): Json | undefined {
+  if (
+    input.payload?.platform === "xiaohongshu" &&
+    Object.prototype.hasOwnProperty.call(input.payload, "contentThemeLabel")
+  ) {
+    return denyPreflight(
+      event, "validate_requirement", input, "invalid_input", "INVALID_INPUT",
+      "contentThemeLabel is a Douyin-only search label and is excluded by the Xiaohongshu Provider path. Map Xiaohongshu content themes to contentFeatureLabel and keep persona terms in kolPersonaLabel.",
+    );
+  }
   const originalBrief = input.payload?.rawMessagesJson?.originalBrief;
   if (!text(originalBrief)) {
     return denyPreflight(
@@ -689,6 +937,30 @@ function authorizeRequirementBrief(event: Json, input: Json): Json | undefined {
   return undefined;
 }
 
+function authorizeRankMcns(event: Json, input: Json, current: GuardStore): Json | undefined {
+  const workflow = current.data.workflow as Json;
+  if (
+    workflow.phase !== "candidate_pool_ready" || workflow.next_action !== "rank_mcns" ||
+    workflow.search_flow_started !== true || workflow.pre_race_supply_status !== "valid"
+  ) {
+    return denyPreflight(
+      event, "rank_mcns", input, "workflow_order", "INVALID_PHASE",
+      "rank_mcns requires a successful search_creators result for the active requirement before MCN ranking.",
+    );
+  }
+  if (
+    !text(workflow.requirement_id) || !text(input.id) ||
+    input.id.trim() !== workflow.requirement_id.trim() ||
+    (text(workflow.platform) && text(input.platform) && input.platform.trim() !== workflow.platform.trim())
+  ) {
+    return denyPreflight(
+      event, "rank_mcns", input, "workflow_lineage", "INVALID_INPUT",
+      "rank_mcns.id and platform must match the same requirement that successfully completed search_creators; never rank a newly created or unrelated requirement ID.",
+    );
+  }
+  return undefined;
+}
+
 function authorizeFieldSelection(event: Json, input: Json, current: GuardStore): Json | undefined {
   if (!text(input.platform) || !["xiaohongshu", "douyin"].includes(input.platform.trim())) {
     return denyPreflight(
@@ -701,6 +973,17 @@ function authorizeFieldSelection(event: Json, input: Json, current: GuardStore):
     return denyPreflight(
       event, "select_inquiry_form_fields", input, "workflow_order", "INVALID_PHASE",
       "select_inquiry_form_fields was already opened for the active MCN flow. Wait for and use only the user's webpage callback; never select fields for the user or reopen the selector after success, cancellation, timeout, or an invalid callback.",
+    );
+  }
+  if (
+    workflow.phase !== "mcn_planning" || workflow.next_action !== "select_inquiry_form_fields" ||
+    workflow.rank_mcn_inquiry_evidence_status !== "valid" ||
+    !text(workflow.requirement_id) ||
+    (text(workflow.platform) && input.platform.trim() !== workflow.platform.trim())
+  ) {
+    return denyPreflight(
+      event, "select_inquiry_form_fields", input, "workflow_order", "INVALID_PHASE",
+      "select_inquiry_form_fields requires the active requirement's successful search_creators -> rank_mcns chain and the same platform.",
     );
   }
   return undefined;
@@ -1847,7 +2130,7 @@ function updateLocalWorkflow(
     // The Tool waits for the selector callback and returns the submitted fields.
     // Persist normalized callback evidence so later calls and resumed sessions can verify lineage.
     workflow.phase = "inquiry_fields_ready";
-    workflow.next_action = "validate_requirement";
+    workflow.next_action = "create_with_distributions";
     workflow.waiting_for = null;
     if (text(input.platform)) workflow.platform = input.platform.trim();
     workflow.field_selection_evidence_status = "valid";
@@ -2043,6 +2326,8 @@ function updateLocalWorkflow(
         if (requirementId) workflow.requirement_id = requirementId;
         if (text(input.payload?.platform)) workflow.platform = input.payload.platform.trim();
         if (Number.isInteger(input.payload?.quantityTotal)) workflow.quantity_total = input.payload.quantityTotal;
+        workflow.notification_snapshot = notificationSnapshotForPayload(input.payload ?? {}, requirementId);
+        workflow.notification_required_sections = workflow.notification_snapshot.required_sections;
         break;
       }
       case "search_creators": {
@@ -2378,6 +2663,23 @@ function recipientSelectionMismatch(input: Json, workflow: Json): boolean {
     actual.length !== expected.length || actual.some((supplierHash, index) => supplierHash !== expected[index]);
 }
 
+function externalSendLineageError(input: Json, workflow: Json): string | undefined {
+  const requirementMatches = text(workflow.requirement_id) && text(input.requirement_id) &&
+    workflow.requirement_id.trim() === input.requirement_id.trim();
+  if (!requirementMatches) {
+    return "create_with_distributions.requirement_id must be the same requirement that completed search_creators and rank_mcns; never replace it with a newly validated ID.";
+  }
+  if (individualFallbackPending(workflow, input)) return undefined;
+  if (
+    workflow.phase !== "inquiry_fields_ready" || workflow.next_action !== "create_with_distributions" ||
+    workflow.rank_mcn_inquiry_evidence_status !== "valid" ||
+    workflow.field_selection_evidence_status !== "valid"
+  ) {
+    return "create_with_distributions requires the active requirement's search_creators -> rank_mcns -> user field-selection chain before any confirmation or send.";
+  }
+  return undefined;
+}
+
 function createSummary(input: Json, workflow: Json): Json {
   const description = text(input.description) ? input.description : "";
   return {
@@ -2491,7 +2793,7 @@ function authorizeExternalSend(
 ): Json | undefined {
   const selected = scopeAvailable ? store(rootDir) : globalStore(rootDir);
   const locked = withStoreLock(selected.path, (current) =>
-    authorizeExternalSendInStore(input, toolCallId, current)
+    authorizeExternalSendInStore(input, toolCallId, current, scopeAvailable)
   );
   if (!locked.acquired) {
     return denyStructured(
@@ -2506,7 +2808,9 @@ function authorizeExternalSendInStore(
   input: Json,
   toolCallId: string | undefined,
   current: GuardStore,
+  enforceWorkflowLineage: boolean,
 ): Json | undefined {
+  const workflow = current.data.workflow as Json;
   const requestFingerprint = fingerprint(input);
   const inFlight = Object.entries<Json>(current.data.confirmations).find(([, receipt]) =>
     receipt.kind === "external_send" && EXTERNAL_SEND_CONFIRMATION_MODES.has(receipt.confirmation_mode) &&
@@ -2528,6 +2832,18 @@ function authorizeExternalSendInStore(
     return denyStructured(
       "INTEGRATION_REQUIRED",
       `该机构在本次逐个发送中的状态已记录为 ${completedFallbackStatus}，禁止重复发送。`,
+    );
+  }
+
+  if (enforceWorkflowLineage) {
+    const lineageError = externalSendLineageError(input, workflow);
+    if (lineageError) return denyStructured("INVALID_PHASE", lineageError);
+  }
+  const missingSections = missingNotificationSections(input, workflow);
+  if (missingSections.length > 0) {
+    return denyStructured(
+      "INVALID_INPUT",
+      `企微通知未覆盖当前已验证需求快照的关键信息：${missingSections.join("、")}。请按快照补全正文，并让 wechat_notification_message 与 description 完全一致后再确认外发。`,
     );
   }
 
@@ -2637,6 +2953,7 @@ export function guardWorkflowTool(
     }
     return scopeAvailable ? authorizeFreshSearchRequirement(event, input, _current) : undefined;
   }
+  if (tool === "rank_mcns") return authorizeRankMcns(event, input, _current);
   if (tool === "manual_source_creators") {
     if (!validRequirementPrimaryKey(input.requirement_id)) {
       return denyPreflight(

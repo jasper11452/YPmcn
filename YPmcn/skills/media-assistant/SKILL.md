@@ -15,6 +15,7 @@ description: "Use for YPmcn requirement parsing, manual creator sourcing, audita
 - Allowed stops: terminal, Provider wait, terminal failure without safe recovery, or cancelled Ask. Otherwise continue; a human decision requires Ask first. After cancellation, wait for a new user message.
 - 标准检索链中，`search_creators` 成功后同轮直接调用 `rank_mcns`，中间不弹供给确认、不询问是否继续。排序成功后才弹“赛后补量”：始终展示需求人数、已选机构数、预估机构达人去重覆盖量、供需倍数、建议手动拓展人数，以及“机构承接达人:手动拓展达人”比例；手动拓展为 `0` 时也必须显示（例如 `2:0`），并且不得发起零人拓展。响应含真实累计覆盖里程碑时，同时展示前 N 家可达到的实际供需倍数，禁止虚构。
 - 字段选择网页只允许用户操作。每轮 MCN 流程最多调用一次 `select_inquiry_form_fields`，调用后等待用户在网页选择并提交；禁止代选、预选、推断或提交字段，也禁止在等待、成功、取消、超时或无效 callback 后重复打开网页。
+- Split same-platform account directions into independent execution units; keep one `requirement_id` through search, rank, field selection, send, and sync. Follow the Tool references for mapping and message coverage.
 - `sync_mcn_inquiry_status` 只允许在本轮 `create_with_distributions` 实际成功响应逐机构返回匹配需求、项目和机构集合的 `sent` 明细后调用；状态机记录授权、阻断和完成顺序。sync 只证明询价同步，绝不证明企微已发送。
 - 每次 `create_with_distributions` 实际发送前（包括逐机构 fallback）都必须弹出原生“企微外发确认”，且仅在用户对完全相同参数明确选择“确认发送”后执行。状态机必须依次记录 `popup_required/approved/in_flight/consumed`；没有匹配的“已弹窗且已确认”回执时，即使收到 after-tool 成功结果也不得记为企微发送成功。If host context disappears, create and use only a plugin-owned global no-session receipt; never reuse a session receipt.
 - 多平台按原文及差异字段拆单；共用 Ask，不问先后或中途停。
@@ -24,7 +25,7 @@ description: "Use for YPmcn requirement parsing, manual creator sourcing, audita
 - 除上述当次新 ID 外，不检查该需求是否历史检索过或其他流程是否完成。其余 ID 仍逐项核对 ID 血缘，只复制本轮实际成功响应返回的 ID；不得猜测、串用或用虚构 ID 探测。
 - 任一步失败都停止后续业务 Tool；必需证据无效不算成功。写结果未知时先对账，禁止盲重试；用户要求失败即停时绝不重试。
 - 主键格式错就改用当前响应的 `data.id`，不得再建需求；Hook 缺少宿主会话上下文时由插件自有的一次性回执完成校验，不得重新建需求。不得把 `DEMAND_NOT_FOUND` 猜成去重、清理、覆盖或延迟。
-- Hook 校验原始 Brief、搜索/拓展达人的 `data.id` 与企微外发；先剥离包装，Ask/Tool JSON 不覆盖原文。拓展达人绑定一次性新 ID，但不以 phase 或历史为门槛。重复 `rank_creators` 只提示。本地状态只按实际成功结果推进，preview 不限制 Skill 读取或其他 Tool。
+- Hook 校验原始 Brief、搜索/拓展达人的 `data.id` 与企微外发. A successful `validate_requirement` snapshots notification facts from its structured payload and mapped atoms; sending checks that snapshot and never reparses `originalBrief`. Strip envelopes first: later Ask/Tool JSON cannot replace the client text. Manual sourcing binds one fresh ID without historical phase gating. Repeated `rank_creators` only warns. 本地状态只按实际成功结果推进; preview 不限制 Skill 读取或其他 Tool.
 
 ## 主链
 
