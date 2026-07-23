@@ -2104,7 +2104,7 @@ export function renderLocalWorkflowContext(rootDir: string): string {
 
 function selectedRecipientNames(input: Json, workflow: Json): string[] | undefined {
   if (!Array.isArray(input.supplierIds) || input.supplierIds.length === 0) return [];
-  const unnamed = () => input.supplierIds.map(() => "名称未提供");
+  const unnamed = () => input.supplierIds.map((id: unknown) => String(id));
   if (!text(input.requirement_id) || !text(workflow.mcn_directory_requirement_id_sha256)) return unnamed();
   if (sha256Text(input.requirement_id.trim()) !== workflow.mcn_directory_requirement_id_sha256) return undefined;
   if (!Array.isArray(workflow.mcn_recipient_directory)) return unnamed();
@@ -2117,7 +2117,7 @@ function selectedRecipientNames(input: Json, workflow: Json): string[] | undefin
     }
   }
   return input.supplierIds.map((supplierId: unknown) =>
-    text(supplierId) ? namesBySupplierHash.get(sha256Text(supplierId.trim())) ?? "名称未提供" : "名称未提供"
+    text(supplierId) ? namesBySupplierHash.get(sha256Text(supplierId.trim())) ?? String(supplierId) : String(supplierId)
   );
 }
 
@@ -2171,7 +2171,7 @@ function externalSendQuestion(input: Json, summary: Json): string {
       ? recipientNames.map((name: string, index: number) => `${index + 1}. ${name}`)
       : Array.from(
           { length: Number(summary.supplier_count) || 0 },
-          (_, index) => `${index + 1}. 名称未提供`,
+          (_, index) => `${index + 1}. （未获取名称）`,
         )),
     "",
     "回填字段",

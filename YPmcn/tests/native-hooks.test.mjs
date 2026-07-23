@@ -1059,7 +1059,7 @@ describe("YP Action native hooks", () => {
       "call-unverified-recipient",
     );
     assert.equal(unknownRecipient.block, true);
-    assert.match(askInputFrom(unknownRecipient).questions[0].question, /1\. 星图文化\n2\. 名称未提供/);
+    assert.match(askInputFrom(unknownRecipient).questions[0].question, /1\. 星图文化\n2\. supplier-unverified/);
 
     const staleRequirement = await guard(
       "mcp__ypmcn__create_with_distributions",
